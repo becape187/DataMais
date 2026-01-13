@@ -24,7 +24,7 @@ builder.Services.AddDbContext<DataMaisDbContext>(options =>
 builder.Services.AddSingleton<ConfigService>(configService);
 
 // Registra o ModbusService como scoped
-builder.Services.AddScoped<Services.ModbusService>();
+builder.Services.AddScoped<DataMais.Services.ModbusService>();
 
 // CORS para permitir requisições do frontend
 builder.Services.AddCors(options =>

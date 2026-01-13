@@ -1,6 +1,5 @@
 using NModbus;
 using NModbus.Device;
-using System.Net;
 using System.Net.Sockets;
 using DataMais.Data;
 using DataMais.Models;
@@ -197,7 +196,7 @@ public class ModbusService
                         {
                             Array.Reverse(bytes);
                         }
-                        valorConvertido = BitConverter.ToSingle(bytes, 0);
+                        valorConvertido = (decimal)BitConverter.ToSingle(bytes, 0);
                     }
                     else if (registro.TipoDado == "Int32")
                     {
@@ -240,7 +239,8 @@ public class ModbusService
                 return existingMaster;
             }
 
-            var tcpClient = new TcpClient(ipAddress, port);
+            var tcpClient = new TcpClient();
+            tcpClient.Connect(ipAddress, port);
             var factory = new ModbusFactory();
             var master = factory.CreateMaster(tcpClient);
 
