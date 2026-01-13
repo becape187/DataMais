@@ -1,0 +1,24 @@
+name: Deploy to DataMais
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Build and Deploy
+      run: |
+        chmod +x ./build.sh
+        ./build.sh
+    
+    - name: Restart services
+      run: |
+        sudo systemctl daemon-reload
+        sudo systemctl restart datamais.service
+        sudo systemctl status datamais.service
