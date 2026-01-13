@@ -1,0 +1,28 @@
+[Unit]
+Description=DataMais API Service
+After=network.target postgresql.service influxdb.service
+
+[Service]
+Type=notify
+User=root
+Group=root
+WorkingDirectory=/opt/datamais
+ExecStart=/usr/bin/dotnet /opt/datamais/DataMais.dll
+Restart=always
+RestartSec=10
+KillSignal=SIGINT
+SyslogIdentifier=datamais
+Environment=ASPNETCORE_ENVIRONMENT=Production
+Environment=DOTNET_PRINT_TELEMETRY_MESSAGE=false
+EnvironmentFile=/home/becape/datamais.env
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/datamais
+ReadOnlyPaths=/opt/datamais/.env
+
+[Install]
+WantedBy=multi-user.target

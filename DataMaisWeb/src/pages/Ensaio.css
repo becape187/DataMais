@@ -1,0 +1,207 @@
+.ensaio {
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.ensaio .page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+}
+
+.ensaio-controls {
+  display: flex;
+  gap: 12px;
+}
+
+.ensaio-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.stat-mini {
+  background: var(--white);
+  padding: 16px;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.stat-mini-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.stat-mini-value {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--modec-navy);
+}
+
+.stat-mini-value.status-active {
+  color: var(--success);
+}
+
+.stat-mini-value.status-inactive {
+  color: var(--text-secondary);
+}
+
+.ensaio-main-content {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.grafico-container {
+  height: 100%;
+}
+
+.grafico-card {
+  background: var(--white);
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  display: flex;
+  flex-direction: column;
+}
+
+.grafico-card h2 {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--modec-navy);
+  margin-bottom: 16px;
+  flex-shrink: 0;
+}
+
+.grafico-card > div {
+  flex: 1;
+  min-height: 0;
+}
+
+.log-container {
+  flex: 1;
+}
+
+.log-card {
+  background: var(--white);
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  display: flex;
+  flex-direction: column;
+}
+
+.log-card h2 {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--modec-navy);
+  margin-bottom: 16px;
+  flex-shrink: 0;
+}
+
+.log-content {
+  background: #1A1A1A;
+  border-radius: 8px;
+  padding: 12px;
+  overflow-y: auto;
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  height: 150px;
+}
+
+.log-empty {
+  color: #666;
+  text-align: center;
+  padding: 40px;
+}
+
+.log-entry {
+  color: #00FF00;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.log-entry:last-child {
+  border-bottom: none;
+}
+
+.log-entry.log-desvio {
+  background-color: rgba(227, 30, 36, 0.1);
+  padding: 8px 12px;
+  border-radius: 4px;
+  margin: 2px 0;
+}
+
+.log-texto {
+  flex: 1;
+}
+
+.log-comentario-btn {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
+  padding: 4px 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+
+.log-comentario-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.comentario-icon,
+.comentario-icon-empty {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.comentario-icon-empty {
+  opacity: 0.6;
+}
+
+.comentario-badge {
+  background-color: var(--modec-red);
+  color: white;
+  border-radius: 10px;
+  padding: 2px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  min-width: 18px;
+  text-align: center;
+}
+
+/* Scrollbar personalizado para o log */
+.log-content::-webkit-scrollbar {
+  width: 8px;
+}
+
+.log-content::-webkit-scrollbar-track {
+  background: #2A2A2A;
+  border-radius: 4px;
+}
+
+.log-content::-webkit-scrollbar-thumb {
+  background: #555;
+  border-radius: 4px;
+}
+
+.log-content::-webkit-scrollbar-thumb:hover {
+  background: #777;
+}
+
+

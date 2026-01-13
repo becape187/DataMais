@@ -1,0 +1,157 @@
+.comentarios-desvio {
+  max-width: 1000px;
+  margin: 0 auto;
+}
+
+.back-link {
+  display: inline-block;
+  margin-bottom: 12px;
+  background: none;
+  border: none;
+  color: var(--modec-red);
+  text-decoration: none;
+  font-weight: 500;
+  font-size: 16px;
+  cursor: pointer;
+  transition: color 0.2s;
+  padding: 0;
+}
+
+.back-link:hover {
+  color: var(--modec-navy);
+}
+
+.comentarios-container {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.evento-card {
+  background: var(--white);
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  border-left: 4px solid var(--modec-red);
+}
+
+.evento-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.evento-icon {
+  font-size: 32px;
+  flex-shrink: 0;
+}
+
+.evento-header h3 {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--modec-navy);
+  margin-bottom: 8px;
+}
+
+.evento-texto {
+  color: var(--text-primary);
+  font-size: 15px;
+  margin-bottom: 8px;
+}
+
+.evento-data {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.comentarios-list {
+  background: var(--white);
+  border-radius: 12px;
+  padding: 24px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.comentarios-list h2 {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--modec-navy);
+  margin-bottom: 20px;
+}
+
+.sem-comentarios {
+  text-align: center;
+  padding: 40px;
+  color: var(--text-secondary);
+}
+
+.comentarios-items {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.comentario-item {
+  background: var(--bg-light);
+  border-radius: 8px;
+  padding: 16px;
+  border-left: 3px solid var(--modec-navy);
+}
+
+.comentario-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.comentario-header strong {
+  display: block;
+  color: var(--text-primary);
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+
+.comentario-data {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.comentario-texto {
+  color: var(--text-primary);
+  font-size: 14px;
+  line-height: 1.6;
+  margin: 0;
+}
+
+.adicionar-comentario {
+  background: var(--white);
+  border-radius: 12px;
+  padding: 24px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.adicionar-comentario h3 {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--modec-navy);
+  margin-bottom: 16px;
+}
+
+.comentario-input {
+  width: 100%;
+  padding: 12px;
+  border: 2px solid var(--border-color);
+  border-radius: 8px;
+  font-size: 14px;
+  font-family: inherit;
+  resize: vertical;
+  margin-bottom: 16px;
+  transition: border-color 0.2s;
+}
+
+.comentario-input:focus {
+  outline: none;
+  border-color: var(--modec-red);
+}
+
+
