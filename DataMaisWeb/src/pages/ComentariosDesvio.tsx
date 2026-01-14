@@ -10,8 +10,11 @@ interface Comentario {
 }
 
 const ComentariosDesvio = () => {
-  const { eventoId } = useParams<{ eventoId: string }>()
+  const params = useParams<{ eventoId: string }>()
   const navigate = useNavigate()
+  
+  // TODO: Usar params.eventoId para buscar dados do evento específico da API
+  // Por enquanto usando dados mockados
   
   const [comentarios, setComentarios] = useState<Comentario[]>([
     {
