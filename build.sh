@@ -44,9 +44,9 @@ dotnet restore
 echo "Compilando aplicação..."
 dotnet build -c Release --no-restore
 
-# Publica a aplicação
+# Publica a aplicação (sem --output para evitar warning em solution)
 echo "Publicando aplicação..."
-dotnet publish -c Release -o ../publish/api --no-build
+dotnet publish DataMais.csproj -c Release -o ../publish/api --no-build
 
 cd ..
 
@@ -54,18 +54,17 @@ echo -e "${GREEN}✓ Backend compilado com sucesso${NC}"
 
 echo -e "${YELLOW}📁 Copiando arquivos do backend...${NC}"
 
-# Cria diretório se não existir
-sudo mkdir -p "$API_DIR"
+# Cria diretório se não existir (sem sudo, o usuário deve ter permissão)
+mkdir -p "$API_DIR"
 
 # Copia arquivos publicados
-sudo cp -r publish/api/* "$API_DIR/"
+cp -r publish/api/* "$API_DIR/"
 
-# Copia arquivo de serviço
-sudo cp "$BACKEND_DIR/datamais.service" "$SERVICE_FILE"
+# Ajusta permissões básicas (sem sudo, assume que o usuário tem permissão)
+chmod +x "$API_DIR/DataMais" 2>/dev/null || true
 
-# Ajusta permissões
-sudo chown -R becape:becape "$API_DIR"
-sudo chmod +x "$API_DIR/DataMais"
+# Nota: O arquivo de serviço será copiado no step separado do workflow
+echo "⚠️  Arquivo de serviço será copiado no próximo step do workflow"
 
 echo -e "${GREEN}✓ Backend copiado para $API_DIR${NC}"
 
@@ -91,19 +90,17 @@ cd ..
 
 echo -e "${GREEN}✓ Frontend compilado com sucesso${NC}"
 
-echo -e "${YELLOW}📁 Copiando arquivos do frontend...${NC}"
+echo -e "${YELLOW}📁 Preparando arquivos do frontend...${NC}"
 
-# Cria diretório web se não existir
-sudo mkdir -p "$WEB_DIR"
+# Nota: A cópia para /var/www será feita no step separado do workflow
+# Aqui apenas garantimos que os arquivos estão compilados
+if [ ! -d "$FRONTEND_DIR/dist" ]; then
+    echo -e "${RED}❌ Diretório dist não encontrado. Frontend não foi compilado.${NC}"
+    exit 1
+fi
 
-# Copia arquivos compilados
-sudo cp -r "$FRONTEND_DIR/dist"/* "$WEB_DIR/"
-
-# Ajusta permissões
-sudo chown -R www-data:www-data "$WEB_DIR"
-sudo chmod -R 755 "$WEB_DIR"
-
-echo -e "${GREEN}✓ Frontend copiado para $WEB_DIR${NC}"
+echo "✓ Frontend compilado e pronto para deploy"
+echo "⚠️  Arquivos serão copiados para $WEB_DIR no próximo step do workflow"
 
 # Limpa arquivos temporários
 echo -e "${YELLOW}🧹 Limpando arquivos temporários...${NC}"

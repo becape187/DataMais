@@ -12,10 +12,23 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
     
-    - name: Build and Deploy
+    - name: Build application
       run: |
         chmod +x ./build.sh
         ./build.sh
+    
+    - name: Setup systemd service and permissions
+      run: |
+        sudo cp DataMais/datamais.service /etc/systemd/system/datamais.service
+        sudo chown -R becape:becape /home/becape/datamais.api
+        sudo chmod +x /home/becape/datamais.api/DataMais || true
+    
+    - name: Deploy frontend
+      run: |
+        sudo mkdir -p /var/www/datamais
+        sudo cp -r DataMaisWeb/dist/* /var/www/datamais/
+        sudo chown -R www-data:www-data /var/www/datamais
+        sudo chmod -R 755 /var/www/datamais
     
     - name: Restart services
       run: |
