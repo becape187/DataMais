@@ -78,9 +78,9 @@ if ! command -v node &> /dev/null; then
     exit 1
 fi
 
-# Instala dependências
+# Instala dependências (incluindo tipos do React)
 echo "Instalando dependências do frontend..."
-npm ci
+npm ci --legacy-peer-deps || npm install
 
 # Compila para produção
 echo "Compilando frontend para produção..."
