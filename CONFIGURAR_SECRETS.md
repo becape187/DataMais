@@ -25,17 +25,12 @@ Clique em **New repository secret** e adicione cada um dos seguintes:
 #### SSH_PASSWORD
 - **Nome**: `SSH_PASSWORD`
 - **Valor**: Senha do usuário SSH
-  - ⚠️ **Importante**: Se preferir usar chave SSH, deixe este campo vazio e configure `SSH_KEY`
+  - ⚠️ **Obrigatório**: Este é o método de autenticação usado
 
 #### SSH_PORT
 - **Nome**: `SSH_PORT`
 - **Valor**: Porta SSH (geralmente `22`)
   - Exemplo: `22`
-
-#### SSH_KEY (Opcional - Recomendado)
-- **Nome**: `SSH_KEY`
-- **Valor**: Conteúdo completo da chave privada SSH
-  - ⚠️ **Se usar chave SSH, deixe `SSH_PASSWORD` vazio**
 
 ### 3. Verificar Secrets Configurados
 
@@ -44,52 +39,19 @@ Você deve ter os seguintes secrets configurados:
 ```
 ✅ SSH_HOST
 ✅ SSH_USER
-✅ SSH_PASSWORD (ou SSH_KEY)
+✅ SSH_PASSWORD
 ✅ SSH_PORT
 ```
-
-## Usando Chave SSH (Recomendado - Mais Seguro)
-
-### Gerar Chave SSH (se ainda não tiver)
-
-No seu computador local:
-```bash
-ssh-keygen -t ed25519 -C "github-actions-datamais"
-```
-
-### Copiar Chave Pública para o Servidor
-
-```bash
-ssh-copy-id -i ~/.ssh/id_ed25519.pub becape@seu-servidor-ip
-```
-
-Ou manualmente:
-```bash
-cat ~/.ssh/id_ed25519.pub | ssh becape@seu-servidor-ip "mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys"
-```
-
-### Adicionar Chave Privada no GitHub
-
-1. Copie o conteúdo da chave privada:
-   ```bash
-   cat ~/.ssh/id_ed25519
-   ```
-
-2. Cole no secret `SSH_KEY` no GitHub
-
-3. **Deixe `SSH_PASSWORD` vazio** se usar chave SSH
 
 ## Testar Conexão SSH
 
 Antes de fazer o deploy, teste a conexão:
 
 ```bash
-# Com senha
 ssh -p 22 becape@seu-servidor-ip
-
-# Com chave
-ssh -i ~/.ssh/id_ed25519 -p 22 becape@seu-servidor-ip
 ```
+
+Digite a senha quando solicitado.
 
 ## Verificar Secrets no GitHub Actions
 
@@ -107,7 +69,6 @@ SSH_HOST: 192.168.1.100
 SSH_USER: becape
 SSH_PASSWORD: sua-senha-aqui
 SSH_PORT: 22
-SSH_KEY: (vazio ou chave privada)
 ```
 
-**Nota**: Se usar `SSH_KEY`, deixe `SSH_PASSWORD` vazio. O workflow tentará usar a chave primeiro.
+**Nota**: O workflow usa autenticação por senha. Certifique-se de que a senha está correta e que o servidor permite autenticação por senha via SSH.

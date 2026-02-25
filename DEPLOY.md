@@ -17,11 +17,10 @@ Configure os seguintes secrets no repositório GitHub:
 
 **Settings → Secrets and variables → Actions → New repository secret**
 
-1. **SSH_HOST**: IP ou hostname do servidor (ex: `192.168.1.100` ou `datamais.example.com`)
-2. **SSH_USER**: Usuário SSH (ex: `becape` ou `root`)
-3. **SSH_PASSWORD**: Senha do usuário SSH (ou deixe vazio se usar chave)
+1. **SSH_HOST**: IP ou hostname do servidor (ex: `192.168.1.100`)
+2. **SSH_USER**: Usuário SSH (ex: `becape`)
+3. **SSH_PASSWORD**: Senha do usuário SSH
 4. **SSH_PORT**: Porta SSH (padrão: `22`)
-5. **SSH_KEY**: Chave privada SSH (opcional, se preferir usar chave em vez de senha)
 
 **Como configurar:**
 1. Acesse: `https://github.com/seu-usuario/DataMais/settings/secrets/actions`

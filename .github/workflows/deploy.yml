@@ -34,7 +34,8 @@ jobs:
     - name: Build frontend
       run: |
         cd DataMaisWeb
-        npm ci
+        # Tenta npm ci primeiro, se falhar usa npm install
+        npm ci || npm install --legacy-peer-deps
         npm run build
     
     - name: Deploy to server via SSH
@@ -44,7 +45,6 @@ jobs:
         username: ${{ secrets.SSH_USER }}
         password: ${{ secrets.SSH_PASSWORD }}
         port: ${{ secrets.SSH_PORT }}
-        key: ${{ secrets.SSH_KEY }}
         source: "publish/api/*"
         target: "/home/becape/datamais.api"
     
@@ -55,7 +55,6 @@ jobs:
         username: ${{ secrets.SSH_USER }}
         password: ${{ secrets.SSH_PASSWORD }}
         port: ${{ secrets.SSH_PORT }}
-        key: ${{ secrets.SSH_KEY }}
         source: "DataMaisWeb/dist/*"
         target: "/var/www/datamais"
     
@@ -66,7 +65,6 @@ jobs:
         username: ${{ secrets.SSH_USER }}
         password: ${{ secrets.SSH_PASSWORD }}
         port: ${{ secrets.SSH_PORT }}
-        key: ${{ secrets.SSH_KEY }}
         source: "DataMais/datamais.service"
         target: "/tmp"
     
@@ -77,7 +75,6 @@ jobs:
         username: ${{ secrets.SSH_USER }}
         password: ${{ secrets.SSH_PASSWORD }}
         port: ${{ secrets.SSH_PORT }}
-        key: ${{ secrets.SSH_KEY }}
         script: |
           sudo cp /tmp/datamais.service /etc/systemd/system/datamais.service
           sudo chown -R becape:becape /home/becape/datamais.api
