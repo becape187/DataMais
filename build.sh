@@ -80,7 +80,13 @@ fi
 
 # Instala dependências (incluindo tipos do React)
 echo "Instalando dependências do frontend..."
-npm ci --legacy-peer-deps || npm install
+# Tenta npm ci primeiro, se falhar usa npm install para atualizar o lock file
+if npm ci --legacy-peer-deps 2>&1; then
+    echo "✓ Dependências instaladas com npm ci"
+else
+    echo "⚠️  package-lock.json desatualizado, atualizando com npm install..."
+    npm install --legacy-peer-deps
+fi
 
 # Compila para produção
 echo "Compilando frontend para produção..."

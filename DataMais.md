@@ -283,6 +283,17 @@ A aplicação estará disponível em `http://localhost:5173` (porta padrão do V
 
 ---
 
+## Deploy
+
+O deploy é feito automaticamente via GitHub Actions usando SSH quando há push na branch `main`.
+
+**Configuração necessária:**
+- Secrets do GitHub configurados (SSH_HOST, SSH_USER, SSH_PASSWORD, SSH_PORT, SSH_KEY)
+- Servidor Linux acessível via SSH
+- Diretórios de produção criados no servidor
+
+Consulte `DEPLOY.md` para instruções detalhadas de configuração.
+
 ## Próximos Passos
 
 - [ ] Implementar integração completa com API backend
@@ -290,7 +301,6 @@ A aplicação estará disponível em `http://localhost:5173` (porta padrão do V
 - [ ] Implementar comunicação WebSocket para dados em tempo real
 - [ ] Adicionar testes unitários e de integração
 - [ ] Documentação de API completa
-- [ ] Deploy e configuração de ambientes
 
 ---
 

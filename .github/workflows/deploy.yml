@@ -6,32 +6,82 @@ on:
 
 jobs:
   deploy:
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
     
-    - name: Build application
-      run: |
-        chmod +x ./build.sh
-        ./build.sh
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
     
-    - name: Setup systemd service and permissions
-      run: |
-        sudo cp DataMais/datamais.service /etc/systemd/system/datamais.service
-        sudo chown -R becape:becape /home/becape/datamais.api
-        sudo chmod +x /home/becape/datamais.api/DataMais || true
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20.x'
+        cache: 'npm'
+        cache-dependency-path: DataMaisWeb/package-lock.json
     
-    - name: Deploy frontend
+    - name: Build backend
       run: |
-        sudo mkdir -p /var/www/datamais
-        sudo cp -r DataMaisWeb/dist/* /var/www/datamais/
-        sudo chown -R www-data:www-data /var/www/datamais
-        sudo chmod -R 755 /var/www/datamais
+        cd DataMais
+        dotnet restore
+        dotnet build -c Release
+        dotnet publish -c Release -o ../publish/api
     
-    - name: Restart services
+    - name: Build frontend
       run: |
-        sudo systemctl daemon-reload
-        sudo systemctl restart datamais.service
-        sudo systemctl status datamais.service
+        cd DataMaisWeb
+        npm ci
+        npm run build
+    
+    - name: Deploy to server via SSH
+      uses: appleboy/scp-action@master
+      with:
+        host: ${{ secrets.SSH_HOST }}
+        username: ${{ secrets.SSH_USER }}
+        password: ${{ secrets.SSH_PASSWORD }}
+        port: ${{ secrets.SSH_PORT }}
+        key: ${{ secrets.SSH_KEY }}
+        source: "publish/api/*"
+        target: "/home/becape/datamais.api"
+    
+    - name: Deploy frontend via SSH
+      uses: appleboy/scp-action@master
+      with:
+        host: ${{ secrets.SSH_HOST }}
+        username: ${{ secrets.SSH_USER }}
+        password: ${{ secrets.SSH_PASSWORD }}
+        port: ${{ secrets.SSH_PORT }}
+        key: ${{ secrets.SSH_KEY }}
+        source: "DataMaisWeb/dist/*"
+        target: "/var/www/datamais"
+    
+    - name: Copy service file via SSH
+      uses: appleboy/scp-action@master
+      with:
+        host: ${{ secrets.SSH_HOST }}
+        username: ${{ secrets.SSH_USER }}
+        password: ${{ secrets.SSH_PASSWORD }}
+        port: ${{ secrets.SSH_PORT }}
+        key: ${{ secrets.SSH_KEY }}
+        source: "DataMais/datamais.service"
+        target: "/tmp"
+    
+    - name: Setup permissions and restart service
+      uses: appleboy/ssh-action@master
+      with:
+        host: ${{ secrets.SSH_HOST }}
+        username: ${{ secrets.SSH_USER }}
+        password: ${{ secrets.SSH_PASSWORD }}
+        port: ${{ secrets.SSH_PORT }}
+        key: ${{ secrets.SSH_KEY }}
+        script: |
+          sudo cp /tmp/datamais.service /etc/systemd/system/datamais.service
+          sudo chown -R becape:becape /home/becape/datamais.api
+          sudo chmod +x /home/becape/datamais.api/DataMais || true
+          sudo chown -R www-data:www-data /var/www/datamais
+          sudo systemctl daemon-reload
+          sudo systemctl restart datamais.service || true
