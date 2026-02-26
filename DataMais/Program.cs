@@ -19,7 +19,11 @@ var appConfig = configService.GetConfig();
 // Add services to the container
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+builder.Services.AddSwaggerGen(c =>
+{
+    // Resolver conflito de nomes: usar namespace completo para tipos com mesmo nome
+    c.CustomSchemaIds(type => type.FullName?.Replace("+", "."));
+});
 
 // Desabilitar HTTPS redirection em produção (nginx faz o proxy SSL)
 if (builder.Environment.IsProduction())
