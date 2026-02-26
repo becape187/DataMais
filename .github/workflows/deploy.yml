@@ -57,7 +57,8 @@ jobs:
         password: ${{ secrets.SSH_PASSWORD }}
         port: ${{ secrets.SSH_PORT }}
         source: "publish/api/*"
-        target: "/home/becape/datamais.api"
+        target: "/home/becape"
+        strip_components: 0
     
     - name: Prepare frontend for deploy
       run: |
@@ -95,6 +96,18 @@ jobs:
         password: ${{ secrets.SSH_PASSWORD }}
         port: ${{ secrets.SSH_PORT }}
         script: |
+          # Verificar se os arquivos foram copiados corretamente
+          echo "📦 Verificando arquivos copiados..."
+          if [ -f "/home/becape/datamais.api/DataMais.dll" ]; then
+            echo "✓ DataMais.dll encontrado"
+            ls -lh /home/becape/datamais.api/DataMais.dll
+          else
+            echo "❌ ERRO: DataMais.dll NÃO encontrado em /home/becape/datamais.api/"
+            echo "Conteúdo do diretório:"
+            ls -la /home/becape/datamais.api/ || echo "Diretório não existe"
+            exit 1
+          fi
+          
           # Descobrir onde dotnet está instalado
           DOTNET_PATH=""
           if [ -f "/home/becape/.dotnet/dotnet" ]; then
@@ -159,3 +172,13 @@ jobs:
           echo "${{ secrets.SSH_PASSWORD }}" | sudo -S chown -R www-data:www-data /var/www/datamais
           echo "${{ secrets.SSH_PASSWORD }}" | sudo -S systemctl daemon-reload
           echo "${{ secrets.SSH_PASSWORD }}" | sudo -S systemctl restart datamais.service || true
+          
+          # Verificar se o serviço iniciou corretamente
+          sleep 2
+          if systemctl is-active --quiet datamais.service; then
+            echo "✓ Serviço iniciado com sucesso"
+          else
+            echo "❌ ERRO: Serviço não iniciou. Verificar logs:"
+            sudo journalctl -u datamais.service -n 20 --no-pager
+            exit 1
+          fi
