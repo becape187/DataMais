@@ -62,10 +62,16 @@ builder.Services.AddCors(options =>
 var app = builder.Build();
 
 // Configure the HTTP request pipeline
+// Swagger disponível em desenvolvimento e produção
+app.UseSwagger();
+app.UseSwaggerUI(c =>
+{
+    c.SwaggerEndpoint("/swagger/v1/swagger.json", "DataMais API v1");
+    c.RoutePrefix = "swagger"; // Acesse em /swagger
+});
+
 if (app.Environment.IsDevelopment())
 {
-    app.UseSwagger();
-    app.UseSwaggerUI();
     app.UseHttpsRedirection();
 }
 // Em produção, o nginx faz o proxy HTTPS, então não precisa de redirecionamento HTTP->HTTPS
