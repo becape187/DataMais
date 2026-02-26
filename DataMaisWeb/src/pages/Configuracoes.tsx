@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import api from '../config/api'
 import './Configuracoes.css'
 
 interface AppConfig {
@@ -54,194 +55,10 @@ const Configuracoes = () => {
 
   const loadConfig = async () => {
     try {
-      // TODO: Substituir por chamada real à API
-      // const response = await axios.get('/api/config')
-      // setConfig(response.data)
-      
-      // Mock data
-      setConfig({
-        database: {
-          host: 'localhost',
-          port: 5432,
-          database: 'datamais',
-          username: 'postgres',
-          password: ''
-        },
-        influx: {
-          url: 'http://localhost:8086',
-          token: '',
-          organization: 'datamais',
-          bucket: 'sensores'
-        },
-        modbus: {
-          timeoutMs: 5000,
-          retryCount: 3,
-          poolingIntervalMs: 100
-        },
-        modbusRegistros: [
-          {
-            id: 1,
-            nome: 'Pressão Sensor A',
-            descricao: 'Leitura de pressão da câmara A',
-            ipAddress: '192.168.1.100',
-            port: 502,
-            slaveId: 1,
-            funcaoModbus: 'ReadHoldingRegisters',
-            enderecoRegistro: 40001,
-            quantidadeRegistros: 2,
-            tipoDado: 'Float',
-            byteOrder: 'BigEndian',
-            fatorConversao: 0.1,
-            unidade: 'bar',
-            ordemLeitura: 1,
-            ativo: true
-          },
-          {
-            id: 2,
-            nome: 'Pressão Sensor B',
-            descricao: 'Leitura de pressão da câmara B',
-            ipAddress: '192.168.1.100',
-            port: 502,
-            slaveId: 1,
-            funcaoModbus: 'ReadHoldingRegisters',
-            enderecoRegistro: 40003,
-            quantidadeRegistros: 2,
-            tipoDado: 'Float',
-            byteOrder: 'BigEndian',
-            fatorConversao: 0.1,
-            unidade: 'bar',
-            ordemLeitura: 2,
-            ativo: true
-          },
-          {
-            id: 3,
-            nome: 'Carga Ton 1',
-            descricao: 'Leitura de carga sensor 1',
-            ipAddress: '192.168.1.100',
-            port: 502,
-            slaveId: 1,
-            funcaoModbus: 'ReadHoldingRegisters',
-            enderecoRegistro: 40005,
-            quantidadeRegistros: 2,
-            tipoDado: 'Float',
-            byteOrder: 'BigEndian',
-            fatorConversao: 0.01,
-            unidade: 'ton',
-            ordemLeitura: 3,
-            ativo: true
-          },
-          {
-            id: 4,
-            nome: 'Carga Ton 2',
-            descricao: 'Leitura de carga sensor 2',
-            ipAddress: '192.168.1.100',
-            port: 502,
-            slaveId: 1,
-            funcaoModbus: 'ReadHoldingRegisters',
-            enderecoRegistro: 40007,
-            quantidadeRegistros: 2,
-            tipoDado: 'Float',
-            byteOrder: 'BigEndian',
-            fatorConversao: 0.01,
-            unidade: 'ton',
-            ordemLeitura: 4,
-            ativo: true
-          },
-          {
-            id: 5,
-            nome: 'Botão Avançar',
-            descricao: 'Comando para avançar cilindro',
-            ipAddress: '192.168.1.100',
-            port: 502,
-            slaveId: 1,
-            funcaoModbus: 'WriteSingleCoil',
-            enderecoRegistro: 1,
-            quantidadeRegistros: 1,
-            tipoDado: 'Boolean',
-            byteOrder: 'BigEndian',
-            ordemLeitura: 10,
-            ativo: true
-          },
-          {
-            id: 6,
-            nome: 'Botão Recuar',
-            descricao: 'Comando para recuar cilindro',
-            ipAddress: '192.168.1.100',
-            port: 502,
-            slaveId: 1,
-            funcaoModbus: 'WriteSingleCoil',
-            enderecoRegistro: 2,
-            quantidadeRegistros: 1,
-            tipoDado: 'Boolean',
-            byteOrder: 'BigEndian',
-            ordemLeitura: 11,
-            ativo: true
-          },
-          {
-            id: 7,
-            nome: 'Botão Liga/Desliga Motor',
-            descricao: 'Comando para ligar/desligar motor',
-            ipAddress: '192.168.1.100',
-            port: 502,
-            slaveId: 1,
-            funcaoModbus: 'WriteSingleCoil',
-            enderecoRegistro: 3,
-            quantidadeRegistros: 1,
-            tipoDado: 'Boolean',
-            byteOrder: 'BigEndian',
-            ordemLeitura: 12,
-            ativo: true
-          },
-          {
-            id: 8,
-            nome: 'Botão Liga/Desliga Radiador',
-            descricao: 'Comando para ligar/desligar radiador',
-            ipAddress: '192.168.1.100',
-            port: 502,
-            slaveId: 1,
-            funcaoModbus: 'WriteSingleCoil',
-            enderecoRegistro: 4,
-            quantidadeRegistros: 1,
-            tipoDado: 'Boolean',
-            byteOrder: 'BigEndian',
-            ordemLeitura: 13,
-            ativo: true
-          },
-          {
-            id: 9,
-            nome: 'Limite Pressão A',
-            descricao: 'Registro de limite de pressão A',
-            ipAddress: '192.168.1.100',
-            port: 502,
-            slaveId: 1,
-            funcaoModbus: 'ReadHoldingRegisters',
-            enderecoRegistro: 40010,
-            quantidadeRegistros: 2,
-            tipoDado: 'Float',
-            byteOrder: 'BigEndian',
-            unidade: 'bar',
-            ordemLeitura: 5,
-            ativo: true
-          },
-          {
-            id: 10,
-            nome: 'Limite Pressão B',
-            descricao: 'Registro de limite de pressão B',
-            ipAddress: '192.168.1.100',
-            port: 502,
-            slaveId: 1,
-            funcaoModbus: 'ReadHoldingRegisters',
-            enderecoRegistro: 40012,
-            quantidadeRegistros: 2,
-            tipoDado: 'Float',
-            byteOrder: 'BigEndian',
-            unidade: 'bar',
-            ordemLeitura: 6,
-            ativo: true
-          }
-        ]
-      })
+      const response = await api.get('/config')
+      setConfig(response.data)
     } catch (error) {
+      console.error('Erro ao carregar configurações:', error)
       setMessage({ type: 'error', text: 'Erro ao carregar configurações' })
     } finally {
       setLoading(false)
@@ -255,9 +72,7 @@ const Configuracoes = () => {
     setMessage(null)
 
     try {
-      // TODO: Substituir por chamada real à API
-      // await axios.post('/api/config', config)
-      
+      await api.post('/config', config)
       setMessage({ type: 'success', text: 'Configurações salvas com sucesso!' })
     } catch (error) {
       setMessage({ type: 'error', text: 'Erro ao salvar configurações' })

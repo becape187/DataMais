@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
+import api from '../config/api'
 import './ConfiguracaoCilindro.css'
 
 interface Cilindro {
@@ -86,103 +87,82 @@ const ConfiguracaoCilindro = () => {
   })
 
   useEffect(() => {
-    if (!isNew) {
-      // Simulação de busca do cilindro - substituir por chamada à API
-      const cilindrosMock: Cilindro[] = [
-        {
-          id: 1,
-          nome: 'Cilindro Principal',
-          descricao: 'Cilindro principal do sistema',
-          codigoCliente: 'CIL-001',
-          codigoInterno: 'INT-001',
-          modelo: 'MOD-2024',
-          fabricante: 'Fabricante A',
-          dataFabricacao: '2023-01-15',
-          diametroInterno: 100,
-          comprimentoHaste: 500,
-          diametroHaste: 50,
-          maximaPressaoSuportadaA: 1000,
-          maximaPressaoSuportadaB: 800,
-          maximaPressaoSegurancaA: 900,
-          maximaPressaoSegurancaB: 700,
-          preCargaA: 50,
-          cargaNominalA: 500,
-          tempoRampaSubidaA: 30,
-          tempoDuracaoCargaA: 60,
-          tempoRampaDescidaA: 30,
-          percentualVariacaoAlarmeA: 10,
-          histereseAlarmeA: 5,
-          percentualVariacaoDesligaProcessoA: 15,
-          preCargaB: 45,
-          cargaNominalB: 450,
-          tempoRampaSubidaB: 28,
-          tempoDuracaoCargaB: 55,
-          tempoRampaDescidaB: 28,
-          percentualVariacaoAlarmeB: 9,
-          histereseAlarmeB: 4,
-          percentualVariacaoDesligaProcessoB: 14,
-        },
-        {
-          id: 2,
-          nome: 'Cilindro Secundário',
-          descricao: 'Cilindro secundário do sistema',
-          codigoCliente: 'CIL-002',
-          codigoInterno: 'INT-002',
-          modelo: 'MOD-2024',
-          fabricante: 'Fabricante B',
-          dataFabricacao: '2023-02-20',
-          diametroInterno: 80,
-          comprimentoHaste: 400,
-          diametroHaste: 40,
-          maximaPressaoSuportadaA: 800,
-          maximaPressaoSuportadaB: 600,
-          maximaPressaoSegurancaA: 700,
-          maximaPressaoSegurancaB: 500,
-          preCargaA: 40,
-          cargaNominalA: 400,
-          tempoRampaSubidaA: 25,
-          tempoDuracaoCargaA: 50,
-          tempoRampaDescidaA: 25,
-          percentualVariacaoAlarmeA: 8,
-          histereseAlarmeA: 4,
-          percentualVariacaoDesligaProcessoA: 12,
-          preCargaB: 35,
-          cargaNominalB: 350,
-          tempoRampaSubidaB: 23,
-          tempoDuracaoCargaB: 45,
-          tempoRampaDescidaB: 23,
-          percentualVariacaoAlarmeB: 7,
-          histereseAlarmeB: 3,
-          percentualVariacaoDesligaProcessoB: 11,
-        },
-      ]
-
-      const cilindroEncontrado = cilindrosMock.find(c => c.id === Number(cilindroId))
-      if (cilindroEncontrado) {
-        setFormData(cilindroEncontrado)
-      }
-
-      // Simulação de relatórios do cilindro
-      setRelatorios([
-        { id: 1, numero: 'REL-2024-001', data: '2024-01-15' },
-        { id: 2, numero: 'REL-2024-002', data: '2024-02-20' },
-        { id: 3, numero: 'REL-2024-003', data: '2024-03-10' },
-      ])
+    if (!isNew && cilindroId) {
+      loadCilindro()
     }
   }, [cilindroId, isNew])
+
+  const loadCilindro = async () => {
+    try {
+      const response = await api.get(`/cilindro/${cilindroId}`)
+      const data = response.data
+      
+      setFormData({
+        id: data.id,
+        nome: data.nome || '',
+        descricao: data.descricao || '',
+        codigoCliente: data.codigoCliente || '',
+        codigoInterno: data.codigoInterno || '',
+        modelo: data.modelo || '',
+        fabricante: data.fabricante || '',
+        dataFabricacao: data.dataFabricacao || '',
+        diametroInterno: Number(data.diametroInterno) || 0,
+        comprimentoHaste: Number(data.comprimentoHaste) || 0,
+        diametroHaste: Number(data.diametroHaste) || 0,
+        maximaPressaoSuportadaA: Number(data.maximaPressaoSuportadaA) || 0,
+        maximaPressaoSuportadaB: Number(data.maximaPressaoSuportadaB) || 0,
+        maximaPressaoSegurancaA: Number(data.maximaPressaoSegurancaA) || 0,
+        maximaPressaoSegurancaB: Number(data.maximaPressaoSegurancaB) || 0,
+        preCargaA: Number(data.preCargaA) || 0,
+        cargaNominalA: Number(data.cargaNominalA) || 0,
+        tempoRampaSubidaA: Number(data.tempoRampaSubidaA) || 0,
+        tempoDuracaoCargaA: Number(data.tempoDuracaoCargaA) || 0,
+        tempoRampaDescidaA: Number(data.tempoRampaDescidaA) || 0,
+        percentualVariacaoAlarmeA: Number(data.percentualVariacaoAlarmeA) || 0,
+        histereseAlarmeA: Number(data.histereseAlarmeA) || 0,
+        percentualVariacaoDesligaProcessoA: Number(data.percentualVariacaoDesligaProcessoA) || 0,
+        preCargaB: Number(data.preCargaB) || 0,
+        cargaNominalB: Number(data.cargaNominalB) || 0,
+        tempoRampaSubidaB: Number(data.tempoRampaSubidaB) || 0,
+        tempoDuracaoCargaB: Number(data.tempoDuracaoCargaB) || 0,
+        tempoRampaDescidaB: Number(data.tempoRampaDescidaB) || 0,
+        percentualVariacaoAlarmeB: Number(data.percentualVariacaoAlarmeB) || 0,
+        histereseAlarmeB: Number(data.histereseAlarmeB) || 0,
+        percentualVariacaoDesligaProcessoB: Number(data.percentualVariacaoDesligaProcessoB) || 0,
+      })
+      
+      setRelatorios(data.relatorios || [])
+    } catch (error) {
+      console.error('Erro ao carregar cilindro:', error)
+    }
+  }
 
   const handleInputChange = (field: keyof Cilindro, value: string | number) => {
     setFormData(prev => ({ ...prev, [field]: value }))
   }
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    // Aqui seria a lógica de salvar
-    console.log('Salvando cilindro:', formData)
-    if (isNew) {
-      navigate(`/clientes/${clienteId}`)
-    } else {
-      setIsEditing(false)
+    try {
+      const cilindroData = {
+        ...formData,
+        clienteId: Number(clienteId)
+      }
+      
+      if (isNew) {
+        await api.post('/cilindro', cilindroData)
+      } else {
+        await api.put(`/cilindro/${cilindroId}`, cilindroData)
+      }
+      
+      if (isNew) {
+        navigate(`/clientes/${clienteId}`)
+      } else {
+        setIsEditing(false)
+      }
+    } catch (error) {
+      console.error('Erro ao salvar cilindro:', error)
+      alert('Erro ao salvar cilindro')
     }
   }
 
@@ -191,7 +171,7 @@ const ConfiguracaoCilindro = () => {
       navigate(`/clientes/${clienteId}`)
     } else {
       setIsEditing(false)
-      // Recarregar dados originais
+      loadCilindro() // Recarregar dados originais
     }
   }
 

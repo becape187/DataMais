@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import api from '../config/api'
 import './Clientes.css'
 
 interface Cliente {
@@ -12,21 +13,40 @@ interface Cliente {
 
 const Clientes = () => {
   const navigate = useNavigate()
-  const [clientes] = useState<Cliente[]>([
-    { id: 1, nome: 'MODEC Brasil', cnpj: '12.345.678/0001-90', contato: 'João Silva', email: 'joao.silva@modec.com' },
-    { id: 2, nome: 'Petrobras', cnpj: '33.000.167/0001-01', contato: 'Maria Santos', email: 'maria.santos@petrobras.com.br' },
-    { id: 3, nome: 'Equinor Brasil', cnpj: '11.222.333/0001-44', contato: 'Carlos Oliveira', email: 'carlos.oliveira@equinor.com' },
-  ])
+  const [clientes, setClientes] = useState<Cliente[]>([])
+  const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
+
+  useEffect(() => {
+    loadClientes()
+  }, [])
+
+  const loadClientes = async () => {
+    try {
+      setLoading(true)
+      const response = await api.get('/cliente')
+      setClientes(response.data)
+    } catch (error) {
+      console.error('Erro ao carregar clientes:', error)
+    } finally {
+      setLoading(false)
+    }
+  }
 
   const [showModal, setShowModal] = useState(false)
   const [formData, setFormData] = useState<Partial<Cliente>>({})
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    // Aqui seria a lógica de salvar
-    setShowModal(false)
-    setFormData({})
+    try {
+      await api.post('/cliente', formData)
+      await loadClientes()
+      setShowModal(false)
+      setFormData({})
+    } catch (error) {
+      console.error('Erro ao salvar cliente:', error)
+      alert('Erro ao salvar cliente')
+    }
   }
 
   const filteredClientes = clientes.filter(cliente =>
@@ -38,6 +58,19 @@ const Clientes = () => {
 
   const handleClienteClick = (clienteId: number) => {
     navigate(`/clientes/${clienteId}`)
+  }
+
+  if (loading) {
+    return (
+      <div className="clientes">
+        <div className="page-header">
+          <h1>Cadastro de Clientes</h1>
+        </div>
+        <div className="clientes-card">
+          <p>Carregando...</p>
+        </div>
+      </div>
+    )
   }
 
   return (
