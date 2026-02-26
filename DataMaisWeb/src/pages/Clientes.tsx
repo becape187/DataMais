@@ -25,9 +25,11 @@ const Clientes = () => {
     try {
       setLoading(true)
       const response = await api.get('/cliente')
-      setClientes(response.data)
+      // Garante que sempre seja um array
+      setClientes(Array.isArray(response.data) ? response.data : [])
     } catch (error) {
       console.error('Erro ao carregar clientes:', error)
+      setClientes([]) // Garante array vazio em caso de erro
     } finally {
       setLoading(false)
     }
@@ -49,11 +51,11 @@ const Clientes = () => {
     }
   }
 
-  const filteredClientes = clientes.filter(cliente =>
-    cliente.nome.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    cliente.cnpj.includes(searchTerm) ||
-    cliente.contato.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    cliente.email.toLowerCase().includes(searchTerm.toLowerCase())
+  const filteredClientes = (Array.isArray(clientes) ? clientes : []).filter(cliente =>
+    cliente?.nome?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    cliente?.cnpj?.includes(searchTerm) ||
+    cliente?.contato?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    cliente?.email?.toLowerCase().includes(searchTerm.toLowerCase())
   )
 
   const handleClienteClick = (clienteId: number) => {

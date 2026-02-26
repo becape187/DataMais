@@ -69,8 +69,8 @@ const DetalhesCliente = () => {
         email: data.email || ''
       })
       
-      setRelatorios(data.relatorios || [])
-      setCilindros(data.cilindros || [])
+      setRelatorios(Array.isArray(data.relatorios) ? data.relatorios : [])
+      setCilindros(Array.isArray(data.cilindros) ? data.cilindros : [])
     } catch (error) {
       console.error('Erro ao carregar cliente:', error)
     }

@@ -56,7 +56,12 @@ const Configuracoes = () => {
   const loadConfig = async () => {
     try {
       const response = await api.get('/config')
-      setConfig(response.data)
+      const configData = response.data
+      // Garante que modbusRegistros seja sempre um array
+      if (configData && !Array.isArray(configData.modbusRegistros)) {
+        configData.modbusRegistros = []
+      }
+      setConfig(configData)
     } catch (error) {
       console.error('Erro ao carregar configurações:', error)
       setMessage({ type: 'error', text: 'Erro ao carregar configurações' })
@@ -98,7 +103,7 @@ const Configuracoes = () => {
 
     setConfig({
       ...config,
-      modbusRegistros: config.modbusRegistros.map(r =>
+      modbusRegistros: (Array.isArray(config.modbusRegistros) ? config.modbusRegistros : []).map(r =>
         r.id === id ? { ...r, [field]: value } : r
       )
     })
@@ -107,7 +112,8 @@ const Configuracoes = () => {
   const handleAddRegistro = () => {
     if (!config) return
 
-    const newId = Math.max(...config.modbusRegistros.map(r => r.id), 0) + 1
+    const registros = Array.isArray(config.modbusRegistros) ? config.modbusRegistros : []
+    const newId = Math.max(...registros.map(r => r.id), 0) + 1
     const newRegistro: ModbusRegistro = {
       id: newId,
       nome: '',
@@ -119,13 +125,13 @@ const Configuracoes = () => {
       quantidadeRegistros: 1,
       tipoDado: 'UInt16',
       byteOrder: 'BigEndian',
-      ordemLeitura: config.modbusRegistros.length + 1,
+      ordemLeitura: registros.length + 1,
       ativo: true
     }
 
     setConfig({
       ...config,
-      modbusRegistros: [...config.modbusRegistros, newRegistro]
+      modbusRegistros: [...(Array.isArray(config.modbusRegistros) ? config.modbusRegistros : []), newRegistro]
     })
   }
 
@@ -134,7 +140,7 @@ const Configuracoes = () => {
 
     setConfig({
       ...config,
-      modbusRegistros: config.modbusRegistros.filter(r => r.id !== id)
+      modbusRegistros: (Array.isArray(config.modbusRegistros) ? config.modbusRegistros : []).filter(r => r.id !== id)
     })
   }
 
@@ -300,7 +306,7 @@ const Configuracoes = () => {
                 </tr>
               </thead>
               <tbody>
-                {config.modbusRegistros
+                {(Array.isArray(config.modbusRegistros) ? config.modbusRegistros : [])
                   .sort((a, b) => a.ordemLeitura - b.ordemLeitura)
                   .map(registro => (
                     <tr key={registro.id}>
