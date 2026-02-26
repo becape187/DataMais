@@ -32,15 +32,28 @@ public class ConfigService
 
     private AppConfig LoadConfig()
     {
-        // Carrega o arquivo .env se existir
-        if (File.Exists(_envFilePath))
+        // Primeiro, verifica se as variáveis já estão nas variáveis de ambiente
+        // (carregadas pelo systemd via EnvironmentFile)
+        var passwordFromEnv = Environment.GetEnvironmentVariable("POSTGRES_PASSWORD");
+        
+        // Se não estiver nas variáveis de ambiente, tenta carregar do arquivo
+        if (string.IsNullOrWhiteSpace(passwordFromEnv))
         {
-            Env.Load(_envFilePath);
+            // Carrega o arquivo .env se existir
+            if (File.Exists(_envFilePath))
+            {
+                Console.WriteLine($"📄 Carregando variáveis do arquivo: {_envFilePath}");
+                Env.Load(_envFilePath);
+            }
+            else
+            {
+                // Log warning se o arquivo não existir
+                Console.WriteLine($"⚠️ Arquivo .env não encontrado em: {_envFilePath}");
+            }
         }
         else
         {
-            // Log warning se o arquivo não existir
-            Console.WriteLine($"⚠️ Arquivo .env não encontrado em: {_envFilePath}");
+            Console.WriteLine($"✓ Variáveis de ambiente já carregadas pelo systemd (EnvironmentFile)");
         }
 
         var password = Environment.GetEnvironmentVariable("POSTGRES_PASSWORD");
@@ -48,8 +61,11 @@ public class ConfigService
         // Validação: se a senha estiver vazia, tenta carregar novamente ou loga aviso
         if (string.IsNullOrWhiteSpace(password))
         {
-            Console.WriteLine($"⚠️ POSTGRES_PASSWORD não está definida ou está vazia. Arquivo .env: {_envFilePath}");
+            Console.WriteLine($"❌ POSTGRES_PASSWORD não está definida ou está vazia!");
+            Console.WriteLine($"   Arquivo .env esperado: {_envFilePath}");
             Console.WriteLine($"   Arquivo existe: {File.Exists(_envFilePath)}");
+            Console.WriteLine($"   Variável de ambiente POSTGRES_PASSWORD: {(passwordFromEnv != null ? "definida mas vazia" : "não definida")}");
+            
             if (File.Exists(_envFilePath))
             {
                 Console.WriteLine($"   Conteúdo do arquivo (primeiras 10 linhas):");
@@ -65,7 +81,9 @@ public class ConfigService
                             if (parts.Length == 2)
                             {
                                 var hasValue = !string.IsNullOrWhiteSpace(parts[1]);
-                                Console.WriteLine($"   {parts[0]}={'*'.PadRight(Math.Min(parts[1]?.Length ?? 0, 10), '*')} (tem valor: {hasValue})");
+                                var passwordLength = Math.Min(parts[1]?.Length ?? 0, 10);
+                                var maskedPassword = new string('*', passwordLength);
+                                Console.WriteLine($"   {parts[0]}={maskedPassword} (tem valor: {hasValue})");
                             }
                         }
                         else
@@ -79,6 +97,10 @@ public class ConfigService
                     Console.WriteLine($"   Erro ao ler arquivo: {ex.Message}");
                 }
             }
+        }
+        else
+        {
+            Console.WriteLine($"✓ POSTGRES_PASSWORD carregada com sucesso ({password.Length} caracteres)");
         }
 
         return new AppConfig
