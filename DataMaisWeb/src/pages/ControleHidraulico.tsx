@@ -93,6 +93,8 @@ const ControleHidraulico = () => {
 
         setRegistros(registrosEncontrados)
 
+        console.log('Registros Modbus encontrados:', registrosEncontrados)
+
         // Verifica quais registros não foram encontrados
         const registrosFaltando = []
         if (!registrosEncontrados.ligaMotor) registrosFaltando.push('BOTAO_LIGA_MOTOR')
@@ -106,7 +108,10 @@ const ControleHidraulico = () => {
         if (!registrosEncontrados.pressaoB) registrosFaltando.push('PRESSAO_B')
 
         if (registrosFaltando.length > 0) {
+          console.warn('Registros Modbus não encontrados:', registrosFaltando)
           setError(`Registros Modbus não encontrados: ${registrosFaltando.join(', ')}`)
+        } else {
+          console.log('Todos os registros Modbus foram encontrados com sucesso!')
         }
       } catch (err: any) {
         console.error('Erro ao buscar registros Modbus:', err)
@@ -165,7 +170,19 @@ const ControleHidraulico = () => {
       setError(null)
       setMessage(null)
 
-      await api.post(`/ModbusConfig/${registro.id}/write`, { valor })
+      console.log(`Enviando comando ${nomeAcao}:`, {
+        registroId: registro.id,
+        nome: registro.nome,
+        funcaoModbus: registro.funcaoModbus,
+        tipoDado: registro.tipoDado,
+        endereco: registro.enderecoRegistro,
+        valor: valor,
+        valorTipo: typeof valor
+      })
+
+      const response = await api.post(`/ModbusConfig/${registro.id}/write`, { valor })
+      
+      console.log(`Resposta do servidor para ${nomeAcao}:`, response.data)
 
       setMessage({ 
         type: 'success', 
@@ -176,7 +193,12 @@ const ControleHidraulico = () => {
       return true
     } catch (err: any) {
       console.error(`Erro ao ${nomeAcao}:`, err)
-      const errorMsg = err.response?.data?.message || err.message || `Erro ao ${nomeAcao}`
+      console.error('Detalhes do erro:', {
+        status: err.response?.status,
+        data: err.response?.data,
+        message: err.message
+      })
+      const errorMsg = err.response?.data?.message || err.response?.data?.error || err.message || `Erro ao ${nomeAcao}`
       setError(errorMsg)
       setMessage({ type: 'error', text: errorMsg })
       return false
@@ -231,15 +253,31 @@ const ControleHidraulico = () => {
           <div className="controle-actions">
             <button 
               className="btn btn-success"
-              onClick={ligarMotor}
+              onClick={() => {
+                console.log('Botão Ligar Motor clicado', { 
+                  registro: registros.ligaMotor,
+                  saving,
+                  loading 
+                })
+                ligarMotor()
+              }}
               disabled={saving !== null || !registros.ligaMotor || loading}
+              title={!registros.ligaMotor ? 'Registro Modbus não encontrado' : ''}
             >
               {saving === 'Ligar Motor' ? '⏳ Processando...' : '▶️ Ligar Motor'}
             </button>
             <button 
               className="btn btn-danger"
-              onClick={desligarMotor}
+              onClick={() => {
+                console.log('Botão Desligar Motor clicado', { 
+                  registro: registros.desligaMotor,
+                  saving,
+                  loading 
+                })
+                desligarMotor()
+              }}
               disabled={saving !== null || !registros.desligaMotor || loading}
+              title={!registros.desligaMotor ? 'Registro Modbus não encontrado' : ''}
             >
               {saving === 'Desligar Motor' ? '⏳ Processando...' : '⏹️ Desligar Motor'}
             </button>
@@ -302,15 +340,39 @@ const ControleHidraulico = () => {
           <div className="controle-actions">
             <button 
               className="btn btn-success"
-              onClick={avancarCilindro}
+              onClick={() => {
+                console.log('Botão Avançar Cilindro clicado', { 
+                  registro: registros.avancaCilindro,
+                  saving,
+                  loading,
+                  motorStatus 
+                })
+                avancarCilindro()
+              }}
               disabled={saving !== null || !registros.avancaCilindro || loading || !motorStatus}
+              title={
+                !motorStatus ? 'Motor deve estar ligado' : 
+                !registros.avancaCilindro ? 'Registro Modbus não encontrado' : ''
+              }
             >
               {saving === 'Avançar Cilindro' ? '⏳ Processando...' : '⬆️ Avançar Cilindro'}
             </button>
             <button 
               className="btn btn-warning"
-              onClick={recuarCilindro}
+              onClick={() => {
+                console.log('Botão Recuar Cilindro clicado', { 
+                  registro: registros.recuaCilindro,
+                  saving,
+                  loading,
+                  motorStatus 
+                })
+                recuarCilindro()
+              }}
               disabled={saving !== null || !registros.recuaCilindro || loading || !motorStatus}
+              title={
+                !motorStatus ? 'Motor deve estar ligado' : 
+                !registros.recuaCilindro ? 'Registro Modbus não encontrado' : ''
+              }
             >
               {saving === 'Recuar Cilindro' ? '⏳ Processando...' : '⬇️ Recuar Cilindro'}
             </button>

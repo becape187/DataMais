@@ -4,6 +4,7 @@ using DataMais.Data;
 using DataMais.Models;
 using DataMais.Services;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace DataMais.Controllers;
 
@@ -280,16 +281,24 @@ public class ModbusConfigController : ControllerBase
     {
         try
         {
+            _logger.LogInformation("Recebida requisição para escrever registro {RegistroId}. Valor recebido: {Valor} (Tipo: {Tipo})", 
+                id, request.Valor.ToString(), request.Valor.ValueKind);
+
             var config = await _context.ModbusConfigs.FindAsync(id);
             if (config == null)
             {
+                _logger.LogWarning("Registro Modbus {RegistroId} não encontrado", id);
                 return NotFound(new { message = "Configuração Modbus não encontrada" });
             }
 
             if (!config.Ativo)
             {
+                _logger.LogWarning("Registro Modbus {RegistroId} ({Nome}) está inativo", id, config.Nome);
                 return BadRequest(new { message = "Registro Modbus está inativo" });
             }
+
+            _logger.LogInformation("Registro encontrado: {Nome}, Função: {FuncaoModbus}, Tipo: {TipoDado}, Endereço: {Endereco}", 
+                config.Nome, config.FuncaoModbus, config.TipoDado, config.EnderecoRegistro);
 
             // Determina a função de escrita baseado no tipo de dado ou função atual
             string funcaoEscrita = config.FuncaoModbus;
@@ -299,10 +308,12 @@ public class ModbusConfigController : ControllerBase
                 if (config.TipoDado == "Boolean" || funcaoEscrita == "ReadCoils")
                 {
                     funcaoEscrita = "WriteSingleCoil";
+                    _logger.LogInformation("Convertendo função de {FuncaoOriginal} para WriteSingleCoil", config.FuncaoModbus);
                 }
                 else
                 {
                     funcaoEscrita = "WriteSingleRegister";
+                    _logger.LogInformation("Convertendo função de {FuncaoOriginal} para WriteSingleRegister", config.FuncaoModbus);
                 }
             }
 
@@ -310,11 +321,45 @@ public class ModbusConfigController : ControllerBase
             object valor;
             if (funcaoEscrita == "WriteSingleCoil")
             {
-                valor = request.Valor is bool boolVal ? boolVal : Convert.ToBoolean(request.Valor);
+                // Converte JsonElement para bool
+                if (request.Valor.ValueKind == JsonValueKind.True)
+                {
+                    valor = true;
+                }
+                else if (request.Valor.ValueKind == JsonValueKind.False)
+                {
+                    valor = false;
+                }
+                else if (request.Valor.ValueKind == JsonValueKind.String)
+                {
+                    valor = bool.Parse(request.Valor.GetString() ?? "false");
+                }
+                else if (request.Valor.ValueKind == JsonValueKind.Number)
+                {
+                    valor = request.Valor.GetInt32() != 0;
+                }
+                else
+                {
+                    valor = request.Valor.GetBoolean();
+                }
+                _logger.LogInformation("Valor convertido para bool: {Valor}", valor);
             }
             else
             {
-                valor = Convert.ToUInt16(request.Valor);
+                // Converte JsonElement para ushort
+                if (request.Valor.ValueKind == JsonValueKind.Number)
+                {
+                    valor = (ushort)request.Valor.GetUInt16();
+                }
+                else if (request.Valor.ValueKind == JsonValueKind.String)
+                {
+                    valor = ushort.Parse(request.Valor.GetString() ?? "0");
+                }
+                else
+                {
+                    valor = (ushort)request.Valor.GetInt32();
+                }
+                _logger.LogInformation("Valor convertido para ushort: {Valor}", valor);
             }
 
             // Cria uma cópia temporária da config com a função de escrita correta
@@ -418,7 +463,8 @@ public class ModbusConfigController : ControllerBase
 // DTO para escrita Modbus
 public class WriteModbusRequest
 {
-    public object Valor { get; set; } = null!;
+    [JsonPropertyName("valor")]
+    public JsonElement Valor { get; set; }
 }
 
 // DTO para importação
