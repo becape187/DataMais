@@ -412,18 +412,21 @@ public class ModbusConfigController : ControllerBase
                 return BadRequest(new { message = "Parâmetro 'nome' é obrigatório" });
             }
 
+            // Converte para minúsculas para busca case-insensitive compatível com EF Core
+            var nomeLower = nome.ToLower();
+
             var configs = await _context.ModbusConfigs
-                .Where(c => c.Nome.Contains(nome, StringComparison.OrdinalIgnoreCase) || 
-                           (c.Descricao != null && c.Descricao.Contains(nome, StringComparison.OrdinalIgnoreCase)))
                 .Where(c => c.Ativo)
+                .Where(c => c.Nome.ToLower().Contains(nomeLower) || 
+                           (c.Descricao != null && c.Descricao.ToLower().Contains(nomeLower)))
                 .ToListAsync();
 
             return Ok(configs);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Erro ao buscar configurações Modbus por nome");
-            return StatusCode(500, new { message = "Erro ao buscar configurações Modbus" });
+            _logger.LogError(ex, "Erro ao buscar configurações Modbus por nome: {Erro}", ex.Message);
+            return StatusCode(500, new { message = "Erro ao buscar configurações Modbus", error = ex.Message });
         }
     }
 
