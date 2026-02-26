@@ -5,6 +5,13 @@ using DataMais.Configuration;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Configurar Kestrel para escutar em 0.0.0.0:5000 em produção
+// Isso permite que o nginx faça proxy reverso corretamente
+if (builder.Environment.IsProduction())
+{
+    builder.WebHost.UseUrls("http://0.0.0.0:5000");
+}
+
 // Carrega configurações do .env
 var configService = new ConfigService();
 var appConfig = configService.GetConfig();
@@ -49,9 +56,10 @@ if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI();
+    app.UseHttpsRedirection();
 }
+// Em produção, o nginx faz o proxy HTTPS, então não precisa de redirecionamento HTTP->HTTPS
 
-app.UseHttpsRedirection();
 app.UseCors("AllowFrontend");
 app.UseAuthorization();
 app.MapControllers();

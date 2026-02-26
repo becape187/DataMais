@@ -134,6 +134,7 @@ jobs:
           KillSignal=SIGINT
           SyslogIdentifier=datamais
           Environment=ASPNETCORE_ENVIRONMENT=Production
+          Environment=ASPNETCORE_URLS=http://0.0.0.0:5000
           Environment=DOTNET_PRINT_TELEMETRY_MESSAGE=false
           EnvironmentFile=/home/becape/datamais.env
           TimeoutStartSec=30
