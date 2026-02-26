@@ -461,6 +461,208 @@ public class ModbusConfigController : ControllerBase
             return StatusCode(500, new { message = "Erro ao ler registro Modbus", error = ex.Message });
         }
     }
+
+    [HttpPost("motor/ligar")]
+    public async Task<IActionResult> LigarMotor()
+    {
+        return await ExecutarComandoMotor("ligar");
+    }
+
+    [HttpPost("motor/desligar")]
+    public async Task<IActionResult> DesligarMotor()
+    {
+        return await ExecutarComandoMotor("desligar");
+    }
+
+    [HttpPost("radiador/ligar")]
+    public async Task<IActionResult> LigarRadiador()
+    {
+        return await ExecutarComandoRadiador("ligar");
+    }
+
+    [HttpPost("radiador/desligar")]
+    public async Task<IActionResult> DesligarRadiador()
+    {
+        return await ExecutarComandoRadiador("desligar");
+    }
+
+    private async Task<IActionResult> ExecutarComandoMotor(string acao)
+    {
+        try
+        {
+            // Busca os registros necessários
+            var botaoRegistro = await _context.ModbusConfigs
+                .FirstOrDefaultAsync(m => m.Nome == (acao == "ligar" ? "BOTAO_LIGA_MOTOR" : "BOTAO_DESLIGA_MOTOR") && m.Ativo);
+
+            var statusRegistro = await _context.ModbusConfigs
+                .FirstOrDefaultAsync(m => m.Nome == "MOTOR_BOMBA" && m.Ativo);
+
+            if (botaoRegistro == null)
+            {
+                return NotFound(new { message = $"Registro Modbus 'BOTAO_{(acao == "ligar" ? "LIGA" : "DESLIGA")}_MOTOR' não encontrado ou inativo" });
+            }
+
+            if (statusRegistro == null)
+            {
+                return NotFound(new { message = "Registro Modbus 'MOTOR_BOMBA' não encontrado ou inativo" });
+            }
+
+            // Lê o status atual do motor
+            var statusAtual = await _modbusService.LerRegistroAsync(statusRegistro.Id);
+            bool statusAtualBool = statusAtual is bool boolVal ? boolVal : (statusAtual?.ToString() == "1" || statusAtual?.ToString() == "True");
+
+            bool statusEsperado = acao == "ligar";
+
+            // Se já está no estado desejado, retorna sucesso
+            if (statusAtualBool == statusEsperado)
+            {
+                return Ok(new { 
+                    message = $"Motor já está {(statusEsperado ? "ligado" : "desligado")}",
+                    status = statusEsperado,
+                    sucesso = true
+                });
+            }
+
+            // Determina função de escrita
+            string funcaoEscrita = botaoRegistro.TipoDado == "Boolean" || botaoRegistro.FuncaoModbus == "ReadCoils" 
+                ? "WriteSingleCoil" 
+                : "WriteSingleRegister";
+
+            // Cria config temporária para escrita
+            var configTemp = new ModbusConfig
+            {
+                Id = botaoRegistro.Id,
+                Nome = botaoRegistro.Nome,
+                IpAddress = botaoRegistro.IpAddress,
+                Port = botaoRegistro.Port,
+                SlaveId = botaoRegistro.SlaveId,
+                FuncaoModbus = funcaoEscrita,
+                EnderecoRegistro = botaoRegistro.EnderecoRegistro,
+                QuantidadeRegistros = botaoRegistro.QuantidadeRegistros,
+                TipoDado = botaoRegistro.TipoDado,
+                Ativo = botaoRegistro.Ativo
+            };
+
+            // 1. Ativa o botão
+            _logger.LogInformation("Ativando botão {Acao} motor (registro {RegistroId})", acao, botaoRegistro.Id);
+            var ativado = await _modbusService.EscreverRegistroAsync(configTemp, true);
+            if (!ativado)
+            {
+                return StatusCode(500, new { message = $"Erro ao ativar botão {acao} motor" });
+            }
+
+            // 2. Aguarda processamento do CLP
+            await Task.Delay(100);
+
+            // 3. Desativa o botão
+            _logger.LogInformation("Desativando botão {Acao} motor (registro {RegistroId})", acao, botaoRegistro.Id);
+            await _modbusService.EscreverRegistroAsync(configTemp, false);
+
+            // 4. Verifica se o status mudou (timeout de 5 segundos, verifica a cada 200ms)
+            var timeout = TimeSpan.FromSeconds(5);
+            var intervalo = TimeSpan.FromMilliseconds(200);
+            var inicio = DateTime.UtcNow;
+            bool statusAlterado = false;
+
+            while (DateTime.UtcNow - inicio < timeout)
+            {
+                await Task.Delay(intervalo);
+                var novoStatus = await _modbusService.LerRegistroAsync(statusRegistro.Id);
+                bool novoStatusBool = novoStatus is bool boolVal2 ? boolVal2 : (novoStatus?.ToString() == "1" || novoStatus?.ToString() == "True");
+
+                if (novoStatusBool == statusEsperado)
+                {
+                    statusAlterado = true;
+                    break;
+                }
+            }
+
+            if (statusAlterado)
+            {
+                _logger.LogInformation("Motor {Acao} com sucesso", acao == "ligar" ? "ligado" : "desligado");
+                return Ok(new { 
+                    message = $"Motor {(statusEsperado ? "ligado" : "desligado")} com sucesso!",
+                    status = statusEsperado,
+                    sucesso = true
+                });
+            }
+            else
+            {
+                _logger.LogWarning("Timeout: Motor não respondeu ao comando de {Acao}", acao);
+                return StatusCode(500, new { 
+                    message = $"Timeout: Motor não respondeu ao comando de {acao}. Verifique o sistema.",
+                    status = statusAtualBool,
+                    sucesso = false
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Erro ao executar comando {Acao} motor", acao);
+            return StatusCode(500, new { message = $"Erro ao {acao} motor", error = ex.Message });
+        }
+    }
+
+    private async Task<IActionResult> ExecutarComandoRadiador(string acao)
+    {
+        try
+        {
+            // Busca os registros necessários
+            var botaoRegistro = await _context.ModbusConfigs
+                .FirstOrDefaultAsync(m => m.Nome == (acao == "ligar" ? "BOTAO_LIGA_RADIADOR" : "BOTAO_DESLIGA_RADIADOR") && m.Ativo);
+
+            if (botaoRegistro == null)
+            {
+                return NotFound(new { message = $"Registro Modbus 'BOTAO_{(acao == "ligar" ? "LIGA" : "DESLIGA")}_RADIADOR' não encontrado ou inativo" });
+            }
+
+            // Determina função de escrita
+            string funcaoEscrita = botaoRegistro.TipoDado == "Boolean" || botaoRegistro.FuncaoModbus == "ReadCoils" 
+                ? "WriteSingleCoil" 
+                : "WriteSingleRegister";
+
+            // Cria config temporária para escrita
+            var configTemp = new ModbusConfig
+            {
+                Id = botaoRegistro.Id,
+                Nome = botaoRegistro.Nome,
+                IpAddress = botaoRegistro.IpAddress,
+                Port = botaoRegistro.Port,
+                SlaveId = botaoRegistro.SlaveId,
+                FuncaoModbus = funcaoEscrita,
+                EnderecoRegistro = botaoRegistro.EnderecoRegistro,
+                QuantidadeRegistros = botaoRegistro.QuantidadeRegistros,
+                TipoDado = botaoRegistro.TipoDado,
+                Ativo = botaoRegistro.Ativo
+            };
+
+            // 1. Ativa o botão
+            _logger.LogInformation("Ativando botão {Acao} radiador (registro {RegistroId})", acao, botaoRegistro.Id);
+            var ativado = await _modbusService.EscreverRegistroAsync(configTemp, true);
+            if (!ativado)
+            {
+                return StatusCode(500, new { message = $"Erro ao ativar botão {acao} radiador" });
+            }
+
+            // 2. Aguarda processamento do CLP
+            await Task.Delay(100);
+
+            // 3. Desativa o botão
+            _logger.LogInformation("Desativando botão {Acao} radiador (registro {RegistroId})", acao, botaoRegistro.Id);
+            await _modbusService.EscreverRegistroAsync(configTemp, false);
+
+            _logger.LogInformation("Radiador {Acao} com sucesso", acao == "ligar" ? "ligado" : "desligado");
+            return Ok(new { 
+                message = $"Radiador {(acao == "ligar" ? "ligado" : "desligado")} com sucesso!",
+                sucesso = true
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Erro ao executar comando {Acao} radiador", acao);
+            return StatusCode(500, new { message = $"Erro ao {acao} radiador", error = ex.Message });
+        }
+    }
 }
 
 // DTO para escrita Modbus

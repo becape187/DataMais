@@ -159,16 +159,26 @@ const ControleHidraulico = () => {
     return () => clearInterval(interval)
   }, [registros.statusMotor?.id, registros.pressaoA?.id, registros.pressaoB?.id])
 
-  const escreverRegistro = async (registro: ModbusRegistro, valor: boolean | number, nomeAcao: string) => {
+  const escreverRegistro = async (
+    registro: ModbusRegistro, 
+    valor: boolean | number, 
+    nomeAcao: string,
+    mostrarMensagem: boolean = false
+  ) => {
     if (!registro) {
-      setMessage({ type: 'error', text: `Registro Modbus não configurado para ${nomeAcao}` })
+      if (mostrarMensagem) {
+        setMessage({ type: 'error', text: `Registro Modbus não configurado para ${nomeAcao}` })
+      }
       return false
     }
 
     try {
-      setSaving(nomeAcao)
-      setError(null)
-      setMessage(null)
+      // Só atualiza saving se for uma ação principal (não para ações internas)
+      if (mostrarMensagem) {
+        setSaving(nomeAcao)
+        setError(null)
+        setMessage(null)
+      }
 
       console.log(`Enviando comando ${nomeAcao}:`, {
         registroId: registro.id,
@@ -184,12 +194,14 @@ const ControleHidraulico = () => {
       
       console.log(`Resposta do servidor para ${nomeAcao}:`, response.data)
 
-      setMessage({ 
-        type: 'success', 
-        text: `${nomeAcao} executado com sucesso!` 
-      })
+      if (mostrarMensagem) {
+        setMessage({ 
+          type: 'success', 
+          text: `${nomeAcao} executado com sucesso!` 
+        })
+        setTimeout(() => setMessage(null), 3000)
+      }
 
-      setTimeout(() => setMessage(null), 3000)
       return true
     } catch (err: any) {
       console.error(`Erro ao ${nomeAcao}:`, err)
@@ -198,21 +210,163 @@ const ControleHidraulico = () => {
         data: err.response?.data,
         message: err.message
       })
-      const errorMsg = err.response?.data?.message || err.response?.data?.error || err.message || `Erro ao ${nomeAcao}`
+      
+      if (mostrarMensagem) {
+        const errorMsg = err.response?.data?.message || err.response?.data?.error || err.message || `Erro ao ${nomeAcao}`
+        setError(errorMsg)
+        setMessage({ type: 'error', text: errorMsg })
+      }
+      
+      return false
+    } finally {
+      if (mostrarMensagem) {
+        setSaving(null)
+      }
+    }
+  }
+
+
+  const ligarMotor = async () => {
+    try {
+      setSaving('Ligar Motor')
+      setError(null)
+      setMessage(null)
+
+      console.log('Enviando comando para ligar motor...')
+      const response = await api.post('/ModbusConfig/motor/ligar')
+      
+      console.log('Resposta do servidor:', response.data)
+
+      if (response.data.sucesso) {
+        setMotorStatus(true)
+        setMessage({ 
+          type: 'success', 
+          text: response.data.message || 'Motor ligado com sucesso!' 
+        })
+        setTimeout(() => setMessage(null), 3000)
+      } else {
+        setMessage({ 
+          type: 'error', 
+          text: response.data.message || 'Erro ao ligar motor' 
+        })
+        setError(response.data.message || 'Erro ao ligar motor')
+        // Atualiza status se veio na resposta
+        if (response.data.status !== undefined) {
+          setMotorStatus(response.data.status)
+        }
+      }
+    } catch (err: any) {
+      console.error('Erro ao ligar motor:', err)
+      const errorMsg = err.response?.data?.message || err.message || 'Erro ao ligar motor'
       setError(errorMsg)
       setMessage({ type: 'error', text: errorMsg })
-      return false
     } finally {
       setSaving(null)
     }
   }
 
-  const ligarMotor = () => escreverRegistro(registros.ligaMotor!, true, 'Ligar Motor')
-  const desligarMotor = () => escreverRegistro(registros.desligaMotor!, true, 'Desligar Motor')
-  const ligarRadiador = () => escreverRegistro(registros.ligaRadiador!, true, 'Ligar Radiador')
-  const desligarRadiador = () => escreverRegistro(registros.desligaRadiador!, true, 'Desligar Radiador')
-  const avancarCilindro = () => escreverRegistro(registros.avancaCilindro!, true, 'Avançar Cilindro')
-  const recuarCilindro = () => escreverRegistro(registros.recuaCilindro!, true, 'Recuar Cilindro')
+  const desligarMotor = async () => {
+    try {
+      setSaving('Desligar Motor')
+      setError(null)
+      setMessage(null)
+
+      console.log('Enviando comando para desligar motor...')
+      const response = await api.post('/ModbusConfig/motor/desligar')
+      
+      console.log('Resposta do servidor:', response.data)
+
+      if (response.data.sucesso) {
+        setMotorStatus(false)
+        setMessage({ 
+          type: 'success', 
+          text: response.data.message || 'Motor desligado com sucesso!' 
+        })
+        setTimeout(() => setMessage(null), 3000)
+      } else {
+        setMessage({ 
+          type: 'error', 
+          text: response.data.message || 'Erro ao desligar motor' 
+        })
+        setError(response.data.message || 'Erro ao desligar motor')
+        // Atualiza status se veio na resposta
+        if (response.data.status !== undefined) {
+          setMotorStatus(response.data.status)
+        }
+      }
+    } catch (err: any) {
+      console.error('Erro ao desligar motor:', err)
+      const errorMsg = err.response?.data?.message || err.message || 'Erro ao desligar motor'
+      setError(errorMsg)
+      setMessage({ type: 'error', text: errorMsg })
+    } finally {
+      setSaving(null)
+    }
+  }
+
+  const ligarRadiador = async () => {
+    try {
+      setSaving('Ligar Radiador')
+      setError(null)
+      setMessage(null)
+
+      const response = await api.post('/ModbusConfig/radiador/ligar')
+      
+      if (response.data.sucesso) {
+        setMessage({ 
+          type: 'success', 
+          text: response.data.message || 'Radiador ligado com sucesso!' 
+        })
+        setTimeout(() => setMessage(null), 3000)
+      } else {
+        setMessage({ 
+          type: 'error', 
+          text: response.data.message || 'Erro ao ligar radiador' 
+        })
+        setError(response.data.message || 'Erro ao ligar radiador')
+      }
+    } catch (err: any) {
+      console.error('Erro ao ligar radiador:', err)
+      const errorMsg = err.response?.data?.message || err.message || 'Erro ao ligar radiador'
+      setError(errorMsg)
+      setMessage({ type: 'error', text: errorMsg })
+    } finally {
+      setSaving(null)
+    }
+  }
+
+  const desligarRadiador = async () => {
+    try {
+      setSaving('Desligar Radiador')
+      setError(null)
+      setMessage(null)
+
+      const response = await api.post('/ModbusConfig/radiador/desligar')
+      
+      if (response.data.sucesso) {
+        setMessage({ 
+          type: 'success', 
+          text: response.data.message || 'Radiador desligado com sucesso!' 
+        })
+        setTimeout(() => setMessage(null), 3000)
+      } else {
+        setMessage({ 
+          type: 'error', 
+          text: response.data.message || 'Erro ao desligar radiador' 
+        })
+        setError(response.data.message || 'Erro ao desligar radiador')
+      }
+    } catch (err: any) {
+      console.error('Erro ao desligar radiador:', err)
+      const errorMsg = err.response?.data?.message || err.message || 'Erro ao desligar radiador'
+      setError(errorMsg)
+      setMessage({ type: 'error', text: errorMsg })
+    } finally {
+      setSaving(null)
+    }
+  }
+  const avancarCilindro = () => escreverRegistro(registros.avancaCilindro!, true, 'Avançar Cilindro', true)
+  const recuarCilindro = () => escreverRegistro(registros.recuaCilindro!, true, 'Recuar Cilindro', true)
 
   return (
     <div className="controle-hidraulico">
@@ -253,31 +407,15 @@ const ControleHidraulico = () => {
           <div className="controle-actions">
             <button 
               className="btn btn-success"
-              onClick={() => {
-                console.log('Botão Ligar Motor clicado', { 
-                  registro: registros.ligaMotor,
-                  saving,
-                  loading 
-                })
-                ligarMotor()
-              }}
-              disabled={saving !== null || !registros.ligaMotor || loading}
-              title={!registros.ligaMotor ? 'Registro Modbus não encontrado' : ''}
+              onClick={ligarMotor}
+              disabled={saving !== null || loading}
             >
               {saving === 'Ligar Motor' ? '⏳ Processando...' : '▶️ Ligar Motor'}
             </button>
             <button 
               className="btn btn-danger"
-              onClick={() => {
-                console.log('Botão Desligar Motor clicado', { 
-                  registro: registros.desligaMotor,
-                  saving,
-                  loading 
-                })
-                desligarMotor()
-              }}
-              disabled={saving !== null || !registros.desligaMotor || loading}
-              title={!registros.desligaMotor ? 'Registro Modbus não encontrado' : ''}
+              onClick={desligarMotor}
+              disabled={saving !== null || loading}
             >
               {saving === 'Desligar Motor' ? '⏳ Processando...' : '⏹️ Desligar Motor'}
             </button>
@@ -313,14 +451,14 @@ const ControleHidraulico = () => {
             <button 
               className="btn btn-success"
               onClick={ligarRadiador}
-              disabled={saving !== null || !registros.ligaRadiador || loading}
+              disabled={saving !== null || loading}
             >
               {saving === 'Ligar Radiador' ? '⏳ Processando...' : '▶️ Ligar Radiador'}
             </button>
             <button 
               className="btn btn-danger"
               onClick={desligarRadiador}
-              disabled={saving !== null || !registros.desligaRadiador || loading}
+              disabled={saving !== null || loading}
             >
               {saving === 'Desligar Radiador' ? '⏳ Processando...' : '⏹️ Desligar Radiador'}
             </button>
