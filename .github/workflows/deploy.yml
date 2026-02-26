@@ -38,6 +38,17 @@ jobs:
         npm ci || npm install --legacy-peer-deps
         npm run build
     
+    - name: Stop service before deploy
+      uses: appleboy/ssh-action@master
+      with:
+        host: ${{ secrets.SSH_HOST }}
+        username: ${{ secrets.SSH_USER }}
+        password: ${{ secrets.SSH_PASSWORD }}
+        port: ${{ secrets.SSH_PORT }}
+        script: |
+          echo "${{ secrets.SSH_PASSWORD }}" | sudo -S systemctl stop datamais.service || true
+          echo "✓ Serviço parado antes do deploy"
+    
     - name: Deploy to server via SSH
       uses: appleboy/scp-action@master
       with:
