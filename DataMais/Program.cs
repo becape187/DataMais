@@ -21,6 +21,16 @@ builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
+// Desabilitar HTTPS redirection em produção (nginx faz o proxy SSL)
+if (builder.Environment.IsProduction())
+{
+    builder.Services.Configure<Microsoft.AspNetCore.HttpsPolicy.HttpsRedirectionOptions>(options =>
+    {
+        options.RedirectStatusCode = Microsoft.AspNetCore.Http.StatusCodes.Status307TemporaryRedirect;
+        options.HttpsPort = null; // Desabilita redirecionamento
+    });
+}
+
 // Configuração do Entity Framework com PostgreSQL
 var connectionString = $"Host={appConfig.Database.Host};Port={appConfig.Database.Port};Database={appConfig.Database.Database};Username={appConfig.Database.Username};Password={appConfig.Database.Password}";
 
