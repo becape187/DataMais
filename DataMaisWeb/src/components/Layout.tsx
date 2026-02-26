@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import type { ReactNode } from 'react'
 import { Link, useLocation } from 'react-router-dom'
+import api from '../config/api'
 import './Layout.css'
 
 interface LayoutProps {
@@ -10,19 +11,72 @@ interface LayoutProps {
 const Layout = ({ children }: LayoutProps) => {
   const location = useLocation()
   const [isLigado, setIsLigado] = useState(false)
+  const [processando, setProcessando] = useState(false)
 
   const isActive = (path: string) => location.pathname === path
 
-  const handleLigaDesliga = () => {
-    setIsLigado(!isLigado)
-    // Aqui seria a lógica de ligar/desligar o sistema
+  // Busca o status do motor ao carregar
+  useEffect(() => {
+    const buscarStatusMotor = async () => {
+      try {
+        const response = await api.get('/ModbusConfig')
+        const todosRegistros = response.data
+        const statusMotor = todosRegistros.find((r: any) => r.nome === 'MOTOR_BOMBA' && r.ativo)
+        
+        if (statusMotor) {
+          const readResponse = await api.get(`/ModbusConfig/${statusMotor.id}/read`)
+          const valor = readResponse.data.valor
+          setIsLigado(valor === true || valor === 1 || valor === '1')
+        }
+      } catch (err) {
+        console.error('Erro ao buscar status do motor:', err)
+      }
+    }
+
+    buscarStatusMotor()
+    // Atualiza a cada 2 segundos
+    const interval = setInterval(buscarStatusMotor, 2000)
+    return () => clearInterval(interval)
+  }, [])
+
+  const handleLigaDesliga = async () => {
+    console.log('🔵 Botão Liga/Desliga da sidebar CLICADO!', { isLigado, processando })
+    
+    if (processando) {
+      console.warn('⚠️ Já está processando, ignorando clique')
+      return
+    }
+
+    try {
+      setProcessando(true)
+      const acao = isLigado ? 'desligar' : 'ligar'
+      console.log(`📤 Enviando comando para ${acao} motor...`)
+      
+      const response = await api.post(`/ModbusConfig/motor/${acao}`)
+      console.log('Resposta do servidor:', response.data)
+
+      if (response.data.sucesso) {
+        setIsLigado(!isLigado)
+        console.log(`✅ Motor ${acao === 'ligar' ? 'ligado' : 'desligado'} com sucesso!`)
+      } else {
+        console.error('❌ Erro:', response.data.message)
+      }
+    } catch (err: any) {
+      console.error('❌ Erro ao executar comando:', err)
+      const errorMsg = err.response?.data?.message || err.message || 'Erro ao executar comando'
+      alert(errorMsg)
+    } finally {
+      setProcessando(false)
+    }
   }
 
   const handleAvança = () => {
+    console.log('🔵 Botão Avança da sidebar CLICADO!')
     // Aqui seria a lógica de avançar
   }
 
   const handleRecua = () => {
+    console.log('🔵 Botão Recua da sidebar CLICADO!')
     // Aqui seria a lógica de recuar
   }
 
@@ -131,9 +185,19 @@ const Layout = ({ children }: LayoutProps) => {
             </div>
             <button 
               className={`btn-hidraulica btn-liga-desliga ${isLigado ? 'ligado' : ''}`}
-              onClick={handleLigaDesliga}
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                console.log('🔵 onClick handler executado!', { isLigado, processando })
+                handleLigaDesliga()
+              }}
+              disabled={processando}
+              style={{ 
+                cursor: processando ? 'not-allowed' : 'pointer',
+                opacity: processando ? 0.6 : 1
+              }}
             >
-              {isLigado ? 'Desliga' : 'Liga'}
+              {processando ? '⏳ Processando...' : (isLigado ? 'Desliga' : 'Liga')}
             </button>
           </div>
         </div>

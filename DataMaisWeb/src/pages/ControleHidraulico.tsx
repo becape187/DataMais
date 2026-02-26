@@ -21,8 +21,11 @@ interface ModbusRegistro {
   ativo: boolean
 }
 
+// Versão da página - incrementar quando houver mudanças importantes
+const VERSAO_PAGINA = '1.0.3'
+
 const ControleHidraulico = () => {
-  console.log('🟢 Componente ControleHidraulico renderizado')
+  console.log(`🟢 Componente ControleHidraulico renderizado - Versão ${VERSAO_PAGINA}`)
   
   // Estados dos registros Modbus
   const [registros, setRegistros] = useState<{
@@ -377,6 +380,9 @@ const ControleHidraulico = () => {
       <div className="page-header">
         <h1>Controle da Unidade Hidráulica</h1>
         <p className="page-subtitle">Controle manual do motor, radiador e cilindro</p>
+        <div className="version-badge">
+          v{VERSAO_PAGINA}
+        </div>
       </div>
 
       {message && (

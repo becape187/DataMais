@@ -3,6 +3,37 @@
   margin: 0 auto;
 }
 
+.page-header {
+  position: relative;
+  margin-bottom: 32px;
+}
+
+.page-header h1 {
+  font-size: 32px;
+  font-weight: 700;
+  color: var(--modec-navy);
+  margin: 0 0 8px 0;
+}
+
+.page-subtitle {
+  color: var(--text-secondary);
+  font-size: 16px;
+  margin: 0;
+}
+
+.version-badge {
+  position: absolute;
+  top: 0;
+  right: 0;
+  font-size: 11px;
+  color: #666;
+  background: #f0f0f0;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-family: 'Courier New', monospace;
+  font-weight: 600;
+}
+
 .controle-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
