@@ -108,6 +108,30 @@ public class ClienteController : ControllerBase
                 return BadRequest(ModelState);
             }
 
+            // Verificar se CNPJ já existe (se fornecido)
+            if (!string.IsNullOrWhiteSpace(cliente.Cnpj))
+            {
+                var cnpjExiste = await _context.Clientes
+                    .AnyAsync(c => c.Cnpj == cliente.Cnpj);
+                
+                if (cnpjExiste)
+                {
+                    return Conflict(new { message = "CNPJ já cadastrado" });
+                }
+            }
+
+            // Verificar se email já existe (se fornecido)
+            if (!string.IsNullOrWhiteSpace(cliente.Email))
+            {
+                var emailExiste = await _context.Clientes
+                    .AnyAsync(c => c.Email != null && c.Email.ToLower() == cliente.Email.ToLower());
+                
+                if (emailExiste)
+                {
+                    return Conflict(new { message = "Email já cadastrado" });
+                }
+            }
+
             cliente.DataCriacao = DateTime.UtcNow;
             _context.Clientes.Add(cliente);
             await _context.SaveChangesAsync();
@@ -137,6 +161,34 @@ public class ClienteController : ControllerBase
             if (cliente == null)
             {
                 return NotFound(new { message = "Cliente não encontrado" });
+            }
+
+            // Verificar se CNPJ já existe em outro cliente (se fornecido e diferente)
+            if (!string.IsNullOrWhiteSpace(clienteAtualizado.Cnpj) && 
+                clienteAtualizado.Cnpj != cliente.Cnpj)
+            {
+                var cnpjExiste = await _context.Clientes
+                    .AnyAsync(c => c.Cnpj == clienteAtualizado.Cnpj && c.Id != id);
+                
+                if (cnpjExiste)
+                {
+                    return Conflict(new { message = "CNPJ já cadastrado" });
+                }
+            }
+
+            // Verificar se email já existe em outro cliente (se fornecido e diferente)
+            if (!string.IsNullOrWhiteSpace(clienteAtualizado.Email) && 
+                clienteAtualizado.Email.ToLower() != cliente.Email?.ToLower())
+            {
+                var emailExiste = await _context.Clientes
+                    .AnyAsync(c => c.Email != null && 
+                        c.Email.ToLower() == clienteAtualizado.Email.ToLower() && 
+                        c.Id != id);
+                
+                if (emailExiste)
+                {
+                    return Conflict(new { message = "Email já cadastrado" });
+                }
             }
 
             cliente.Nome = clienteAtualizado.Nome;

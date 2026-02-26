@@ -36,19 +36,59 @@ const Clientes = () => {
   }
 
   const [showModal, setShowModal] = useState(false)
+  const [editingId, setEditingId] = useState<number | null>(null)
   const [formData, setFormData] = useState<Partial<Cliente>>({})
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     try {
-      await api.post('/cliente', formData)
+      if (editingId === null) {
+        await api.post('/cliente', formData)
+      } else {
+        await api.put(`/cliente/${editingId}`, formData)
+      }
       await loadClientes()
       setShowModal(false)
+      setEditingId(null)
       setFormData({})
-    } catch (error) {
+    } catch (error: any) {
       console.error('Erro ao salvar cliente:', error)
-      alert('Erro ao salvar cliente')
+      const message = error.response?.data?.message || 'Erro ao salvar cliente'
+      alert(message)
     }
+  }
+
+  const handleEdit = (cliente: Cliente) => {
+    setEditingId(cliente.id)
+    setFormData({
+      nome: cliente.nome,
+      cnpj: cliente.cnpj || '',
+      contato: cliente.contato || '',
+      email: cliente.email || ''
+    })
+    setShowModal(true)
+  }
+
+  const handleDelete = async (id: number, e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (!confirm('Tem certeza que deseja excluir este cliente?')) {
+      return
+    }
+
+    try {
+      await api.delete(`/cliente/${id}`)
+      await loadClientes()
+    } catch (error: any) {
+      console.error('Erro ao excluir cliente:', error)
+      const message = error.response?.data?.message || 'Erro ao excluir cliente'
+      alert(message)
+    }
+  }
+
+  const handleNew = () => {
+    setEditingId(null)
+    setFormData({})
+    setShowModal(true)
   }
 
   const filteredClientes = (Array.isArray(clientes) ? clientes : []).filter(cliente =>
@@ -82,7 +122,7 @@ const Clientes = () => {
           <h1>Cadastro de Clientes</h1>
           <p className="page-subtitle">Gerenciamento de clientes do sistema</p>
         </div>
-        <button className="btn btn-primary" onClick={() => setShowModal(true)}>
+        <button className="btn btn-primary" onClick={handleNew}>
           ➕ Novo Cliente
         </button>
       </div>
@@ -123,8 +163,20 @@ const Clientes = () => {
                   <td>{cliente.email}</td>
                   <td onClick={(e) => e.stopPropagation()}>
                     <div className="action-buttons">
-                      <button className="btn-icon" title="Editar">✏️</button>
-                      <button className="btn-icon" title="Excluir">🗑️</button>
+                      <button 
+                        className="btn-icon" 
+                        title="Editar"
+                        onClick={() => handleEdit(cliente)}
+                      >
+                        ✏️
+                      </button>
+                      <button 
+                        className="btn-icon" 
+                        title="Excluir"
+                        onClick={(e) => handleDelete(cliente.id, e)}
+                      >
+                        🗑️
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -138,8 +190,11 @@ const Clientes = () => {
         <div className="modal-overlay" onClick={() => setShowModal(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h2>Novo Cliente</h2>
-              <button className="modal-close" onClick={() => setShowModal(false)}>×</button>
+              <h2>{editingId === null ? 'Novo Cliente' : 'Editar Cliente'}</h2>
+              <button className="modal-close" onClick={() => {
+                setShowModal(false)
+                setEditingId(null)
+              }}>×</button>
             </div>
             <form onSubmit={handleSubmit} className="modal-form">
               <div className="form-group">
@@ -179,11 +234,18 @@ const Clientes = () => {
                 />
               </div>
               <div className="modal-actions">
-                <button type="button" className="btn btn-secondary" onClick={() => setShowModal(false)}>
+                <button 
+                  type="button" 
+                  className="btn btn-secondary" 
+                  onClick={() => {
+                    setShowModal(false)
+                    setEditingId(null)
+                  }}
+                >
                   Cancelar
                 </button>
                 <button type="submit" className="btn btn-primary">
-                  Salvar
+                  {editingId === null ? 'Salvar' : 'Atualizar'}
                 </button>
               </div>
             </form>

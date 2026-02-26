@@ -1,59 +1,182 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import api from '../config/api'
 import './GestaoUsuarios.css'
 
 interface Usuario {
   id: number
   nome: string
   email: string
-  perfil: 'Administrador' | 'Operador' | 'Visualizador'
-  status: 'ativo' | 'inativo'
-  ultimoAcesso: string
+  role: string
+  ativo: boolean
+  ultimoAcesso: string | null
 }
 
 const GestaoUsuarios = () => {
-  const [usuarios] = useState<Usuario[]>([
-    {
-      id: 1,
-      nome: 'João Silva',
-      email: 'joao.silva@modec.com',
-      perfil: 'Administrador',
-      status: 'ativo',
-      ultimoAcesso: '22/12/2024 14:30'
-    },
-    {
-      id: 2,
-      nome: 'Maria Santos',
-      email: 'maria.santos@modec.com',
-      perfil: 'Operador',
-      status: 'ativo',
-      ultimoAcesso: '22/12/2024 13:15'
-    },
-    {
-      id: 3,
-      nome: 'Carlos Oliveira',
-      email: 'carlos.oliveira@modec.com',
-      perfil: 'Visualizador',
-      status: 'ativo',
-      ultimoAcesso: '21/12/2024 16:45'
-    },
-    {
-      id: 4,
-      nome: 'Ana Costa',
-      email: 'ana.costa@modec.com',
-      perfil: 'Operador',
-      status: 'inativo',
-      ultimoAcesso: '20/12/2024 10:20'
-    }
-  ])
-
+  const [usuarios, setUsuarios] = useState<Usuario[]>([])
+  const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
-  const [formData, setFormData] = useState<Partial<Usuario>>({})
+  const [editingId, setEditingId] = useState<number | null>(null)
+  const [formData, setFormData] = useState<{
+    nome: string
+    email: string
+    role: string
+    senha: string
+    confirmarSenha: string
+    ativo: boolean
+  }>({
+    nome: '',
+    email: '',
+    role: 'Usuario',
+    senha: '',
+    confirmarSenha: '',
+    ativo: true
+  })
 
-  const handleSubmit = (e: React.FormEvent) => {
+  useEffect(() => {
+    loadUsuarios()
+  }, [])
+
+  const loadUsuarios = async () => {
+    try {
+      setLoading(true)
+      const response = await api.get('/usuario')
+      setUsuarios(Array.isArray(response.data) ? response.data : [])
+    } catch (error) {
+      console.error('Erro ao carregar usuários:', error)
+      setUsuarios([])
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    // Aqui seria a lógica de salvar
-    setShowModal(false)
-    setFormData({})
+
+    // Validações
+    if (!formData.nome || !formData.email) {
+      alert('Nome e email são obrigatórios')
+      return
+    }
+
+    if (editingId === null && (!formData.senha || formData.senha.length < 8)) {
+      alert('Senha deve ter no mínimo 8 caracteres')
+      return
+    }
+
+    if (editingId === null && formData.senha !== formData.confirmarSenha) {
+      alert('Senhas não coincidem')
+      return
+    }
+
+    try {
+      if (editingId === null) {
+        // Criar novo usuário
+        await api.post('/usuario', {
+          nome: formData.nome,
+          email: formData.email,
+          role: formData.role,
+          senha: formData.senha,
+          ativo: formData.ativo
+        })
+      } else {
+        // Atualizar usuário existente
+        const updateData: any = {
+          nome: formData.nome,
+          email: formData.email,
+          role: formData.role,
+          ativo: formData.ativo
+        }
+        
+        if (formData.senha && formData.senha.length >= 8) {
+          if (formData.senha !== formData.confirmarSenha) {
+            alert('Senhas não coincidem')
+            return
+          }
+          updateData.senha = formData.senha
+        }
+        
+        await api.put(`/usuario/${editingId}`, updateData)
+      }
+
+      await loadUsuarios()
+      setShowModal(false)
+      setEditingId(null)
+      setFormData({
+        nome: '',
+        email: '',
+        role: 'Usuario',
+        senha: '',
+        confirmarSenha: '',
+        ativo: true
+      })
+    } catch (error: any) {
+      console.error('Erro ao salvar usuário:', error)
+      const message = error.response?.data?.message || 'Erro ao salvar usuário'
+      alert(message)
+    }
+  }
+
+  const handleEdit = (usuario: Usuario) => {
+    setEditingId(usuario.id)
+    setFormData({
+      nome: usuario.nome,
+      email: usuario.email,
+      role: usuario.role || 'Usuario',
+      senha: '',
+      confirmarSenha: '',
+      ativo: usuario.ativo
+    })
+    setShowModal(true)
+  }
+
+  const handleDelete = async (id: number) => {
+    if (!confirm('Tem certeza que deseja excluir este usuário?')) {
+      return
+    }
+
+    try {
+      await api.delete(`/usuario/${id}`)
+      await loadUsuarios()
+    } catch (error) {
+      console.error('Erro ao excluir usuário:', error)
+      alert('Erro ao excluir usuário')
+    }
+  }
+
+  const handleNew = () => {
+    setEditingId(null)
+    setFormData({
+      nome: '',
+      email: '',
+      role: 'Usuario',
+      senha: '',
+      confirmarSenha: '',
+      ativo: true
+    })
+    setShowModal(true)
+  }
+
+  const getPerfilLabel = (role: string) => {
+    const roles: { [key: string]: string } = {
+      'Admin': 'Administrador',
+      'Usuario': 'Operador',
+      'Operador': 'Operador',
+      'Visualizador': 'Visualizador'
+    }
+    return roles[role] || role
+  }
+
+  if (loading) {
+    return (
+      <div className="gestao-usuarios">
+        <div className="page-header">
+          <h1>Gestão de Usuários</h1>
+        </div>
+        <div className="usuarios-card">
+          <p>Carregando...</p>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -63,7 +186,7 @@ const GestaoUsuarios = () => {
           <h1>Gestão de Usuários</h1>
           <p className="page-subtitle">Gerenciamento de usuários e permissões do sistema</p>
         </div>
-        <button className="btn btn-primary" onClick={() => setShowModal(true)}>
+        <button className="btn btn-primary" onClick={handleNew}>
           ➕ Novo Usuário
         </button>
       </div>
@@ -82,41 +205,66 @@ const GestaoUsuarios = () => {
               </tr>
             </thead>
             <tbody>
-              {usuarios.map(usuario => (
-                <tr key={usuario.id}>
-                  <td><strong>{usuario.nome}</strong></td>
-                  <td>{usuario.email}</td>
-                  <td>
-                    <span className={`perfil-badge perfil-${usuario.perfil.toLowerCase()}`}>
-                      {usuario.perfil}
-                    </span>
-                  </td>
-                  <td>
-                    <span className={`status-badge ${usuario.status}`}>
-                      {usuario.status === 'ativo' ? '● Ativo' : '○ Inativo'}
-                    </span>
-                  </td>
-                  <td>{usuario.ultimoAcesso}</td>
-                  <td>
-                    <div className="action-buttons">
-                      <button className="btn-icon" title="Editar">✏️</button>
-                      <button className="btn-icon" title="Alterar Senha">🔒</button>
-                      <button className="btn-icon" title="Excluir">🗑️</button>
-                    </div>
+              {usuarios.length === 0 ? (
+                <tr>
+                  <td colSpan={6} style={{ textAlign: 'center', padding: '2rem' }}>
+                    Nenhum usuário cadastrado
                   </td>
                 </tr>
-              ))}
+              ) : (
+                usuarios.map(usuario => (
+                  <tr key={usuario.id}>
+                    <td><strong>{usuario.nome}</strong></td>
+                    <td>{usuario.email}</td>
+                    <td>
+                      <span className={`perfil-badge perfil-${(usuario.role || 'Usuario').toLowerCase()}`}>
+                        {getPerfilLabel(usuario.role || 'Usuario')}
+                      </span>
+                    </td>
+                    <td>
+                      <span className={`status-badge ${usuario.ativo ? 'ativo' : 'inativo'}`}>
+                        {usuario.ativo ? '● Ativo' : '○ Inativo'}
+                      </span>
+                    </td>
+                    <td>{usuario.ultimoAcesso || 'Nunca'}</td>
+                    <td>
+                      <div className="action-buttons">
+                        <button 
+                          className="btn-icon" 
+                          title="Editar"
+                          onClick={() => handleEdit(usuario)}
+                        >
+                          ✏️
+                        </button>
+                        <button 
+                          className="btn-icon" 
+                          title="Excluir"
+                          onClick={() => handleDelete(usuario.id)}
+                        >
+                          🗑️
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
       </div>
 
       {showModal && (
-        <div className="modal-overlay" onClick={() => setShowModal(false)}>
+        <div className="modal-overlay" onClick={() => {
+          setShowModal(false)
+          setEditingId(null)
+        }}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h2>Novo Usuário</h2>
-              <button className="modal-close" onClick={() => setShowModal(false)}>×</button>
+              <h2>{editingId === null ? 'Novo Usuário' : 'Editar Usuário'}</h2>
+              <button className="modal-close" onClick={() => {
+                setShowModal(false)
+                setEditingId(null)
+              }}>×</button>
             </div>
             <form onSubmit={handleSubmit} className="modal-form">
               <div className="form-group">
@@ -124,7 +272,7 @@ const GestaoUsuarios = () => {
                 <input 
                   type="text" 
                   required
-                  value={formData.nome || ''}
+                  value={formData.nome}
                   onChange={(e) => setFormData({...formData, nome: e.target.value})}
                 />
               </div>
@@ -133,7 +281,7 @@ const GestaoUsuarios = () => {
                 <input 
                   type="email" 
                   required
-                  value={formData.email || ''}
+                  value={formData.email}
                   onChange={(e) => setFormData({...formData, email: e.target.value})}
                 />
               </div>
@@ -141,37 +289,60 @@ const GestaoUsuarios = () => {
                 <label>Perfil</label>
                 <select
                   required
-                  value={formData.perfil || ''}
-                  onChange={(e) => setFormData({...formData, perfil: e.target.value as Usuario['perfil']})}
+                  value={formData.role}
+                  onChange={(e) => setFormData({...formData, role: e.target.value})}
                 >
-                  <option value="">Selecione...</option>
-                  <option value="Administrador">Administrador</option>
+                  <option value="Usuario">Operador</option>
+                  <option value="Admin">Administrador</option>
                   <option value="Operador">Operador</option>
                   <option value="Visualizador">Visualizador</option>
                 </select>
               </div>
               <div className="form-group">
-                <label>Senha</label>
+                <label>Senha {editingId !== null && '(deixe em branco para não alterar)'}</label>
                 <input 
                   type="password" 
-                  required
+                  required={editingId === null}
                   placeholder="Mínimo 8 caracteres"
+                  value={formData.senha}
+                  onChange={(e) => setFormData({...formData, senha: e.target.value})}
                 />
               </div>
+              {(!editingId || formData.senha) && (
+                <div className="form-group">
+                  <label>Confirmar Senha</label>
+                  <input 
+                    type="password" 
+                    required={editingId === null || formData.senha.length > 0}
+                    placeholder="Digite a senha novamente"
+                    value={formData.confirmarSenha}
+                    onChange={(e) => setFormData({...formData, confirmarSenha: e.target.value})}
+                  />
+                </div>
+              )}
               <div className="form-group">
-                <label>Confirmar Senha</label>
-                <input 
-                  type="password" 
-                  required
-                  placeholder="Digite a senha novamente"
-                />
+                <label>
+                  <input 
+                    type="checkbox" 
+                    checked={formData.ativo}
+                    onChange={(e) => setFormData({...formData, ativo: e.target.checked})}
+                  />
+                  {' '}Usuário Ativo
+                </label>
               </div>
               <div className="modal-actions">
-                <button type="button" className="btn btn-secondary" onClick={() => setShowModal(false)}>
+                <button 
+                  type="button" 
+                  className="btn btn-secondary" 
+                  onClick={() => {
+                    setShowModal(false)
+                    setEditingId(null)
+                  }}
+                >
                   Cancelar
                 </button>
                 <button type="submit" className="btn btn-primary">
-                  Salvar
+                  {editingId === null ? 'Salvar' : 'Atualizar'}
                 </button>
               </div>
             </form>

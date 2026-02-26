@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using DataMais.Data;
 using DataMais.Models;
+using DataMais.Services;
 using System.Text.Json;
 
 namespace DataMais.Controllers;
@@ -12,11 +13,13 @@ public class ModbusConfigController : ControllerBase
 {
     private readonly DataMaisDbContext _context;
     private readonly ILogger<ModbusConfigController> _logger;
+    private readonly ModbusService _modbusService;
 
-    public ModbusConfigController(DataMaisDbContext context, ILogger<ModbusConfigController> logger)
+    public ModbusConfigController(DataMaisDbContext context, ILogger<ModbusConfigController> logger, ModbusService modbusService)
     {
         _context = context;
         _logger = logger;
+        _modbusService = modbusService;
     }
 
     [HttpGet]
@@ -271,6 +274,151 @@ public class ModbusConfigController : ControllerBase
             return StatusCode(500, new { message = "Erro ao deletar configuração Modbus" });
         }
     }
+
+    [HttpPost("{id}/write")]
+    public async Task<IActionResult> WriteRegister(int id, [FromBody] WriteModbusRequest request)
+    {
+        try
+        {
+            var config = await _context.ModbusConfigs.FindAsync(id);
+            if (config == null)
+            {
+                return NotFound(new { message = "Configuração Modbus não encontrada" });
+            }
+
+            if (!config.Ativo)
+            {
+                return BadRequest(new { message = "Registro Modbus está inativo" });
+            }
+
+            // Determina a função de escrita baseado no tipo de dado ou função atual
+            string funcaoEscrita = config.FuncaoModbus;
+            if (funcaoEscrita != "WriteSingleRegister" && funcaoEscrita != "WriteSingleCoil")
+            {
+                // Se não for função de escrita, determina baseado no tipo de dado
+                if (config.TipoDado == "Boolean" || funcaoEscrita == "ReadCoils")
+                {
+                    funcaoEscrita = "WriteSingleCoil";
+                }
+                else
+                {
+                    funcaoEscrita = "WriteSingleRegister";
+                }
+            }
+
+            // Converte o valor conforme o tipo de dado
+            object valor;
+            if (funcaoEscrita == "WriteSingleCoil")
+            {
+                valor = request.Valor is bool boolVal ? boolVal : Convert.ToBoolean(request.Valor);
+            }
+            else
+            {
+                valor = Convert.ToUInt16(request.Valor);
+            }
+
+            // Cria uma cópia temporária da config com a função de escrita correta
+            var configTemp = new ModbusConfig
+            {
+                Id = config.Id,
+                Nome = config.Nome,
+                Descricao = config.Descricao,
+                IpAddress = config.IpAddress,
+                Port = config.Port,
+                SlaveId = config.SlaveId,
+                FuncaoModbus = funcaoEscrita,
+                EnderecoRegistro = config.EnderecoRegistro,
+                QuantidadeRegistros = config.QuantidadeRegistros,
+                TipoDado = config.TipoDado,
+                ByteOrder = config.ByteOrder,
+                FatorConversao = config.FatorConversao,
+                Offset = config.Offset,
+                Unidade = config.Unidade,
+                OrdemLeitura = config.OrdemLeitura,
+                Ativo = config.Ativo
+            };
+
+            var sucesso = await _modbusService.EscreverRegistroAsync(configTemp, valor);
+
+            if (sucesso)
+            {
+                _logger.LogInformation("Valor {Valor} escrito no registro Modbus {RegistroId} ({Nome})", valor, id, config.Nome);
+                return Ok(new { message = "Valor escrito com sucesso", valor });
+            }
+            else
+            {
+                return StatusCode(500, new { message = "Erro ao escrever valor no registro Modbus" });
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Erro ao escrever registro Modbus {RegistroId}", id);
+            return StatusCode(500, new { message = "Erro ao escrever registro Modbus", error = ex.Message });
+        }
+    }
+
+    [HttpGet("search")]
+    public async Task<IActionResult> SearchByName([FromQuery] string nome)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(nome))
+            {
+                return BadRequest(new { message = "Parâmetro 'nome' é obrigatório" });
+            }
+
+            var configs = await _context.ModbusConfigs
+                .Where(c => c.Nome.Contains(nome, StringComparison.OrdinalIgnoreCase) || 
+                           (c.Descricao != null && c.Descricao.Contains(nome, StringComparison.OrdinalIgnoreCase)))
+                .Where(c => c.Ativo)
+                .ToListAsync();
+
+            return Ok(configs);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Erro ao buscar configurações Modbus por nome");
+            return StatusCode(500, new { message = "Erro ao buscar configurações Modbus" });
+        }
+    }
+
+    [HttpGet("{id}/read")]
+    public async Task<IActionResult> ReadRegister(int id)
+    {
+        try
+        {
+            var config = await _context.ModbusConfigs.FindAsync(id);
+            if (config == null)
+            {
+                return NotFound(new { message = "Configuração Modbus não encontrada" });
+            }
+
+            if (!config.Ativo)
+            {
+                return BadRequest(new { message = "Registro Modbus está inativo" });
+            }
+
+            var valor = await _modbusService.LerRegistroAsync(id);
+
+            if (valor == null)
+            {
+                return StatusCode(500, new { message = "Erro ao ler registro Modbus" });
+            }
+
+            return Ok(new { valor });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Erro ao ler registro Modbus {RegistroId}", id);
+            return StatusCode(500, new { message = "Erro ao ler registro Modbus", error = ex.Message });
+        }
+    }
+}
+
+// DTO para escrita Modbus
+public class WriteModbusRequest
+{
+    public object Valor { get; set; } = null!;
 }
 
 // DTO para importação

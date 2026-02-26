@@ -120,6 +120,34 @@ public class CilindroController : ControllerBase
                 return BadRequest(ModelState);
             }
 
+            // Verificar se código interno já existe
+            var codigoInternoExiste = await _context.Cilindros
+                .AnyAsync(c => c.CodigoInterno == cilindro.CodigoInterno);
+            
+            if (codigoInternoExiste)
+            {
+                return Conflict(new { message = "Código interno já cadastrado" });
+            }
+
+            // Verificar se código cliente já existe para o mesmo cliente
+            var codigoClienteExiste = await _context.Cilindros
+                .AnyAsync(c => c.ClienteId == cilindro.ClienteId && 
+                    c.CodigoCliente == cilindro.CodigoCliente);
+            
+            if (codigoClienteExiste)
+            {
+                return Conflict(new { message = "Código cliente já cadastrado para este cliente" });
+            }
+
+            // Verificar se cliente existe
+            var clienteExiste = await _context.Clientes
+                .AnyAsync(c => c.Id == cilindro.ClienteId);
+            
+            if (!clienteExiste)
+            {
+                return BadRequest(new { message = "Cliente não encontrado" });
+            }
+
             cilindro.DataCriacao = DateTime.UtcNow;
             _context.Cilindros.Add(cilindro);
             await _context.SaveChangesAsync();
@@ -144,6 +172,46 @@ public class CilindroController : ControllerBase
                 return NotFound(new { message = "Cilindro não encontrado" });
             }
 
+            // Verificar se código interno já existe em outro cilindro
+            if (cilindroAtualizado.CodigoInterno != cilindro.CodigoInterno)
+            {
+                var codigoInternoExiste = await _context.Cilindros
+                    .AnyAsync(c => c.CodigoInterno == cilindroAtualizado.CodigoInterno && c.Id != id);
+                
+                if (codigoInternoExiste)
+                {
+                    return Conflict(new { message = "Código interno já cadastrado" });
+                }
+            }
+
+            // Verificar se código cliente já existe para o mesmo cliente em outro cilindro
+            var clienteId = cilindroAtualizado.ClienteId != 0 ? cilindroAtualizado.ClienteId : cilindro.ClienteId;
+            if (cilindroAtualizado.CodigoCliente != cilindro.CodigoCliente || 
+                clienteId != cilindro.ClienteId)
+            {
+                var codigoClienteExiste = await _context.Cilindros
+                    .AnyAsync(c => c.ClienteId == clienteId && 
+                        c.CodigoCliente == cilindroAtualizado.CodigoCliente && 
+                        c.Id != id);
+                
+                if (codigoClienteExiste)
+                {
+                    return Conflict(new { message = "Código cliente já cadastrado para este cliente" });
+                }
+            }
+
+            // Verificar se cliente existe (se foi alterado)
+            if (cilindroAtualizado.ClienteId != 0 && cilindroAtualizado.ClienteId != cilindro.ClienteId)
+            {
+                var clienteExiste = await _context.Clientes
+                    .AnyAsync(c => c.Id == cilindroAtualizado.ClienteId);
+                
+                if (!clienteExiste)
+                {
+                    return BadRequest(new { message = "Cliente não encontrado" });
+                }
+            }
+
             // Atualiza todas as propriedades
             cilindro.Nome = cilindroAtualizado.Nome;
             cilindro.Descricao = cilindroAtualizado.Descricao;
@@ -152,6 +220,12 @@ public class CilindroController : ControllerBase
             cilindro.Modelo = cilindroAtualizado.Modelo;
             cilindro.Fabricante = cilindroAtualizado.Fabricante;
             cilindro.DataFabricacao = cilindroAtualizado.DataFabricacao;
+            
+            // Atualizar ClienteId se fornecido
+            if (cilindroAtualizado.ClienteId != 0 && cilindroAtualizado.ClienteId != cilindro.ClienteId)
+            {
+                cilindro.ClienteId = cilindroAtualizado.ClienteId;
+            }
             cilindro.DiametroInterno = cilindroAtualizado.DiametroInterno;
             cilindro.ComprimentoHaste = cilindroAtualizado.ComprimentoHaste;
             cilindro.DiametroHaste = cilindroAtualizado.DiametroHaste;

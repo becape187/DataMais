@@ -100,6 +100,17 @@ public class ModbusService
         if (registro == null || !registro.Ativo)
             return false;
 
+        return await EscreverRegistroAsync(registro, valor);
+    }
+
+    /// <summary>
+    /// Escreve um valor em um registro Modbus usando uma configuração específica
+    /// </summary>
+    public async Task<bool> EscreverRegistroAsync(ModbusConfig registro, object valor)
+    {
+        if (registro == null || !registro.Ativo)
+            return false;
+
         var master = ObterOuCriarConexao(registro.IpAddress, registro.Port);
 
         try
@@ -111,12 +122,22 @@ public class ModbusService
                     {
                         master.WriteSingleRegister(registro.SlaveId, registro.EnderecoRegistro, ushortValue);
                     }
+                    else
+                    {
+                        _logger.LogWarning("Valor inválido para WriteSingleRegister: esperado ushort, recebido {Tipo}", valor.GetType().Name);
+                        return false;
+                    }
                     break;
 
                 case "WriteSingleCoil":
                     if (valor is bool boolValue)
                     {
                         master.WriteSingleCoil(registro.SlaveId, registro.EnderecoRegistro, boolValue);
+                    }
+                    else
+                    {
+                        _logger.LogWarning("Valor inválido para WriteSingleCoil: esperado bool, recebido {Tipo}", valor.GetType().Name);
+                        return false;
                     }
                     break;
 
@@ -129,31 +150,34 @@ public class ModbusService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Erro ao escrever registro {RegistroId}", registroId);
+            _logger.LogError(ex, "Erro ao escrever registro {RegistroId} ({Nome})", registro.Id, registro.Nome);
             return false;
         }
     }
 
     private async Task<object> LerRegistroAsync(IModbusMaster master, ModbusConfig registro)
     {
-        ushort[] valores;
-
         switch (registro.FuncaoModbus)
         {
+            case "ReadCoils":
+                var coils = master.ReadCoils(registro.SlaveId, registro.EnderecoRegistro, registro.QuantidadeRegistros);
+                return coils != null && coils.Length > 0 ? coils[0] : false;
+
+            case "ReadInputs":
+                var inputs = master.ReadInputs(registro.SlaveId, registro.EnderecoRegistro, registro.QuantidadeRegistros);
+                return inputs != null && inputs.Length > 0 ? inputs[0] : false;
+
             case "ReadHoldingRegisters":
-                valores = master.ReadHoldingRegisters(registro.SlaveId, registro.EnderecoRegistro, registro.QuantidadeRegistros);
-                break;
+                var holdingRegisters = master.ReadHoldingRegisters(registro.SlaveId, registro.EnderecoRegistro, registro.QuantidadeRegistros);
+                return ConverterValor(holdingRegisters, registro);
 
             case "ReadInputRegisters":
-                valores = master.ReadInputRegisters(registro.SlaveId, registro.EnderecoRegistro, registro.QuantidadeRegistros);
-                break;
+                var inputRegisters = master.ReadInputRegisters(registro.SlaveId, registro.EnderecoRegistro, registro.QuantidadeRegistros);
+                return ConverterValor(inputRegisters, registro);
 
             default:
                 throw new NotSupportedException($"Função Modbus {registro.FuncaoModbus} não suportada");
         }
-
-        // Converte os valores conforme o tipo de dado
-        return ConverterValor(valores, registro);
     }
 
     private object ConverterValor(ushort[] valores, ModbusConfig registro)
