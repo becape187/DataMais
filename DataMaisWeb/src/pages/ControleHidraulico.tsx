@@ -22,6 +22,8 @@ interface ModbusRegistro {
 }
 
 const ControleHidraulico = () => {
+  console.log('🟢 Componente ControleHidraulico renderizado')
+  
   // Estados dos registros Modbus
   const [registros, setRegistros] = useState<{
     ligaMotor?: ModbusRegistro
@@ -227,12 +229,13 @@ const ControleHidraulico = () => {
 
 
   const ligarMotor = async () => {
+    console.log('🚀 ligarMotor chamado!', { saving, loading })
     try {
       setSaving('Ligar Motor')
       setError(null)
       setMessage(null)
 
-      console.log('Enviando comando para ligar motor...')
+      console.log('📤 Enviando comando para ligar motor...')
       const response = await api.post('/ModbusConfig/motor/ligar')
       
       console.log('Resposta do servidor:', response.data)
@@ -266,12 +269,13 @@ const ControleHidraulico = () => {
   }
 
   const desligarMotor = async () => {
+    console.log('🚀 desligarMotor chamado!', { saving, loading })
     try {
       setSaving('Desligar Motor')
       setError(null)
       setMessage(null)
 
-      console.log('Enviando comando para desligar motor...')
+      console.log('📤 Enviando comando para desligar motor...')
       const response = await api.post('/ModbusConfig/motor/desligar')
       
       console.log('Resposta do servidor:', response.data)
@@ -393,6 +397,13 @@ const ControleHidraulico = () => {
         </div>
       )}
 
+      {/* Debug info */}
+      {import.meta.env.DEV && (
+        <div style={{ padding: '10px', background: '#f0f0f0', marginBottom: '10px', fontSize: '12px' }}>
+          <strong>Debug:</strong> loading={loading ? 'true' : 'false'}, saving={saving || 'null'}
+        </div>
+      )}
+
       <div className="controle-grid">
         {/* Card do Motor */}
         <div className="controle-card">
@@ -407,15 +418,51 @@ const ControleHidraulico = () => {
           <div className="controle-actions">
             <button 
               className="btn btn-success"
-              onClick={ligarMotor}
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                console.log('🔵 Botão Ligar Motor CLICADO!', { 
+                  saving, 
+                  loading, 
+                  disabled: saving !== null || loading,
+                  buttonEnabled: !(saving !== null || loading)
+                })
+                if (!loading && saving === null) {
+                  ligarMotor()
+                } else {
+                  console.warn('⚠️ Botão desabilitado!', { loading, saving })
+                }
+              }}
               disabled={saving !== null || loading}
+              style={{ 
+                cursor: (saving !== null || loading) ? 'not-allowed' : 'pointer',
+                pointerEvents: (saving !== null || loading) ? 'none' : 'auto'
+              }}
             >
               {saving === 'Ligar Motor' ? '⏳ Processando...' : '▶️ Ligar Motor'}
             </button>
             <button 
               className="btn btn-danger"
-              onClick={desligarMotor}
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                console.log('🔴 Botão Desligar Motor CLICADO!', { 
+                  saving, 
+                  loading, 
+                  disabled: saving !== null || loading,
+                  buttonEnabled: !(saving !== null || loading)
+                })
+                if (!loading && saving === null) {
+                  desligarMotor()
+                } else {
+                  console.warn('⚠️ Botão desabilitado!', { loading, saving })
+                }
+              }}
               disabled={saving !== null || loading}
+              style={{ 
+                cursor: (saving !== null || loading) ? 'not-allowed' : 'pointer',
+                pointerEvents: (saving !== null || loading) ? 'none' : 'auto'
+              }}
             >
               {saving === 'Desligar Motor' ? '⏳ Processando...' : '⏹️ Desligar Motor'}
             </button>
