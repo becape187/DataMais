@@ -8,12 +8,66 @@ interface LayoutProps {
   children: ReactNode
 }
 
+interface ModbusRegistro {
+  id: number
+  nome: string
+  ativo: boolean
+}
+
+// Versão do Layout - incrementar quando houver mudanças importantes
+// v1.0.2 - Botões Avança/Recua agora são momentâneos (pressionar = true, soltar = false)
+
 const Layout = ({ children }: LayoutProps) => {
   const location = useLocation()
   const [isLigado, setIsLigado] = useState(false)
   const [processando, setProcessando] = useState(false)
+  const [avancaPressionado, setAvancaPressionado] = useState(false)
+  const [recuaPressionado, setRecuaPressionado] = useState(false)
+  const [registros, setRegistros] = useState<{
+    avanca?: ModbusRegistro
+    recua?: ModbusRegistro
+  }>({})
 
   const isActive = (path: string) => location.pathname === path
+
+  // Busca os registros Modbus necessários
+  useEffect(() => {
+    const buscarRegistros = async () => {
+      try {
+        const response = await api.get('/ModbusConfig')
+        const todosRegistros: ModbusRegistro[] = response.data
+        
+        const avancaReg = todosRegistros.find((r: any) => r.nome === 'BOTAO_AVANCA_IHM' && r.ativo)
+        const recuaReg = todosRegistros.find((r: any) => r.nome === 'BOTAO_RECUA_IHM' && r.ativo)
+        
+        setRegistros({
+          avanca: avancaReg,
+          recua: recuaReg
+        })
+        
+        console.log('Registros Modbus encontrados na sidebar:', { avanca: avancaReg, recua: recuaReg })
+      } catch (err) {
+        console.error('Erro ao buscar registros Modbus:', err)
+      }
+    }
+
+    buscarRegistros()
+  }, [])
+
+  // Garante que os botões sejam desativados se a janela perder o foco
+  useEffect(() => {
+    const handleWindowBlur = () => {
+      if (avancaPressionado) {
+        handleAvancaUp()
+      }
+      if (recuaPressionado) {
+        handleRecuaUp()
+      }
+    }
+
+    window.addEventListener('blur', handleWindowBlur)
+    return () => window.removeEventListener('blur', handleWindowBlur)
+  }, [avancaPressionado, recuaPressionado])
 
   // Busca o status do motor ao carregar
   useEffect(() => {
@@ -70,14 +124,78 @@ const Layout = ({ children }: LayoutProps) => {
     }
   }
 
-  const handleAvança = () => {
-    console.log('🔵 Botão Avança da sidebar CLICADO!')
-    // Aqui seria a lógica de avançar
+  // Funções para Avança - botão momentâneo (pressionar = true, soltar = false)
+  const handleAvancaDown = async () => {
+    console.log('🔵 Botão Avança PRESSIONADO (MouseDown)!', { avancaPressionado, registro: registros.avanca })
+    
+    if (avancaPressionado || !registros.avanca) {
+      return
+    }
+
+    try {
+      setAvancaPressionado(true)
+      console.log(`📤 Enviando TRUE para BOTAO_AVANCA_IHM (ID: ${registros.avanca.id})...`)
+      await api.post(`/ModbusConfig/${registros.avanca.id}/write`, { valor: true })
+      console.log('✅ TRUE enviado para Avança')
+    } catch (err: any) {
+      console.error('❌ Erro ao enviar TRUE para Avança:', err)
+      setAvancaPressionado(false)
+    }
   }
 
-  const handleRecua = () => {
-    console.log('🔵 Botão Recua da sidebar CLICADO!')
-    // Aqui seria a lógica de recuar
+  const handleAvancaUp = async () => {
+    console.log('🔵 Botão Avança SOLTO (MouseUp)!', { avancaPressionado, registro: registros.avanca })
+    
+    if (!avancaPressionado || !registros.avanca) {
+      return
+    }
+
+    try {
+      console.log(`📤 Enviando FALSE para BOTAO_AVANCA_IHM (ID: ${registros.avanca.id})...`)
+      await api.post(`/ModbusConfig/${registros.avanca.id}/write`, { valor: false })
+      console.log('✅ FALSE enviado para Avança')
+    } catch (err: any) {
+      console.error('❌ Erro ao enviar FALSE para Avança:', err)
+    } finally {
+      setAvancaPressionado(false)
+    }
+  }
+
+  // Funções para Recua - botão momentâneo (pressionar = true, soltar = false)
+  const handleRecuaDown = async () => {
+    console.log('🔵 Botão Recua PRESSIONADO (MouseDown)!', { recuaPressionado, registro: registros.recua })
+    
+    if (recuaPressionado || !registros.recua) {
+      return
+    }
+
+    try {
+      setRecuaPressionado(true)
+      console.log(`📤 Enviando TRUE para BOTAO_RECUA_IHM (ID: ${registros.recua.id})...`)
+      await api.post(`/ModbusConfig/${registros.recua.id}/write`, { valor: true })
+      console.log('✅ TRUE enviado para Recua')
+    } catch (err: any) {
+      console.error('❌ Erro ao enviar TRUE para Recua:', err)
+      setRecuaPressionado(false)
+    }
+  }
+
+  const handleRecuaUp = async () => {
+    console.log('🔵 Botão Recua SOLTO (MouseUp)!', { recuaPressionado, registro: registros.recua })
+    
+    if (!recuaPressionado || !registros.recua) {
+      return
+    }
+
+    try {
+      console.log(`📤 Enviando FALSE para BOTAO_RECUA_IHM (ID: ${registros.recua.id})...`)
+      await api.post(`/ModbusConfig/${registros.recua.id}/write`, { valor: false })
+      console.log('✅ FALSE enviado para Recua')
+    } catch (err: any) {
+      console.error('❌ Erro ao enviar FALSE para Recua:', err)
+    } finally {
+      setRecuaPressionado(false)
+    }
   }
 
   return (
@@ -176,11 +294,59 @@ const Layout = ({ children }: LayoutProps) => {
           </div>
           <div className="hidraulica-buttons">
             <div className="movimento-buttons">
-              <button className="btn-hidraulica btn-avanca" onClick={handleAvança}>
-                Avança
+              <button 
+                className="btn-hidraulica btn-avanca" 
+                onMouseDown={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  handleAvancaDown()
+                }}
+                onMouseUp={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  handleAvancaUp()
+                }}
+                onMouseLeave={(e) => {
+                  // Se o mouse sair do botão enquanto está pressionado, também desativa
+                  if (avancaPressionado) {
+                    e.preventDefault()
+                    handleAvancaUp()
+                  }
+                }}
+                disabled={!registros.avanca}
+                style={{ 
+                  cursor: !registros.avanca ? 'not-allowed' : 'pointer',
+                  opacity: !registros.avanca ? 0.6 : (avancaPressionado ? 0.8 : 1)
+                }}
+              >
+                {avancaPressionado ? '⏳ Avança' : 'Avança'}
               </button>
-              <button className="btn-hidraulica btn-recua" onClick={handleRecua}>
-                Recua
+              <button 
+                className="btn-hidraulica btn-recua" 
+                onMouseDown={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  handleRecuaDown()
+                }}
+                onMouseUp={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  handleRecuaUp()
+                }}
+                onMouseLeave={(e) => {
+                  // Se o mouse sair do botão enquanto está pressionado, também desativa
+                  if (recuaPressionado) {
+                    e.preventDefault()
+                    handleRecuaUp()
+                  }
+                }}
+                disabled={!registros.recua}
+                style={{ 
+                  cursor: !registros.recua ? 'not-allowed' : 'pointer',
+                  opacity: !registros.recua ? 0.6 : (recuaPressionado ? 0.8 : 1)
+                }}
+              >
+                {recuaPressionado ? '⏳ Recua' : 'Recua'}
               </button>
             </div>
             <button 
@@ -188,7 +354,7 @@ const Layout = ({ children }: LayoutProps) => {
               onClick={(e) => {
                 e.preventDefault()
                 e.stopPropagation()
-                console.log('🔵 onClick handler executado!', { isLigado, processando })
+                console.log('🔵 onClick Liga/Desliga executado!', { isLigado, processando })
                 handleLigaDesliga()
               }}
               disabled={processando}
