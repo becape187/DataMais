@@ -460,9 +460,10 @@ const Configuracoes = () => {
                         >
                           <option value="ReadHoldingRegisters">Read Holding Registers</option>
                           <option value="ReadInputRegisters">Read Input Registers</option>
+                          <option value="ReadCoils">Read Coils</option>
+                          <option value="ReadInputs">Read Discrete Inputs (0x02)</option>
                           <option value="WriteSingleRegister">Write Single Register</option>
                           <option value="WriteSingleCoil">Write Single Coil</option>
-                          <option value="ReadCoils">Read Coils</option>
                         </select>
                       </td>
                       <td>

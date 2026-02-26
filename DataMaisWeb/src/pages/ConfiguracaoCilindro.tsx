@@ -144,10 +144,76 @@ const ConfiguracaoCilindro = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     try {
-      const cilindroData = {
-        ...formData,
+      // Validação básica dos campos obrigatórios
+      if (!formData.nome || !formData.nome.trim()) {
+        alert('O campo Nome é obrigatório')
+        return
+      }
+      if (!formData.codigoCliente || !formData.codigoCliente.trim()) {
+        alert('O campo Código Cliente é obrigatório')
+        return
+      }
+      if (!formData.codigoInterno || !formData.codigoInterno.trim()) {
+        alert('O campo Código Interno é obrigatório')
+        return
+      }
+      if (!clienteId) {
+        alert('Cliente não identificado')
+        return
+      }
+
+      // Preparar dados para envio
+      const cilindroData: any = {
+        nome: formData.nome.trim(),
+        codigoCliente: formData.codigoCliente.trim(),
+        codigoInterno: formData.codigoInterno.trim(),
         clienteId: Number(clienteId)
       }
+
+      // Adicionar campos opcionais apenas se tiverem valor
+      if (formData.descricao && formData.descricao.trim()) {
+        cilindroData.descricao = formData.descricao.trim()
+      }
+      if (formData.modelo && formData.modelo.trim()) {
+        cilindroData.modelo = formData.modelo.trim()
+      }
+      if (formData.fabricante && formData.fabricante.trim()) {
+        cilindroData.fabricante = formData.fabricante.trim()
+      }
+      if (formData.dataFabricacao) {
+        cilindroData.dataFabricacao = formData.dataFabricacao
+      }
+
+      // Adicionar campos numéricos apenas se tiverem valor diferente de 0 ou null
+      const addNumericField = (field: string, value: number) => {
+        if (value !== null && value !== undefined && value !== 0) {
+          cilindroData[field] = value
+        }
+      }
+
+      addNumericField('diametroInterno', formData.diametroInterno)
+      addNumericField('comprimentoHaste', formData.comprimentoHaste)
+      addNumericField('diametroHaste', formData.diametroHaste)
+      addNumericField('maximaPressaoSuportadaA', formData.maximaPressaoSuportadaA)
+      addNumericField('maximaPressaoSuportadaB', formData.maximaPressaoSuportadaB)
+      addNumericField('maximaPressaoSegurancaA', formData.maximaPressaoSegurancaA)
+      addNumericField('maximaPressaoSegurancaB', formData.maximaPressaoSegurancaB)
+      addNumericField('preCargaA', formData.preCargaA)
+      addNumericField('cargaNominalA', formData.cargaNominalA)
+      addNumericField('tempoRampaSubidaA', formData.tempoRampaSubidaA)
+      addNumericField('tempoDuracaoCargaA', formData.tempoDuracaoCargaA)
+      addNumericField('tempoRampaDescidaA', formData.tempoRampaDescidaA)
+      addNumericField('percentualVariacaoAlarmeA', formData.percentualVariacaoAlarmeA)
+      addNumericField('histereseAlarmeA', formData.histereseAlarmeA)
+      addNumericField('percentualVariacaoDesligaProcessoA', formData.percentualVariacaoDesligaProcessoA)
+      addNumericField('preCargaB', formData.preCargaB)
+      addNumericField('cargaNominalB', formData.cargaNominalB)
+      addNumericField('tempoRampaSubidaB', formData.tempoRampaSubidaB)
+      addNumericField('tempoDuracaoCargaB', formData.tempoDuracaoCargaB)
+      addNumericField('tempoRampaDescidaB', formData.tempoRampaDescidaB)
+      addNumericField('percentualVariacaoAlarmeB', formData.percentualVariacaoAlarmeB)
+      addNumericField('histereseAlarmeB', formData.histereseAlarmeB)
+      addNumericField('percentualVariacaoDesligaProcessoB', formData.percentualVariacaoDesligaProcessoB)
       
       if (isNew) {
         await api.post('/cilindro', cilindroData)
@@ -160,9 +226,39 @@ const ConfiguracaoCilindro = () => {
       } else {
         setIsEditing(false)
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Erro ao salvar cilindro:', error)
-      alert('Erro ao salvar cilindro')
+      
+      // Extrair mensagens de erro detalhadas
+      let errorMessage = 'Erro ao salvar cilindro'
+      
+      if (error.response?.data) {
+        const errorData = error.response.data
+        
+        // Se houver erros de validação do ModelState
+        if (errorData.errors) {
+          const validationErrors: string[] = []
+          Object.keys(errorData.errors).forEach(key => {
+            const messages = errorData.errors[key]
+            if (Array.isArray(messages)) {
+              messages.forEach((msg: string) => {
+                validationErrors.push(`${key}: ${msg}`)
+              })
+            } else {
+              validationErrors.push(`${key}: ${messages}`)
+            }
+          })
+          errorMessage = `Erros de validação:\n${validationErrors.join('\n')}`
+        } else if (errorData.message) {
+          errorMessage = errorData.message
+        } else if (errorData.title) {
+          errorMessage = errorData.title
+        }
+      } else if (error.message) {
+        errorMessage = error.message
+      }
+      
+      alert(errorMessage)
     }
   }
 
