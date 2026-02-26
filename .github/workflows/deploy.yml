@@ -94,6 +94,31 @@ jobs:
         password: ${{ secrets.SSH_PASSWORD }}
         port: ${{ secrets.SSH_PORT }}
         script: |
+          # Descobrir onde dotnet está instalado
+          DOTNET_PATH=""
+          if [ -f "/home/becape/.dotnet/dotnet" ]; then
+            DOTNET_PATH="/home/becape/.dotnet/dotnet"
+          elif [ -f "/usr/share/dotnet/dotnet" ]; then
+            DOTNET_PATH="/usr/share/dotnet/dotnet"
+          elif [ -f "/opt/dotnet/dotnet" ]; then
+            DOTNET_PATH="/opt/dotnet/dotnet"
+          elif [ -f "/usr/local/bin/dotnet" ]; then
+            DOTNET_PATH="/usr/local/bin/dotnet"
+          elif [ -f "/usr/bin/dotnet" ]; then
+            DOTNET_PATH="/usr/bin/dotnet"
+          else
+            # Tentar via PATH do usuário
+            DOTNET_PATH=$(sudo -u becape bash -c 'source ~/.profile 2>/dev/null || true; source ~/.bashrc 2>/dev/null || true; which dotnet 2>/dev/null || echo ""')
+            if [ -z "$DOTNET_PATH" ]; then
+              echo "⚠️  dotnet não encontrado. Verifique a instalação."
+              DOTNET_PATH="dotnet"  # Usar PATH como fallback
+            fi
+          fi
+          echo "✓ Usando dotnet em: $DOTNET_PATH"
+          
+          # Ajustar o arquivo de serviço com o caminho correto
+          sudo sed -i "s|ExecStart=.*|ExecStart=$DOTNET_PATH /home/becape/datamais.api/DataMais.dll|" /tmp/datamais.service
+          
           sudo cp /tmp/datamais.service /etc/systemd/system/datamais.service
           sudo chown -R becape:becape /home/becape/datamais.api
           sudo chmod +x /home/becape/datamais.api/DataMais || true
