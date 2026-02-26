@@ -21,7 +21,6 @@ interface AppConfig {
     retryCount: number
     poolingIntervalMs: number
   }
-  modbusRegistros: ModbusRegistro[]
 }
 
 interface ModbusRegistro {
@@ -45,28 +44,68 @@ interface ModbusRegistro {
 
 const Configuracoes = () => {
   const [config, setConfig] = useState<AppConfig | null>(null)
+  const [modbusRegistros, setModbusRegistros] = useState<ModbusRegistro[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
 
   useEffect(() => {
-    loadConfig()
+    loadAllData()
   }, [])
+
+  const loadAllData = async () => {
+    setLoading(true)
+    try {
+      await Promise.all([loadConfig(), loadModbusRegistros()])
+    } catch (error) {
+      console.error('Erro ao carregar dados:', error)
+    } finally {
+      setLoading(false)
+    }
+  }
 
   const loadConfig = async () => {
     try {
       const response = await api.get('/config')
       const configData = response.data
-      // Garante que modbusRegistros seja sempre um array
-      if (configData && !Array.isArray(configData.modbusRegistros)) {
-        configData.modbusRegistros = []
+      // Remove modbusRegistros do config pois agora vem do banco
+      if (configData && configData.modbusRegistros) {
+        delete configData.modbusRegistros
       }
       setConfig(configData)
     } catch (error) {
       console.error('Erro ao carregar configurações:', error)
       setMessage({ type: 'error', text: 'Erro ao carregar configurações' })
-    } finally {
-      setLoading(false)
+    }
+  }
+
+  const loadModbusRegistros = async () => {
+    try {
+      const response = await api.get('/ModbusConfig')
+      const registros = response.data || []
+      // Mapeia os dados do backend (PascalCase) para camelCase do frontend
+      const mappedRegistros = registros.map((r: any) => ({
+        id: r.id || r.Id,
+        nome: r.nome || r.Nome,
+        descricao: r.descricao || r.Descricao,
+        ipAddress: r.ipAddress || r.IpAddress,
+        port: r.port || r.Port,
+        slaveId: r.slaveId || r.SlaveId,
+        funcaoModbus: r.funcaoModbus || r.FuncaoModbus,
+        enderecoRegistro: r.enderecoRegistro || r.EnderecoRegistro,
+        quantidadeRegistros: r.quantidadeRegistros || r.QuantidadeRegistros || 1,
+        tipoDado: r.tipoDado || r.TipoDado,
+        byteOrder: r.byteOrder || r.ByteOrder,
+        fatorConversao: r.fatorConversao || r.FatorConversao,
+        offset: r.offset || r.Offset,
+        unidade: r.unidade || r.Unidade,
+        ordemLeitura: r.ordemLeitura || r.OrdemLeitura,
+        ativo: r.ativo !== undefined ? r.ativo : (r.Ativo !== undefined ? r.Ativo : true)
+      }))
+      setModbusRegistros(mappedRegistros)
+    } catch (error) {
+      console.error('Erro ao carregar registros Modbus:', error)
+      setMessage({ type: 'error', text: 'Erro ao carregar registros Modbus' })
     }
   }
 
@@ -77,7 +116,9 @@ const Configuracoes = () => {
     setMessage(null)
 
     try {
-      await api.post('/config', config)
+      // Salva apenas as configurações gerais (sem modbusRegistros)
+      const configToSave = { ...config }
+      await api.post('/config', configToSave)
       setMessage({ type: 'success', text: 'Configurações salvas com sucesso!' })
     } catch (error) {
       setMessage({ type: 'error', text: 'Erro ao salvar configurações' })
@@ -99,21 +140,79 @@ const Configuracoes = () => {
   }
 
   const handleRegistroChange = (id: number, field: keyof ModbusRegistro, value: any) => {
-    if (!config) return
-
-    setConfig({
-      ...config,
-      modbusRegistros: (Array.isArray(config.modbusRegistros) ? config.modbusRegistros : []).map(r =>
+    setModbusRegistros(prevRegistros =>
+      prevRegistros.map(r =>
         r.id === id ? { ...r, [field]: value } : r
       )
-    })
+    )
+  }
+
+  const handleSaveRegistro = async (registro: ModbusRegistro) => {
+    try {
+      // Converte de camelCase para PascalCase (formato esperado pelo backend)
+      const registroToSend = {
+        Id: registro.id > 0 ? registro.id : 0,
+        Nome: registro.nome,
+        Descricao: registro.descricao,
+        IpAddress: registro.ipAddress,
+        Port: registro.port,
+        SlaveId: registro.slaveId,
+        FuncaoModbus: registro.funcaoModbus,
+        EnderecoRegistro: registro.enderecoRegistro,
+        QuantidadeRegistros: registro.quantidadeRegistros,
+        TipoDado: registro.tipoDado,
+        ByteOrder: registro.byteOrder,
+        FatorConversao: registro.fatorConversao,
+        Offset: registro.offset,
+        Unidade: registro.unidade,
+        OrdemLeitura: registro.ordemLeitura,
+        Ativo: registro.ativo
+      }
+
+      if (registro.id > 0) {
+        // Atualizar registro existente
+        await api.put(`/ModbusConfig/${registro.id}`, registroToSend)
+        setMessage({ type: 'success', text: 'Registro Modbus atualizado com sucesso!' })
+      } else {
+        // Criar novo registro - remove Id para criação
+        const { Id, ...registroToCreate } = registroToSend
+        const response = await api.post('/ModbusConfig', registroToCreate)
+        // Mapeia a resposta de volta para camelCase
+        const newRegistro = {
+          id: response.data.id || response.data.Id,
+          nome: response.data.nome || response.data.Nome,
+          descricao: response.data.descricao || response.data.Descricao,
+          ipAddress: response.data.ipAddress || response.data.IpAddress,
+          port: response.data.port || response.data.Port,
+          slaveId: response.data.slaveId || response.data.SlaveId,
+          funcaoModbus: response.data.funcaoModbus || response.data.FuncaoModbus,
+          enderecoRegistro: response.data.enderecoRegistro || response.data.EnderecoRegistro,
+          quantidadeRegistros: response.data.quantidadeRegistros || response.data.QuantidadeRegistros || 1,
+          tipoDado: response.data.tipoDado || response.data.TipoDado,
+          byteOrder: response.data.byteOrder || response.data.ByteOrder,
+          fatorConversao: response.data.fatorConversao || response.data.FatorConversao,
+          offset: response.data.offset || response.data.Offset,
+          unidade: response.data.unidade || response.data.Unidade,
+          ordemLeitura: response.data.ordemLeitura || response.data.OrdemLeitura,
+          ativo: response.data.ativo !== undefined ? response.data.ativo : (response.data.Ativo !== undefined ? response.data.Ativo : true)
+        }
+        // Atualizar o ID do registro local com o retornado pelo servidor
+        setModbusRegistros(prevRegistros =>
+          prevRegistros.map(r => r === registro ? newRegistro : r)
+        )
+        setMessage({ type: 'success', text: 'Registro Modbus criado com sucesso!' })
+      }
+      // Recarregar registros para garantir sincronização
+      await loadModbusRegistros()
+    } catch (error) {
+      console.error('Erro ao salvar registro Modbus:', error)
+      setMessage({ type: 'error', text: 'Erro ao salvar registro Modbus' })
+    }
   }
 
   const handleAddRegistro = () => {
-    if (!config) return
-
-    const registros = Array.isArray(config.modbusRegistros) ? config.modbusRegistros : []
-    const newId = Math.max(...registros.map(r => r.id), 0) + 1
+    const maxId = modbusRegistros.length > 0 ? Math.max(...modbusRegistros.map(r => r.id), 0) : 0
+    const newId = -(maxId + 1) // ID temporário negativo para novos registros
     const newRegistro: ModbusRegistro = {
       id: newId,
       nome: '',
@@ -125,23 +224,29 @@ const Configuracoes = () => {
       quantidadeRegistros: 1,
       tipoDado: 'UInt16',
       byteOrder: 'BigEndian',
-      ordemLeitura: registros.length + 1,
+      ordemLeitura: modbusRegistros.length + 1,
       ativo: true
     }
 
-    setConfig({
-      ...config,
-      modbusRegistros: [...(Array.isArray(config.modbusRegistros) ? config.modbusRegistros : []), newRegistro]
-    })
+    setModbusRegistros([...modbusRegistros, newRegistro])
   }
 
-  const handleRemoveRegistro = (id: number) => {
-    if (!config) return
+  const handleRemoveRegistro = async (id: number) => {
+    try {
+      // Se for um registro novo (ID negativo), apenas remove do estado
+      if (id < 0) {
+        setModbusRegistros(prevRegistros => prevRegistros.filter(r => r.id !== id))
+        return
+      }
 
-    setConfig({
-      ...config,
-      modbusRegistros: (Array.isArray(config.modbusRegistros) ? config.modbusRegistros : []).filter(r => r.id !== id)
-    })
+      // Se for um registro existente, deleta do banco
+      await api.delete(`/ModbusConfig/${id}`)
+      setModbusRegistros(prevRegistros => prevRegistros.filter(r => r.id !== id))
+      setMessage({ type: 'success', text: 'Registro Modbus removido com sucesso!' })
+    } catch (error) {
+      console.error('Erro ao remover registro Modbus:', error)
+      setMessage({ type: 'error', text: 'Erro ao remover registro Modbus' })
+    }
   }
 
   if (loading) {
@@ -306,7 +411,7 @@ const Configuracoes = () => {
                 </tr>
               </thead>
               <tbody>
-                {(Array.isArray(config.modbusRegistros) ? config.modbusRegistros : [])
+                {modbusRegistros
                   .sort((a, b) => a.ordemLeitura - b.ordemLeitura)
                   .map(registro => (
                     <tr key={registro.id}>
@@ -315,6 +420,7 @@ const Configuracoes = () => {
                           type="text"
                           value={registro.nome}
                           onChange={(e) => handleRegistroChange(registro.id, 'nome', e.target.value)}
+                          onBlur={() => handleSaveRegistro(registro)}
                           className="table-input"
                         />
                       </td>
@@ -323,6 +429,7 @@ const Configuracoes = () => {
                           type="text"
                           value={registro.ipAddress}
                           onChange={(e) => handleRegistroChange(registro.id, 'ipAddress', e.target.value)}
+                          onBlur={() => handleSaveRegistro(registro)}
                           className="table-input"
                         />
                       </td>
@@ -331,6 +438,7 @@ const Configuracoes = () => {
                           type="number"
                           value={registro.port}
                           onChange={(e) => handleRegistroChange(registro.id, 'port', parseInt(e.target.value))}
+                          onBlur={() => handleSaveRegistro(registro)}
                           className="table-input"
                         />
                       </td>
@@ -339,6 +447,7 @@ const Configuracoes = () => {
                           type="number"
                           value={registro.slaveId}
                           onChange={(e) => handleRegistroChange(registro.id, 'slaveId', parseInt(e.target.value))}
+                          onBlur={() => handleSaveRegistro(registro)}
                           className="table-input"
                         />
                       </td>
@@ -346,6 +455,7 @@ const Configuracoes = () => {
                         <select
                           value={registro.funcaoModbus}
                           onChange={(e) => handleRegistroChange(registro.id, 'funcaoModbus', e.target.value)}
+                          onBlur={() => handleSaveRegistro(registro)}
                           className="table-input"
                         >
                           <option value="ReadHoldingRegisters">Read Holding Registers</option>
@@ -360,6 +470,7 @@ const Configuracoes = () => {
                           type="number"
                           value={registro.enderecoRegistro}
                           onChange={(e) => handleRegistroChange(registro.id, 'enderecoRegistro', parseInt(e.target.value))}
+                          onBlur={() => handleSaveRegistro(registro)}
                           className="table-input"
                         />
                       </td>
@@ -367,6 +478,7 @@ const Configuracoes = () => {
                         <select
                           value={registro.tipoDado}
                           onChange={(e) => handleRegistroChange(registro.id, 'tipoDado', e.target.value)}
+                          onBlur={() => handleSaveRegistro(registro)}
                           className="table-input"
                         >
                           <option value="UInt16">UInt16</option>
@@ -382,6 +494,7 @@ const Configuracoes = () => {
                           type="number"
                           value={registro.ordemLeitura}
                           onChange={(e) => handleRegistroChange(registro.id, 'ordemLeitura', parseInt(e.target.value))}
+                          onBlur={() => handleSaveRegistro(registro)}
                           className="table-input"
                         />
                       </td>
@@ -389,7 +502,10 @@ const Configuracoes = () => {
                         <input
                           type="checkbox"
                           checked={registro.ativo}
-                          onChange={(e) => handleRegistroChange(registro.id, 'ativo', e.target.checked)}
+                          onChange={(e) => {
+                            handleRegistroChange(registro.id, 'ativo', e.target.checked)
+                            handleSaveRegistro({ ...registro, ativo: e.target.checked })
+                          }}
                         />
                       </td>
                       <td>
@@ -403,6 +519,13 @@ const Configuracoes = () => {
                       </td>
                     </tr>
                   ))}
+                {modbusRegistros.length === 0 && (
+                  <tr>
+                    <td colSpan={10} style={{ textAlign: 'center', padding: '20px' }}>
+                      Nenhum registro Modbus encontrado. Clique em "Adicionar Registro" para criar um novo.
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>

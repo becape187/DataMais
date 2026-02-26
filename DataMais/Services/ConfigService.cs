@@ -18,7 +18,7 @@ public class ConfigService
         // 4. .env no diretório da aplicação
         _envFilePath = envFilePath 
             ?? Environment.GetEnvironmentVariable("DATAMAIS_ENV_FILE")
-            ?? "/home/becape/datamais.env"
+            ?? (File.Exists("/home/becape/datamais.env") ? "/home/becape/datamais.env" : null)
             ?? Path.Combine(AppContext.BaseDirectory, ".env");
         _config = LoadConfig();
     }
@@ -37,6 +37,49 @@ public class ConfigService
         {
             Env.Load(_envFilePath);
         }
+        else
+        {
+            // Log warning se o arquivo não existir
+            Console.WriteLine($"⚠️ Arquivo .env não encontrado em: {_envFilePath}");
+        }
+
+        var password = Environment.GetEnvironmentVariable("POSTGRES_PASSWORD");
+        
+        // Validação: se a senha estiver vazia, tenta carregar novamente ou loga aviso
+        if (string.IsNullOrWhiteSpace(password))
+        {
+            Console.WriteLine($"⚠️ POSTGRES_PASSWORD não está definida ou está vazia. Arquivo .env: {_envFilePath}");
+            Console.WriteLine($"   Arquivo existe: {File.Exists(_envFilePath)}");
+            if (File.Exists(_envFilePath))
+            {
+                Console.WriteLine($"   Conteúdo do arquivo (primeiras 10 linhas):");
+                try
+                {
+                    var lines = File.ReadAllLines(_envFilePath).Take(10);
+                    foreach (var line in lines)
+                    {
+                        // Não mostra a senha completa, apenas indica se existe
+                        if (line.Contains("POSTGRES_PASSWORD", StringComparison.OrdinalIgnoreCase))
+                        {
+                            var parts = line.Split('=', 2);
+                            if (parts.Length == 2)
+                            {
+                                var hasValue = !string.IsNullOrWhiteSpace(parts[1]);
+                                Console.WriteLine($"   {parts[0]}={'*'.PadRight(Math.Min(parts[1]?.Length ?? 0, 10), '*')} (tem valor: {hasValue})");
+                            }
+                        }
+                        else
+                        {
+                            Console.WriteLine($"   {line}");
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"   Erro ao ler arquivo: {ex.Message}");
+                }
+            }
+        }
 
         return new AppConfig
         {
@@ -46,7 +89,7 @@ public class ConfigService
                 Port = int.Parse(Environment.GetEnvironmentVariable("POSTGRES_PORT") ?? "5432"),
                 Database = Environment.GetEnvironmentVariable("POSTGRES_DATABASE") ?? "datamais",
                 Username = Environment.GetEnvironmentVariable("POSTGRES_USER") ?? "postgres",
-                Password = Environment.GetEnvironmentVariable("POSTGRES_PASSWORD") ?? ""
+                Password = password ?? ""
             },
             Influx = new InfluxConfig
             {

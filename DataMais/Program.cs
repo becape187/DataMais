@@ -38,6 +38,18 @@ if (builder.Environment.IsProduction())
 // Configuração do Entity Framework com PostgreSQL
 var connectionString = $"Host={appConfig.Database.Host};Port={appConfig.Database.Port};Database={appConfig.Database.Database};Username={appConfig.Database.Username};Password={appConfig.Database.Password}";
 
+// Validação da connection string
+if (string.IsNullOrWhiteSpace(appConfig.Database.Password))
+{
+    Console.WriteLine("❌ ERRO: Senha do PostgreSQL não está configurada!");
+    Console.WriteLine($"   Arquivo .env esperado em: {configService.GetEnvFilePath()}");
+    Console.WriteLine($"   Host: {appConfig.Database.Host}");
+    Console.WriteLine($"   Database: {appConfig.Database.Database}");
+    Console.WriteLine($"   Username: {appConfig.Database.Username}");
+    Console.WriteLine("   Password: (VAZIO)");
+    throw new InvalidOperationException("A senha do PostgreSQL não está configurada. Verifique o arquivo .env e a variável POSTGRES_PASSWORD.");
+}
+
 builder.Services.AddDbContext<DataMaisDbContext>(options =>
     options.UseNpgsql(connectionString));
 
