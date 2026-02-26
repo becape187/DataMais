@@ -75,8 +75,10 @@ sudo visudo
 
 Adicionar linha (substitua `becape` pelo seu usuário SSH):
 ```
-becape ALL=(ALL) NOPASSWD: /usr/bin/cp /etc/systemd/system/datamais.service, /usr/bin/chown, /usr/bin/chmod, /usr/bin/systemctl daemon-reload, /usr/bin/systemctl restart datamais.service, /usr/bin/systemctl status datamais.service
+becape ALL=(ALL) NOPASSWD: /usr/bin/cp, /usr/bin/chown, /usr/bin/chmod, /usr/bin/rm, /usr/bin/tar, /usr/bin/systemctl daemon-reload, /usr/bin/systemctl restart datamais.service, /usr/bin/systemctl status datamais.service
 ```
+
+**Importante**: Isso permite que o usuário execute esses comandos específicos sem senha, necessário para o deploy automático funcionar.
 
 #### 2. Criar diretórios
 
