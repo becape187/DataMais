@@ -3,7 +3,7 @@ Description=DataMais API Service
 After=network.target postgresql.service influxdb.service
 
 [Service]
-Type=notify
+Type=simple
 User=becape
 Group=becape
 WorkingDirectory=/home/becape/datamais.api
@@ -15,6 +15,7 @@ SyslogIdentifier=datamais
 Environment=ASPNETCORE_ENVIRONMENT=Production
 Environment=DOTNET_PRINT_TELEMETRY_MESSAGE=false
 EnvironmentFile=/home/becape/datamais.env
+TimeoutStartSec=30
 
 # Security
 NoNewPrivileges=true
