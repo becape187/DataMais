@@ -15,7 +15,7 @@ interface ModbusRegistro {
 }
 
 // Versão do Layout - incrementar quando houver mudanças importantes
-// v1.0.2 - Botões Avança/Recua agora são momentâneos (pressionar = true, soltar = false)
+// v1.0.3 - Adicionada atualização em tempo real das pressões (PRESSAO_A e PRESSAO_B) a cada 1 segundo
 
 const Layout = ({ children }: LayoutProps) => {
   const location = useLocation()
@@ -23,9 +23,13 @@ const Layout = ({ children }: LayoutProps) => {
   const [processando, setProcessando] = useState(false)
   const [avancaPressionado, setAvancaPressionado] = useState(false)
   const [recuaPressionado, setRecuaPressionado] = useState(false)
+  const [pressaoA, setPressaoA] = useState<number | null>(null)
+  const [pressaoB, setPressaoB] = useState<number | null>(null)
   const [registros, setRegistros] = useState<{
     avanca?: ModbusRegistro
     recua?: ModbusRegistro
+    pressaoA?: ModbusRegistro
+    pressaoB?: ModbusRegistro
   }>({})
 
   const isActive = (path: string) => location.pathname === path
@@ -39,13 +43,22 @@ const Layout = ({ children }: LayoutProps) => {
         
         const avancaReg = todosRegistros.find((r: any) => r.nome === 'BOTAO_AVANCA_IHM' && r.ativo)
         const recuaReg = todosRegistros.find((r: any) => r.nome === 'BOTAO_RECUA_IHM' && r.ativo)
+        const pressaoAReg = todosRegistros.find((r: any) => r.nome === 'PRESSAO_A' && r.ativo)
+        const pressaoBReg = todosRegistros.find((r: any) => r.nome === 'PRESSAO_B' && r.ativo)
         
         setRegistros({
           avanca: avancaReg,
-          recua: recuaReg
+          recua: recuaReg,
+          pressaoA: pressaoAReg,
+          pressaoB: pressaoBReg
         })
         
-        console.log('Registros Modbus encontrados na sidebar:', { avanca: avancaReg, recua: recuaReg })
+        console.log('Registros Modbus encontrados na sidebar:', { 
+          avanca: avancaReg, 
+          recua: recuaReg,
+          pressaoA: pressaoAReg,
+          pressaoB: pressaoBReg
+        })
       } catch (err) {
         console.error('Erro ao buscar registros Modbus:', err)
       }
@@ -92,6 +105,46 @@ const Layout = ({ children }: LayoutProps) => {
     const interval = setInterval(buscarStatusMotor, 2000)
     return () => clearInterval(interval)
   }, [])
+
+  // Atualiza as pressões em tempo real a cada 1 segundo
+  useEffect(() => {
+    if (!registros.pressaoA && !registros.pressaoB) return
+
+    const atualizarPressoes = async () => {
+      try {
+        // Lê Pressão A
+        if (registros.pressaoA) {
+          try {
+            const response = await api.get(`/ModbusConfig/${registros.pressaoA.id}/read`)
+            const valor = Number(response.data.valor)
+            setPressaoA(isNaN(valor) ? null : valor)
+          } catch (err) {
+            console.error('Erro ao ler Pressão A:', err)
+            setPressaoA(null)
+          }
+        }
+
+        // Lê Pressão B
+        if (registros.pressaoB) {
+          try {
+            const response = await api.get(`/ModbusConfig/${registros.pressaoB.id}/read`)
+            const valor = Number(response.data.valor)
+            setPressaoB(isNaN(valor) ? null : valor)
+          } catch (err) {
+            console.error('Erro ao ler Pressão B:', err)
+            setPressaoB(null)
+          }
+        }
+      } catch (err) {
+        console.error('Erro ao atualizar pressões:', err)
+      }
+    }
+
+    // Atualiza imediatamente e depois a cada 1 segundo
+    atualizarPressoes()
+    const interval = setInterval(atualizarPressoes, 1000)
+    return () => clearInterval(interval)
+  }, [registros.pressaoA?.id, registros.pressaoB?.id])
 
   const handleLigaDesliga = async () => {
     console.log('🔵 Botão Liga/Desliga da sidebar CLICADO!', { isLigado, processando })
@@ -268,26 +321,26 @@ const Layout = ({ children }: LayoutProps) => {
         <div className="hidraulica-controls">
           <div className="hidraulica-display">
             <div className="display-row">
-              <div className="display-box carga-box">
-                <span className="display-value">
-                  0.0<span className="display-unit">ton</span>
+              <div className="display-box pressao-box">
+                <span className="display-value pressao-value">
+                  {pressaoA !== null ? pressaoA.toFixed(1) : '--'}<span className="display-unit">bar</span>
                 </span>
               </div>
-              <div className="display-box carga-box">
-                <span className="display-value">
-                  0.0<span className="display-unit">ton</span>
+              <div className="display-box pressao-box">
+                <span className="display-value pressao-value">
+                  {pressaoB !== null ? pressaoB.toFixed(1) : '--'}<span className="display-unit">bar</span>
                 </span>
               </div>
             </div>
             <div className="display-row">
-              <div className="display-box pressao-box">
-                <span className="display-value pressao-value">
-                  0.0<span className="display-unit">bar</span>
+              <div className="display-box carga-box">
+                <span className="display-value">
+                  0.0<span className="display-unit">ton</span>
                 </span>
               </div>
-              <div className="display-box pressao-box">
-                <span className="display-value pressao-value">
-                  0.0<span className="display-unit">bar</span>
+              <div className="display-box carga-box">
+                <span className="display-value">
+                  0.0<span className="display-unit">ton</span>
                 </span>
               </div>
             </div>
