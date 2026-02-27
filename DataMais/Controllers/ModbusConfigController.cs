@@ -103,6 +103,13 @@ public class ModbusConfigController : ControllerBase
             var mappings = mappingProperty.EnumerateArray();
             var ordemLeitura = 1;
             var novosRegistros = new List<ModbusConfig>();
+            var registrosAtualizados = 0;
+            var registrosIgnorados = 0;
+
+            // Buscar registros existentes do mesmo IP para verificação de duplicatas
+            var registrosExistentes = await _context.ModbusConfigs
+                .Where(m => m.IpAddress == ipAddress)
+                .ToListAsync();
 
             foreach (var mapping in mappings)
             {
@@ -138,44 +145,94 @@ public class ModbusConfigController : ControllerBase
                     _ => "UInt16"
                 };
 
-                var registro = new ModbusConfig
-                {
-                    Nome = variable,
-                    Descricao = $"Registro Modbus {variable} (Address: {address}, Type: {datatype})",
-                    IpAddress = ipAddress,
-                    Port = port,
-                    SlaveId = (byte)slaveId,
-                    FuncaoModbus = funcaoModbus,
-                    EnderecoRegistro = address,
-                    QuantidadeRegistros = 1,
-                    TipoDado = tipoDado,
-                    ByteOrder = "BigEndian",
-                    OrdemLeitura = ordemLeitura++,
-                    Ativo = true,
-                    DataCriacao = DateTime.UtcNow
-                };
+                // Verificar se já existe registro com mesmo nome, função E endereço
+                // Permite múltiplos registros com mesmo nome e função, desde que tenham endereços diferentes
+                var registroExistente = registrosExistentes
+                    .FirstOrDefault(r => r.Nome == variable && 
+                                        r.FuncaoModbus == funcaoModbus && 
+                                        r.EnderecoRegistro == address &&
+                                        r.IpAddress == ipAddress);
 
-                novosRegistros.Add(registro);
+                if (registroExistente != null)
+                {
+                    // Atualizar registro existente (mesmo nome, função e endereço)
+                    registroExistente.Descricao = $"Registro Modbus {variable} (Address: {address}, Type: {datatype})";
+                    registroExistente.TipoDado = tipoDado;
+                    registroExistente.OrdemLeitura = ordemLeitura++;
+                    registroExistente.DataAtualizacao = DateTime.UtcNow;
+                    registroExistente.Ativo = true;
+                    registrosAtualizados++;
+                    _logger.LogInformation($"Atualizado registro existente: {variable} ({funcaoModbus}) no endereço {address}");
+                }
+                else
+                {
+                    // Verificar se existe registro com mesmo nome e função mas endereço diferente
+                    var registroComMesmoNomeFuncao = registrosExistentes
+                        .FirstOrDefault(r => r.Nome == variable && r.FuncaoModbus == funcaoModbus);
+                    
+                    if (registroComMesmoNomeFuncao != null)
+                    {
+                        _logger.LogInformation($"Nome '{variable}' com função '{funcaoModbus}' já existe no endereço {registroComMesmoNomeFuncao.EnderecoRegistro}, criando novo registro no endereço {address}");
+                    }
+                    else
+                    {
+                        // Verificar se existe registro com mesmo nome mas função diferente (permitido)
+                        var registroComMesmoNome = registrosExistentes
+                            .FirstOrDefault(r => r.Nome == variable && r.FuncaoModbus != funcaoModbus);
+                        
+                        if (registroComMesmoNome != null)
+                        {
+                            _logger.LogInformation($"Nome '{variable}' já existe com função diferente ({registroComMesmoNome.FuncaoModbus}), criando novo registro com função {funcaoModbus}");
+                        }
+                    }
+
+                    // Criar novo registro (permite mesmo nome e função se endereço for diferente)
+                    var registro = new ModbusConfig
+                    {
+                        Nome = variable,
+                        Descricao = $"Registro Modbus {variable} (Address: {address}, Type: {datatype})",
+                        IpAddress = ipAddress,
+                        Port = port,
+                        SlaveId = (byte)slaveId,
+                        FuncaoModbus = funcaoModbus,
+                        EnderecoRegistro = address,
+                        QuantidadeRegistros = 1,
+                        TipoDado = tipoDado,
+                        ByteOrder = "BigEndian",
+                        OrdemLeitura = ordemLeitura++,
+                        Ativo = true,
+                        DataCriacao = DateTime.UtcNow
+                    };
+
+                    novosRegistros.Add(registro);
+                }
             }
 
-            // Inserir no banco
-            await _context.ModbusConfigs.AddRangeAsync(novosRegistros);
+            // Inserir novos registros no banco
+            if (novosRegistros.Any())
+            {
+                await _context.ModbusConfigs.AddRangeAsync(novosRegistros);
+            }
+            
             await _context.SaveChangesAsync();
 
+            var totalProcessados = novosRegistros.Count + registrosAtualizados;
             var resumo = new
             {
-                total = novosRegistros.Count,
+                total = totalProcessados,
+                novos = novosRegistros.Count,
+                atualizados = registrosAtualizados,
                 coils = novosRegistros.Count(r => r.FuncaoModbus == "ReadCoils"),
                 discreteInputs = novosRegistros.Count(r => r.FuncaoModbus == "ReadInputs"),
                 holdingRegisters = novosRegistros.Count(r => r.FuncaoModbus == "ReadHoldingRegisters"),
                 inputRegisters = novosRegistros.Count(r => r.FuncaoModbus == "ReadInputRegisters")
             };
 
-            _logger.LogInformation($"Importados {novosRegistros.Count} registros Modbus para {ipAddress}");
+            _logger.LogInformation($"Importados {novosRegistros.Count} novos registros e atualizados {registrosAtualizados} registros Modbus para {ipAddress}");
 
             return Ok(new
             {
-                message = $"{novosRegistros.Count} registros Modbus importados com sucesso!",
+                message = $"{totalProcessados} registros Modbus processados com sucesso! ({novosRegistros.Count} novos, {registrosAtualizados} atualizados)",
                 resumo
             });
         }
@@ -427,6 +484,98 @@ public class ModbusConfigController : ControllerBase
         {
             _logger.LogError(ex, "Erro ao buscar configurações Modbus por nome: {Erro}", ex.Message);
             return StatusCode(500, new { message = "Erro ao buscar configurações Modbus", error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Lista variáveis HoldingRegister (para escrita de word)
+    /// </summary>
+    [HttpGet("holding-registers")]
+    public async Task<IActionResult> GetHoldingRegisters()
+    {
+        try
+        {
+            var configs = await _context.ModbusConfigs
+                .Where(c => c.Ativo && c.FuncaoModbus == "ReadHoldingRegisters")
+                .OrderBy(c => c.Nome)
+                .Select(c => new { c.Id, c.Nome, c.Descricao, c.EnderecoRegistro, c.TipoDado })
+                .ToListAsync();
+
+            return Ok(configs);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Erro ao listar HoldingRegisters");
+            return StatusCode(500, new { message = "Erro ao listar HoldingRegisters", error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Lista variáveis InputRegister (para leitura)
+    /// </summary>
+    [HttpGet("input-registers")]
+    public async Task<IActionResult> GetInputRegisters()
+    {
+        try
+        {
+            var configs = await _context.ModbusConfigs
+                .Where(c => c.Ativo && c.FuncaoModbus == "ReadInputRegisters")
+                .OrderBy(c => c.Nome)
+                .Select(c => new { c.Id, c.Nome, c.Descricao, c.EnderecoRegistro, c.TipoDado })
+                .ToListAsync();
+
+            return Ok(configs);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Erro ao listar InputRegisters");
+            return StatusCode(500, new { message = "Erro ao listar InputRegisters", error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Lista variáveis Coil (para saída coil)
+    /// </summary>
+    [HttpGet("coils")]
+    public async Task<IActionResult> GetCoils()
+    {
+        try
+        {
+            var configs = await _context.ModbusConfigs
+                .Where(c => c.Ativo && c.FuncaoModbus == "ReadCoils")
+                .OrderBy(c => c.Nome)
+                .Select(c => new { c.Id, c.Nome, c.Descricao, c.EnderecoRegistro, c.TipoDado })
+                .ToListAsync();
+
+            return Ok(configs);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Erro ao listar Coils");
+            return StatusCode(500, new { message = "Erro ao listar Coils", error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Lista variáveis InputDiscrete (para leitura de bit)
+    /// </summary>
+    [HttpGet("discrete-inputs")]
+    public async Task<IActionResult> GetDiscreteInputs()
+    {
+        try
+        {
+            var configs = await _context.ModbusConfigs
+                .Where(c => c.Ativo && c.FuncaoModbus == "ReadInputs")
+                .OrderBy(c => c.Nome)
+                .Select(c => new { c.Id, c.Nome, c.Descricao, c.EnderecoRegistro, c.TipoDado })
+                .ToListAsync();
+
+            return Ok(configs);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Erro ao listar DiscreteInputs");
+            return StatusCode(500, new { message = "Erro ao listar DiscreteInputs", error = ex.Message });
         }
     }
 

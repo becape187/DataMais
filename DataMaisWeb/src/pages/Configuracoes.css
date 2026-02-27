@@ -65,6 +65,12 @@
   margin-bottom: 20px;
 }
 
+.section-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
 .section-header h2 {
   margin: 0;
   padding-bottom: 12px;
@@ -208,4 +214,75 @@ table td {
 
 .btn-icon:hover {
   background-color: var(--bg-light);
+}
+
+/* Import Dialog Styles */
+.import-dialog {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+  padding: 20px;
+}
+
+.import-dialog-content {
+  background: var(--white);
+  border-radius: 12px;
+  padding: 32px;
+  max-width: 600px;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+}
+
+.import-dialog-content h3 {
+  margin: 0 0 24px 0;
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--modec-navy);
+  padding-bottom: 16px;
+  border-bottom: 2px solid var(--modec-red);
+}
+
+.import-file-section {
+  margin: 24px 0;
+  padding: 24px;
+  background: var(--bg-light);
+  border-radius: 8px;
+  text-align: center;
+}
+
+.file-input-label {
+  display: inline-block;
+  cursor: pointer;
+  padding: 12px 24px;
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  transition: all 0.2s;
+}
+
+.file-input-label:hover:not(:disabled) {
+  background: #c01e24;
+}
+
+.file-input-label:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.import-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 24px;
+  padding-top: 24px;
+  border-top: 1px solid var(--border-color);
 }

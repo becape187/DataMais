@@ -3,6 +3,7 @@ using System;
 using DataMais.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace DataMais.Migrations
 {
     [DbContext(typeof(DataMaisDbContext))]
-    partial class DataMaisDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260227170929_RemoveUniqueIndexNomeModbusConfig")]
+    partial class RemoveUniqueIndexNomeModbusConfig
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -146,7 +149,7 @@ namespace DataMais.Migrations
                     b.HasIndex("ClienteId", "CodigoCliente")
                         .IsUnique();
 
-                    b.ToTable("Cilindros", (string)null);
+                    b.ToTable("Cilindros");
                 });
 
             modelBuilder.Entity("DataMais.Models.Cliente", b =>
@@ -187,7 +190,7 @@ namespace DataMais.Migrations
 
                     b.HasIndex("Email");
 
-                    b.ToTable("Clientes", (string)null);
+                    b.ToTable("Clientes");
                 });
 
             modelBuilder.Entity("DataMais.Models.Ensaio", b =>
@@ -241,7 +244,7 @@ namespace DataMais.Migrations
 
                     b.HasIndex("Status");
 
-                    b.ToTable("Ensaios", (string)null);
+                    b.ToTable("Ensaios");
                 });
 
             modelBuilder.Entity("DataMais.Models.ModbusConfig", b =>
@@ -321,10 +324,9 @@ namespace DataMais.Migrations
 
                     b.HasIndex("IpAddress", "OrdemLeitura");
 
-                    b.HasIndex("Nome", "FuncaoModbus")
-                        .IsUnique();
+                    b.HasIndex("Nome", "FuncaoModbus");
 
-                    b.ToTable("ModbusConfigs", (string)null);
+                    b.ToTable("ModbusConfigs");
                 });
 
             modelBuilder.Entity("DataMais.Models.Relatorio", b =>
@@ -379,7 +381,7 @@ namespace DataMais.Migrations
                     b.HasIndex("Numero")
                         .IsUnique();
 
-                    b.ToTable("Relatorios", (string)null);
+                    b.ToTable("Relatorios");
                 });
 
             modelBuilder.Entity("DataMais.Models.Sensor", b =>
@@ -439,7 +441,7 @@ namespace DataMais.Migrations
                     b.HasIndex("Nome")
                         .IsUnique();
 
-                    b.ToTable("Sensores", (string)null);
+                    b.ToTable("Sensores");
                 });
 
             modelBuilder.Entity("DataMais.Models.Usuario", b =>
@@ -486,7 +488,7 @@ namespace DataMais.Migrations
                     b.HasIndex("Email")
                         .IsUnique();
 
-                    b.ToTable("Usuarios", (string)null);
+                    b.ToTable("Usuarios");
                 });
 
             modelBuilder.Entity("DataMais.Models.Cilindro", b =>

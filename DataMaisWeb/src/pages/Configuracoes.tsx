@@ -48,6 +48,14 @@ const Configuracoes = () => {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
+  const [importing, setImporting] = useState(false)
+  const [showImportDialog, setShowImportDialog] = useState(false)
+  const [importConfig, setImportConfig] = useState({
+    ipAddress: 'modec.automais.cloud',
+    port: 502,
+    slaveId: 1,
+    replaceExisting: false
+  })
 
   useEffect(() => {
     loadAllData()
@@ -249,6 +257,75 @@ const Configuracoes = () => {
     }
   }
 
+  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    if (!file.name.endsWith('.json')) {
+      setMessage({ type: 'error', text: 'Por favor, selecione um arquivo JSON' })
+      return
+    }
+
+    const reader = new FileReader()
+    reader.onload = async (e) => {
+      try {
+        const jsonContent = e.target?.result as string
+        await handleImportJson(jsonContent)
+      } catch (error) {
+        console.error('Erro ao ler arquivo:', error)
+        setMessage({ type: 'error', text: 'Erro ao ler arquivo JSON' })
+      }
+    }
+    reader.readAsText(file)
+    
+    // Limpa o input para permitir selecionar o mesmo arquivo novamente
+    event.target.value = ''
+  }
+
+  const handleImportJson = async (jsonContent: string) => {
+    setImporting(true)
+    setMessage(null)
+
+    try {
+      // Valida se é um JSON válido
+      JSON.parse(jsonContent)
+
+      const requestData = {
+        jsonContent: jsonContent,
+        ipAddress: importConfig.ipAddress || undefined,
+        port: importConfig.port || undefined,
+        slaveId: importConfig.slaveId || undefined,
+        replaceExisting: importConfig.replaceExisting || undefined
+      }
+
+      const response = await api.post('/ModbusConfig/import', requestData)
+      
+      // Mostra mensagem de sucesso com resumo
+      const resumo = response.data.resumo || {}
+      const mensagem = response.data.message || 'Importação realizada com sucesso!'
+      const detalhes = resumo.total ? `\n${resumo.novos || 0} novos, ${resumo.atualizados || 0} atualizados` : ''
+      
+      setMessage({ 
+        type: 'success', 
+        text: `${mensagem}${detalhes}` 
+      })
+
+      // Fecha o diálogo e recarrega os registros
+      setShowImportDialog(false)
+      await loadModbusRegistros()
+    } catch (error: any) {
+      console.error('Erro ao importar JSON:', error)
+      const errorMessage = error.response?.data?.message || error.message || 'Erro ao importar arquivo JSON'
+      setMessage({ type: 'error', text: errorMessage })
+    } finally {
+      setImporting(false)
+    }
+  }
+
+  const handleImportClick = () => {
+    setShowImportDialog(true)
+  }
+
   if (loading) {
     return <div className="configuracoes">Carregando...</div>
   }
@@ -390,10 +467,83 @@ const Configuracoes = () => {
         <section className="config-section">
           <div className="section-header">
             <h2>Registros Modbus</h2>
-            <button className="btn btn-secondary" onClick={handleAddRegistro}>
-              ➕ Adicionar Registro
-            </button>
+            <div className="section-actions">
+              <button className="btn btn-secondary" onClick={handleImportClick}>
+                📤 Importar JSON
+              </button>
+              <button className="btn btn-secondary" onClick={handleAddRegistro}>
+                ➕ Adicionar Registro
+              </button>
+            </div>
           </div>
+
+          {showImportDialog && (
+            <div className="import-dialog">
+              <div className="import-dialog-content">
+                <h3>Importar Configuração Modbus (JSON)</h3>
+                <div className="form-grid">
+                  <div className="form-group">
+                    <label>IP Address</label>
+                    <input
+                      type="text"
+                      value={importConfig.ipAddress}
+                      onChange={(e) => setImportConfig({ ...importConfig, ipAddress: e.target.value })}
+                      placeholder="modec.automais.cloud"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Porta</label>
+                    <input
+                      type="number"
+                      value={importConfig.port}
+                      onChange={(e) => setImportConfig({ ...importConfig, port: parseInt(e.target.value) || 502 })}
+                      placeholder="502"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Slave ID</label>
+                    <input
+                      type="number"
+                      value={importConfig.slaveId}
+                      onChange={(e) => setImportConfig({ ...importConfig, slaveId: parseInt(e.target.value) || 1 })}
+                      placeholder="1"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={importConfig.replaceExisting}
+                        onChange={(e) => setImportConfig({ ...importConfig, replaceExisting: e.target.checked })}
+                      />
+                      {' '}Substituir registros existentes do mesmo IP
+                    </label>
+                  </div>
+                </div>
+                <div className="import-file-section">
+                  <input
+                    type="file"
+                    accept=".json"
+                    onChange={handleFileSelect}
+                    id="json-file-input"
+                    style={{ display: 'none' }}
+                  />
+                  <label htmlFor="json-file-input" className="btn btn-primary file-input-label">
+                    {importing ? '⏳ Importando...' : '📁 Selecionar Arquivo JSON'}
+                  </label>
+                </div>
+                <div className="import-dialog-actions">
+                  <button 
+                    className="btn btn-secondary" 
+                    onClick={() => setShowImportDialog(false)}
+                    disabled={importing}
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
           <div className="table-container">
             <table>
               <thead>

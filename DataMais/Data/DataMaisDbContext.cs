@@ -44,8 +44,11 @@ public class DataMaisDbContext : DbContext
         // Configuração de ModbusConfig
         modelBuilder.Entity<ModbusConfig>(entity =>
         {
-            entity.HasIndex(e => e.Nome).IsUnique();
+            // Índice não único para permitir múltiplos registros com mesmo nome (mas funções diferentes)
+            entity.HasIndex(e => e.Nome);
             entity.HasIndex(e => new { e.IpAddress, e.OrdemLeitura });
+            // Índice composto ÚNICO: permite mesmo nome com funções diferentes, mas não duplicatas
+            entity.HasIndex(e => new { e.Nome, e.FuncaoModbus }).IsUnique();
         });
 
         // Configuração de Sensor
