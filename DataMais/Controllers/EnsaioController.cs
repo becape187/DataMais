@@ -397,3 +397,23 @@ namespace DataMais.Controllers;
     }
 }
 
+public class IniciarEnsaioRequest
+{
+    /// <summary>
+    /// Câmara a ser testada: "A" (avança) ou "B" (recua)
+    /// </summary>
+    [Required]
+    public string Camara { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Pressão de carga configurada para o ensaio (bar)
+    /// </summary>
+    [Range(0.01, double.MaxValue, ErrorMessage = "Pressão de carga deve ser maior que zero.")]
+    public decimal PressaoCarga { get; set; }
+
+    /// <summary>
+    /// Tempo de carga configurado para o ensaio (segundos)
+    /// </summary>
+    [Range(0.01, double.MaxValue, ErrorMessage = "Tempo de carga deve ser maior que zero.")]
+    public decimal TempoCarga { get; set; }
+}
