@@ -232,43 +232,22 @@ const Dashboard = () => {
           console.warn('Erro ao buscar sensores:', err)
         }
 
-        // Busca relatórios através dos clientes
+        // Busca últimos relatórios diretamente do endpoint de relatórios
         try {
-          const responseClientes = await api.get('/Cliente')
-          const clientes: Cliente[] = responseClientes.data
+          const responseRelatorios = await api.get('/Relatorio/ultimos?top=3')
+          const dados = responseRelatorios.data as any[]
 
-          const todosRelatorios: Relatorio[] = []
-          for (const cliente of clientes) {
-            try {
-              const responseCliente = await api.get(`/Cliente/${cliente.id}`)
-              const clienteCompleto = responseCliente.data
-              
-              if (clienteCompleto.relatorios && Array.isArray(clienteCompleto.relatorios)) {
-                clienteCompleto.relatorios.forEach((rel: any) => {
-                  todosRelatorios.push({
-                    id: rel.id,
-                    numero: rel.numero || `REL-${rel.id}`,
-                    data: rel.data,
-                    clienteId: cliente.id,
-                    clienteNome: cliente.nome,
-                    cilindroId: rel.cilindroId,
-                    cilindroNome: rel.cilindroNome
-                  })
-                })
-              }
-            } catch (err) {
-              console.warn(`Erro ao buscar relatórios do cliente ${cliente.id}:`, err)
-            }
-          }
+          const ultimos: Relatorio[] = dados.map((rel: any) => ({
+            id: rel.id,
+            numero: rel.numero || `REL-${rel.id}`,
+            data: rel.data,
+            clienteId: rel.clienteId,
+            clienteNome: rel.clienteNome,
+            cilindroId: rel.cilindroId,
+            cilindroNome: rel.cilindroNome
+          }))
 
-          // Ordena por data (mais recentes primeiro) e pega os últimos 3
-          todosRelatorios.sort((a, b) => {
-            const dataA = new Date(a.data).getTime()
-            const dataB = new Date(b.data).getTime()
-            return dataB - dataA
-          })
-
-          setRelatorios(todosRelatorios.slice(0, 3))
+          setRelatorios(ultimos)
         } catch (err) {
           console.warn('Erro ao buscar relatórios:', err)
         }

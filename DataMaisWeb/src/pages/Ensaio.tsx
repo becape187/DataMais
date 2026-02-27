@@ -22,6 +22,9 @@ const Ensaio = () => {
   const [ensaioId, setEnsaioId] = useState<number | null>(null)
   const [dados, setDados] = useState<DataPoint[]>([])
   const [logEventos, setLogEventos] = useState<LogEvento[]>([])
+  const [camara, setCamara] = useState<'A' | 'B' | ''>('')
+  const [pressaoCarga, setPressaoCarga] = useState<string>('')
+  const [tempoCarga, setTempoCarga] = useState<string>('')
 
   useEffect(() => {
     if (!ensaioAtivo || !ensaioId) return
@@ -48,7 +51,29 @@ const Ensaio = () => {
 
   const iniciarEnsaio = async () => {
     try {
-      const response = await api.post('/ensaio/iniciar')
+      const pressaoVal = Number(pressaoCarga.replace(',', '.'))
+      const tempoVal = Number(tempoCarga.replace(',', '.'))
+
+      if (!camara) {
+        alert('Selecione a câmara a ser testada (A ou B).')
+        return
+      }
+
+      if (!pressaoCarga || isNaN(pressaoVal) || pressaoVal <= 0) {
+        alert('Informe uma Pressão de Carga válida (maior que 0).')
+        return
+      }
+
+      if (!tempoCarga || isNaN(tempoVal) || tempoVal <= 0) {
+        alert('Informe um Tempo de Carga válido (maior que 0).')
+        return
+      }
+
+      const response = await api.post('/ensaio/iniciar', {
+        camara,
+        pressaoCarga: pressaoVal,
+        tempoCarga: tempoVal,
+      })
       const id = response.data.id as number
 
       setEnsaioId(id)
@@ -58,7 +83,7 @@ const Ensaio = () => {
 
       const evento: LogEvento = {
         id: Date.now(),
-        texto: `[${new Date().toLocaleTimeString('pt-BR')}] Ensaio iniciado (ID ${id})`,
+        texto: `[${new Date().toLocaleTimeString('pt-BR')}] Ensaio iniciado (ID ${id}) - Câmara ${camara}, Pressão de Carga ${pressaoVal} bar, Tempo de Carga ${tempoVal} s`,
         tipo: 'normal',
         comentarios: 0,
       }
@@ -109,6 +134,40 @@ const Ensaio = () => {
           <p className="page-subtitle">Monitoramento da curva de pressão</p>
         </div>
         <div className="ensaio-controls">
+          <div className="ensaio-config">
+            <div className="config-field">
+              <label>Câmara</label>
+              <select
+                value={camara}
+                onChange={(e) => setCamara(e.target.value as 'A' | 'B' | '')}
+                disabled={ensaioAtivo}
+              >
+                <option value="">Selecione...</option>
+                <option value="A">Câmara A (Avança)</option>
+                <option value="B">Câmara B (Recua)</option>
+              </select>
+            </div>
+            <div className="config-field">
+              <label>Pressão de Carga (bar)</label>
+              <input
+                type="number"
+                step="0.01"
+                value={pressaoCarga}
+                onChange={(e) => setPressaoCarga(e.target.value)}
+                disabled={ensaioAtivo}
+              />
+            </div>
+            <div className="config-field">
+              <label>Tempo de Carga (s)</label>
+              <input
+                type="number"
+                step="0.01"
+                value={tempoCarga}
+                onChange={(e) => setTempoCarga(e.target.value)}
+                disabled={ensaioAtivo}
+              />
+            </div>
+          </div>
           <button 
             className={`btn ${ensaioAtivo ? 'btn-danger' : 'btn-primary'}`}
             onClick={ensaioAtivo ? interromperEnsaio : iniciarEnsaio}

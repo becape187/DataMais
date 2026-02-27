@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace DataMais.Models;
 
@@ -19,6 +20,24 @@ public class Ensaio
 
     [MaxLength(1000)]
     public string? Observacoes { get; set; }
+
+    /// <summary>
+    /// Câmara testada no ensaio (ex: "A" / "B").
+    /// </summary>
+    [MaxLength(20)]
+    public string? CamaraTestada { get; set; }
+
+    /// <summary>
+    /// Pressão de carga configurada para o ensaio (bar).
+    /// </summary>
+    [Column(TypeName = "decimal(10,2)")]
+    public decimal? PressaoCargaConfigurada { get; set; }
+
+    /// <summary>
+    /// Tempo de carga configurado para o ensaio (segundos).
+    /// </summary>
+    [Column(TypeName = "decimal(10,2)")]
+    public decimal? TempoCargaConfigurado { get; set; }
 
     // Relacionamentos
     [Required]

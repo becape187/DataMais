@@ -1,4 +1,6 @@
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import api from '../config/api'
 import './Relatorios.css'
 
 interface Relatorio {
@@ -6,53 +8,41 @@ interface Relatorio {
   numero: string
   cliente: string
   data: string
-  ensaioId: string
+  ensaioId: number | null
+  ensaioNumero?: string | null
   status: 'gerado' | 'pendente'
 }
 
 const Relatorios = () => {
-  const relatorios: Relatorio[] = [
-    {
-      id: 1,
-      numero: 'REL-2024-001',
-      cliente: 'MODEC Brasil',
-      data: '22/12/2024 14:30',
-      ensaioId: '#1234',
-      status: 'gerado'
-    },
-    {
-      id: 2,
-      numero: 'REL-2024-002',
-      cliente: 'MODEC Brasil',
-      data: '22/12/2024 10:15',
-      ensaioId: '#1233',
-      status: 'gerado'
-    },
-    {
-      id: 3,
-      numero: 'REL-2024-003',
-      cliente: 'Petrobras',
-      data: '21/12/2024 16:45',
-      ensaioId: '#1232',
-      status: 'gerado'
-    },
-    {
-      id: 4,
-      numero: 'REL-2024-004',
-      cliente: 'Equinor Brasil',
-      data: '20/12/2024 11:20',
-      ensaioId: '#1231',
-      status: 'gerado'
-    },
-    {
-      id: 5,
-      numero: 'REL-2024-005',
-      cliente: 'MODEC Brasil',
-      data: '19/12/2024 09:00',
-      ensaioId: '#1230',
-      status: 'gerado'
-    },
-  ]
+  const [relatorios, setRelatorios] = useState<Relatorio[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    const carregarRelatorios = async () => {
+      try {
+        const response = await api.get('/Relatorio')
+        const dados = response.data as any[]
+
+        const mapeados: Relatorio[] = dados.map((r) => ({
+          id: r.id,
+          numero: r.numero,
+          cliente: r.clienteNome || 'N/A',
+          data: new Date(r.data).toLocaleString('pt-BR'),
+          ensaioId: r.ensaioId ?? null,
+          ensaioNumero: r.ensaioNumero ?? null,
+          status: 'gerado',
+        }))
+
+        setRelatorios(mapeados)
+      } catch (err) {
+        console.error('Erro ao carregar relatórios:', err)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    carregarRelatorios()
+  }, [])
 
   const relatoriosPorCliente = relatorios.reduce((acc, rel) => {
     if (!acc[rel.cliente]) {
@@ -61,6 +51,8 @@ const Relatorios = () => {
     acc[rel.cliente].push(rel)
     return acc
   }, {} as Record<string, Relatorio[]>)
+
+  const relatoriosRecentes = [...relatorios].slice(0, 10)
 
   return (
     <div className="relatorios">
@@ -92,31 +84,47 @@ const Relatorios = () => {
                 </tr>
               </thead>
               <tbody>
-                {relatorios.map(relatorio => (
-                  <tr key={relatorio.id}>
-                    <td>
-                      <strong>{relatorio.numero}</strong>
-                    </td>
-                    <td>{relatorio.cliente}</td>
-                    <td>
-                      <span className="ensaio-badge">{relatorio.ensaioId}</span>
-                    </td>
-                    <td>{relatorio.data}</td>
-                    <td>
-                      <span className={`status-badge ${relatorio.status}`}>
-                        {relatorio.status === 'gerado' ? '✓ Gerado' : '⏳ Pendente'}
-                      </span>
-                    </td>
-                    <td>
-                      <Link 
-                        to={`/relatorios/${relatorio.id}`}
-                        className="btn-link"
-                      >
-                        👁️ Visualizar
-                      </Link>
+                {loading ? (
+                  <tr>
+                    <td colSpan={6} style={{ textAlign: 'center', padding: '16px' }}>
+                      Carregando relatórios...
                     </td>
                   </tr>
-                ))}
+                ) : relatoriosRecentes.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} style={{ textAlign: 'center', padding: '16px' }}>
+                      Nenhum relatório encontrado
+                    </td>
+                  </tr>
+                ) : (
+                  relatoriosRecentes.map(relatorio => (
+                    <tr key={relatorio.id}>
+                      <td>
+                        <strong>{relatorio.numero}</strong>
+                      </td>
+                      <td>{relatorio.cliente}</td>
+                      <td>
+                        <span className="ensaio-badge">
+                          {relatorio.ensaioNumero || (relatorio.ensaioId ? `#${relatorio.ensaioId}` : '-')}
+                        </span>
+                      </td>
+                      <td>{relatorio.data}</td>
+                      <td>
+                        <span className={`status-badge ${relatorio.status}`}>
+                          {relatorio.status === 'gerado' ? '✓ Gerado' : '⏳ Pendente'}
+                        </span>
+                      </td>
+                      <td>
+                        <Link 
+                          to={`/relatorios/${relatorio.id}`}
+                          className="btn-link"
+                        >
+                          👁️ Visualizar
+                        </Link>
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>

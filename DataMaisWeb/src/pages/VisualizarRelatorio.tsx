@@ -1,23 +1,103 @@
+import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
+import api from '../config/api'
 import './VisualizarRelatorio.css'
+
+interface RelatorioDetalhe {
+  id: number
+  numero: string
+  cliente: string
+  data: string
+  ensaioId?: number | null
+  ensaioNumero?: string | null
+  observacoes?: string | null
+  camaraTestada?: string | null
+  pressaoCargaConfigurada?: number | null
+  tempoCargaConfigurado?: number | null
+  duracao?: string | null
+  pressaoMaxima?: number | null
+  pressaoMinima?: number | null
+  pressaoMedia?: number | null
+}
 
 const VisualizarRelatorio = () => {
   const { id } = useParams<{ id: string }>()
+  const [relatorio, setRelatorio] = useState<RelatorioDetalhe | null>(null)
+  const [loading, setLoading] = useState(true)
 
-  // Dados mockados do relatório
-  const relatorio = {
-    id: id,
-    numero: 'REL-2024-001',
-    cliente: 'MODEC Brasil',
-    data: '22/12/2024 14:30',
-    ensaioId: '#1234',
-    tecnico: 'João Silva',
-    sensor: 'Sensor de Pressão 01 (PT-350)',
-    pressaoMaxima: '245.8 bar',
-    pressaoMinima: '0.0 bar',
-    duracao: '15 minutos',
-    observacoes: 'Ensaio realizado com sucesso. Todos os parâmetros dentro dos limites especificados.',
-    resultado: 'Aprovado'
+  useEffect(() => {
+    const carregarRelatorio = async () => {
+      if (!id) return
+
+      try {
+        const response = await api.get(`/Relatorio/${id}`)
+        const r = response.data
+
+        const dataStr = new Date(r.data).toLocaleString('pt-BR')
+
+        let duracao: string | null = null
+        if (r.ensaioDataInicio && r.ensaioDataFim) {
+          const inicio = new Date(r.ensaioDataInicio)
+          const fim = new Date(r.ensaioDataFim)
+          const diffMs = fim.getTime() - inicio.getTime()
+          if (diffMs > 0) {
+            const totalSec = Math.round(diffMs / 1000)
+            const minutos = Math.floor(totalSec / 60)
+            const segundos = totalSec % 60
+            duracao = `${minutos} min ${segundos.toString().padStart(2, '0')} s`
+          }
+        }
+
+        setRelatorio({
+          id: r.id,
+          numero: r.numero,
+          cliente: r.clienteNome || 'N/A',
+          data: dataStr,
+          ensaioId: r.ensaioId ?? null,
+          ensaioNumero: r.ensaioNumero ?? null,
+          observacoes: r.observacoes ?? null,
+          camaraTestada: r.camaraTestada ?? null,
+          pressaoCargaConfigurada: r.pressaoCargaConfigurada ?? null,
+          tempoCargaConfigurado: r.tempoCargaConfigurado ?? null,
+          duracao,
+          pressaoMaxima: r.pressaoMaxima ?? null,
+          pressaoMinima: r.pressaoMinima ?? null,
+          pressaoMedia: r.pressaoMedia ?? null,
+        })
+      } catch (err) {
+        console.error('Erro ao carregar relatório:', err)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    carregarRelatorio()
+  }, [id])
+
+  if (loading) {
+    return (
+      <div className="visualizar-relatorio">
+        <div className="page-header">
+          <div>
+            <Link to="/relatorios" className="back-link">← Voltar para Relatórios</Link>
+            <h1>Carregando relatório...</h1>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (!relatorio) {
+    return (
+      <div className="visualizar-relatorio">
+        <div className="page-header">
+          <div>
+            <Link to="/relatorios" className="back-link">← Voltar para Relatórios</Link>
+            <h1>Relatório não encontrado</h1>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -26,7 +106,11 @@ const VisualizarRelatorio = () => {
         <div>
           <Link to="/relatorios" className="back-link">← Voltar para Relatórios</Link>
           <h1>Relatório {relatorio.numero}</h1>
-          <p className="page-subtitle">Ensaio {relatorio.ensaioId} - {relatorio.cliente}</p>
+          <p className="page-subtitle">
+            {relatorio.ensaioNumero
+              ? <>Ensaio {relatorio.ensaioNumero} - {relatorio.cliente}</>
+              : <>Cliente {relatorio.cliente}</>}
+          </p>
         </div>
         <div className="header-actions">
           <button className="btn btn-secondary">📥 Download PDF</button>
@@ -56,7 +140,9 @@ const VisualizarRelatorio = () => {
               </div>
               <div className="meta-item">
                 <span className="meta-label">Ensaio:</span>
-                <span className="meta-value">{relatorio.ensaioId}</span>
+                <span className="meta-value">
+                  {relatorio.ensaioNumero || (relatorio.ensaioId ? `#${relatorio.ensaioId}` : '-')}
+                </span>
               </div>
             </div>
           </div>
@@ -66,21 +152,23 @@ const VisualizarRelatorio = () => {
           <h3>Informações do Ensaio</h3>
           <div className="info-grid">
             <div className="info-card">
-              <span className="info-label">Técnico Responsável</span>
-              <span className="info-value">{relatorio.tecnico}</span>
+              <span className="info-label">Câmara Testada</span>
+              <span className="info-value">{relatorio.camaraTestada || '-'}</span>
             </div>
             <div className="info-card">
-              <span className="info-label">Sensor Utilizado</span>
-              <span className="info-value">{relatorio.sensor}</span>
+              <span className="info-label">Pressão de Carga Configurada</span>
+              <span className="info-value">
+                {relatorio.pressaoCargaConfigurada != null ? `${relatorio.pressaoCargaConfigurada} bar` : '-'}
+              </span>
             </div>
             <div className="info-card">
               <span className="info-label">Duração</span>
-              <span className="info-value">{relatorio.duracao}</span>
+              <span className="info-value">{relatorio.duracao || '-'}</span>
             </div>
             <div className="info-card">
               <span className="info-label">Resultado</span>
-              <span className={`info-value resultado ${relatorio.resultado.toLowerCase()}`}>
-                {relatorio.resultado}
+              <span className="info-value resultado aprovado">
+                Aprovado
               </span>
             </div>
           </div>
@@ -91,11 +179,21 @@ const VisualizarRelatorio = () => {
           <div className="pressao-grid">
             <div className="pressao-card">
               <span className="pressao-label">Pressão Máxima</span>
-              <span className="pressao-value">{relatorio.pressaoMaxima}</span>
+              <span className="pressao-value">
+                {relatorio.pressaoMaxima != null ? `${relatorio.pressaoMaxima.toFixed(2)} bar` : 'N/A'}
+              </span>
+            </div>
+            <div className="pressao-card">
+              <span className="pressao-label">Pressão Média</span>
+              <span className="pressao-value">
+                {relatorio.pressaoMedia != null ? `${relatorio.pressaoMedia.toFixed(2)} bar` : 'N/A'}
+              </span>
             </div>
             <div className="pressao-card">
               <span className="pressao-label">Pressão Mínima</span>
-              <span className="pressao-value">{relatorio.pressaoMinima}</span>
+              <span className="pressao-value">
+                {relatorio.pressaoMinima != null ? `${relatorio.pressaoMinima.toFixed(2)} bar` : 'N/A'}
+              </span>
             </div>
           </div>
         </div>
@@ -111,7 +209,7 @@ const VisualizarRelatorio = () => {
         <div className="relatorio-section">
           <h3>Observações</h3>
           <div className="observacoes-box">
-            <p>{relatorio.observacoes}</p>
+            <p>{relatorio.observacoes || 'Sem observações adicionais.'}</p>
           </div>
         </div>
 

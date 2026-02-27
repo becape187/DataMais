@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.ComponentModel.DataAnnotations;
 using DataMais.Data;
 using DataMais.Models;
 using DataMais.Services;
@@ -12,7 +13,7 @@ namespace DataMais.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class EnsaioController : ControllerBase
+    public class EnsaioController : ControllerBase
 {
     private readonly DataMaisDbContext _context;
     private readonly ModbusService _modbusService;
@@ -32,10 +33,31 @@ public class EnsaioController : ControllerBase
     }
 
     [HttpPost("iniciar")]
-    public async Task<IActionResult> IniciarEnsaio()
+    public async Task<IActionResult> IniciarEnsaio([FromBody] IniciarEnsaioRequest request)
     {
         try
         {
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+
+            var camara = request.Camara?.Trim().ToUpperInvariant();
+            if (camara != "A" && camara != "B")
+            {
+                return BadRequest(new { message = "Câmara inválida. Use 'A' ou 'B'." });
+            }
+
+            if (request.PressaoCarga <= 0)
+            {
+                return BadRequest(new { message = "Pressão de carga deve ser maior que zero." });
+            }
+
+            if (request.TempoCarga <= 0)
+            {
+                return BadRequest(new { message = "Tempo de carga deve ser maior que zero." });
+            }
+
             var appConfig = _configService.GetConfig();
             var sistema = appConfig.Sistema;
 
@@ -68,6 +90,9 @@ public class EnsaioController : ControllerBase
                 DataInicio = agora,
                 ClienteId = cliente.Id,
                 CilindroId = cilindro.Id,
+                CamaraTestada = camara,
+                PressaoCargaConfigurada = request.PressaoCarga,
+                TempoCargaConfigurado = request.TempoCarga,
                 DataCriacao = agora,
                 DataAtualizacao = agora
             };
@@ -177,6 +202,16 @@ public class EnsaioController : ControllerBase
 
             await _context.SaveChangesAsync();
 
+            // Remove as leituras desse ensaio no InfluxDB (período do ensaio)
+            try
+            {
+                await RemoverLeiturasInfluxAsync(ensaio);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Erro ao remover leituras do ensaio {EnsaioId} no InfluxDB", id);
+            }
+
             return Ok(new
             {
                 message = "Ensaio cancelado (não salvo)",
@@ -199,6 +234,8 @@ public class EnsaioController : ControllerBase
     {
         try
         {
+            ModbusConfig? pressaoRegistro = null;
+
             var ensaio = await _context.Ensaios.FindAsync(id);
             if (ensaio == null)
             {
@@ -210,15 +247,44 @@ public class EnsaioController : ControllerBase
                 return BadRequest(new { message = $"Ensaio não está em execução (status atual: {ensaio.Status})" });
             }
 
-            // Procura registro de pressão convertida (preferencialmente pressão geral)
-            var pressaoRegistro = await _context.ModbusConfigs
-                .Where(m => m.Ativo)
-                .Where(m => m.Nome == "PRESSAO_GERAL_CONV" 
-                            || m.Nome == "PRESSAO_GERAL" 
-                            || m.Nome == "PRESSAO_A_CONV" 
-                            || m.Nome == "PRESSAO_B_CONV")
-                .OrderBy(m => m.Nome) // GERAL_CONV primeiro, depois alternativas
-                .FirstOrDefaultAsync();
+            // Define registro de pressão preferencial com base na câmara testada
+            string? registroPreferencial = null;
+            if (string.Equals(ensaio.CamaraTestada, "A", StringComparison.OrdinalIgnoreCase))
+            {
+                registroPreferencial = "PRESSAO_A_CONV";
+            }
+            else if (string.Equals(ensaio.CamaraTestada, "B", StringComparison.OrdinalIgnoreCase))
+            {
+                registroPreferencial = "PRESSAO_B_CONV";
+            }
+
+            // Procura registro de pressão convertida (preferencialmente da câmara configurada, depois geral)
+            var query = _context.ModbusConfigs
+                .Where(m => m.Ativo);
+
+            if (!string.IsNullOrWhiteSpace(registroPreferencial))
+            {
+                var preferencial = await query
+                    .Where(m => m.Nome == registroPreferencial)
+                    .FirstOrDefaultAsync();
+
+                if (preferencial != null)
+                {
+                    pressaoRegistro = preferencial;
+                }
+            }
+
+            if (pressaoRegistro == null)
+            {
+                pressaoRegistro = await _context.ModbusConfigs
+                    .Where(m => m.Ativo)
+                    .Where(m => m.Nome == "PRESSAO_GERAL_CONV"
+                                || m.Nome == "PRESSAO_GERAL"
+                                || m.Nome == "PRESSAO_A_CONV"
+                                || m.Nome == "PRESSAO_B_CONV")
+                    .OrderBy(m => m.Nome) // GERAL_CONV primeiro, depois alternativas
+                    .FirstOrDefaultAsync();
+            }
 
             if (pressaoRegistro == null)
             {
@@ -298,6 +364,36 @@ public class EnsaioController : ControllerBase
             _logger.LogError(ex, "Erro ao ler pressão atual do ensaio {EnsaioId}", id);
             return StatusCode(500, new { message = "Erro ao ler pressão atual do ensaio", error = ex.Message });
         }
+    }
+
+    /// <summary>
+    /// Remove do InfluxDB todas as leituras de pressão associadas a um ensaio cancelado.
+    /// </summary>
+    private async Task RemoverLeiturasInfluxAsync(Ensaio ensaio)
+    {
+        var appConfig = _configService.GetConfig();
+
+        if (string.IsNullOrWhiteSpace(appConfig.Influx.Url) ||
+            string.IsNullOrWhiteSpace(appConfig.Influx.Token) ||
+            string.IsNullOrWhiteSpace(appConfig.Influx.Organization) ||
+            string.IsNullOrWhiteSpace(appConfig.Influx.Bucket))
+        {
+            _logger.LogWarning("Configuração do InfluxDB incompleta. Não será possível remover leituras do ensaio {EnsaioId}.", ensaio.Id);
+            return;
+        }
+
+        // Define intervalo de tempo para remoção (do início ao fim do ensaio, com pequena margem)
+        var from = (ensaio.DataInicio ?? DateTime.UtcNow.AddHours(-1)).ToUniversalTime().AddMinutes(-1);
+        var to = (ensaio.DataFim ?? DateTime.UtcNow).ToUniversalTime().AddMinutes(1);
+
+        var predicate = $"_measurement=\"ensaio_pressao\" AND ensaioId=\"{ensaio.Id}\"";
+
+        using var influxClient = new InfluxDBClient(appConfig.Influx.Url, appConfig.Influx.Token);
+        var deleteApi = influxClient.GetDeleteApi();
+
+        await deleteApi.DeleteAsync(from, to, predicate, appConfig.Influx.Bucket, appConfig.Influx.Organization);
+
+        _logger.LogInformation("Leituras do ensaio {EnsaioId} removidas do InfluxDB no intervalo {From} - {To}", ensaio.Id, from, to);
     }
 }
 
