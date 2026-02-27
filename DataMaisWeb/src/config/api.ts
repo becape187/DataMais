@@ -12,7 +12,7 @@ const api = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
-  timeout: 30000, // 30 segundos
+  timeout: 45000, // 45 segundos (maior que o timeout do Modbus de 10s + margem)
 })
 
 // Interceptor para tratamento de erros

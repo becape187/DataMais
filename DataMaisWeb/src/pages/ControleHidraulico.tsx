@@ -199,6 +199,25 @@ const ControleHidraulico = () => {
     buscarRegistrosESensores()
   }, [])
 
+  // Controle de erros para evitar logs repetitivos
+  const [ultimoErroLogado, setUltimoErroLogado] = useState<{ [key: string]: number }>({})
+
+  const logarErroSeNecessario = (chave: string, mensagem: string, err: any) => {
+    const agora = Date.now()
+    const ultimoErro = ultimoErroLogado[chave] || 0
+    
+    // Só loga erros a cada 30 segundos para evitar spam no console
+    if (agora - ultimoErro > 30000) {
+      const isTimeout = err?.code === 'ECONNABORTED' || err?.message?.includes('timeout')
+      if (isTimeout) {
+        console.warn(`${mensagem} (timeout - tentando reconectar...)`)
+      } else {
+        console.error(mensagem, err)
+      }
+      setUltimoErroLogado({ ...ultimoErroLogado, [chave]: agora })
+    }
+  }
+
   // Atualiza status do motor e pressões periodicamente
   useEffect(() => {
     if (!registros.statusMotor && !registros.pressaoA && !registros.pressaoB) return
@@ -207,66 +226,67 @@ const ControleHidraulico = () => {
       try {
         // Lê status do motor
         if (registros.statusMotor) {
-          const response = await api.get(`/ModbusConfig/${registros.statusMotor.id}/read`)
-          const valor = response.data.valor
-          setMotorStatus(valor === true || valor === 1 || valor === '1')
+          try {
+            const response = await api.get(`/ModbusConfig/${registros.statusMotor.id}/read`)
+            const valor = response.data.valor
+            setMotorStatus(valor === true || valor === 1 || valor === '1')
+          } catch (err: any) {
+            logarErroSeNecessario('motor', 'Erro ao buscar status do motor', err)
+            // Não altera o status em caso de erro para manter o último valor conhecido
+          }
         }
 
         // Lê pressão A usando o endpoint do sensor que aplica conversão linear
         if (sensores.sensorA?.id) {
           try {
-            const response = await api.get(`/Sensor/${sensores.sensorA.id}/read`)
+            const response = await api.get(`/Sensor/${sensores.sensorA.id}/read`, { timeout: 15000 })
             const valor = Number(response.data.valorConvertido)
             setPressaoA(valor)
-          } catch (err) {
-            console.error('Erro ao ler pressão A:', err)
-            setPressaoA(null)
+          } catch (err: any) {
+            logarErroSeNecessario('pressaoA', 'Erro ao ler pressão A', err)
+            // Mantém o último valor em caso de erro temporário
           }
         } else if (registros.pressaoA) {
           // Fallback: lê direto do Modbus se não houver sensor configurado
           try {
-            const response = await api.get(`/ModbusConfig/${registros.pressaoA.id}/read`)
+            const response = await api.get(`/ModbusConfig/${registros.pressaoA.id}/read`, { timeout: 15000 })
             setPressaoA(Number(response.data.valor))
-          } catch (err) {
-            console.error('Erro ao ler pressão A:', err)
-            setPressaoA(null)
+          } catch (err: any) {
+            logarErroSeNecessario('pressaoA', 'Erro ao ler pressão A', err)
           }
         }
 
         // Lê pressão B usando o endpoint do sensor que aplica conversão linear
         if (sensores.sensorB?.id) {
           try {
-            const response = await api.get(`/Sensor/${sensores.sensorB.id}/read`)
+            const response = await api.get(`/Sensor/${sensores.sensorB.id}/read`, { timeout: 15000 })
             const valor = Number(response.data.valorConvertido)
             setPressaoB(valor)
-          } catch (err) {
-            console.error('Erro ao ler pressão B:', err)
-            setPressaoB(null)
+          } catch (err: any) {
+            logarErroSeNecessario('pressaoB', 'Erro ao ler pressão B', err)
           }
         } else if (registros.pressaoB) {
           // Fallback: lê direto do Modbus se não houver sensor configurado
           try {
-            const response = await api.get(`/ModbusConfig/${registros.pressaoB.id}/read`)
+            const response = await api.get(`/ModbusConfig/${registros.pressaoB.id}/read`, { timeout: 15000 })
             setPressaoB(Number(response.data.valor))
-          } catch (err) {
-            console.error('Erro ao ler pressão B:', err)
-            setPressaoB(null)
+          } catch (err: any) {
+            logarErroSeNecessario('pressaoB', 'Erro ao ler pressão B', err)
           }
         }
 
         // Lê pressão geral usando o endpoint do sensor que aplica conversão linear
         if (sensores.pressaoGeral?.id) {
           try {
-            const response = await api.get(`/Sensor/${sensores.pressaoGeral.id}/read`)
+            const response = await api.get(`/Sensor/${sensores.pressaoGeral.id}/read`, { timeout: 15000 })
             const valor = Number(response.data.valorConvertido)
             setPressaoGeral(valor)
-          } catch (err) {
-            console.error('Erro ao ler pressão geral:', err)
-            setPressaoGeral(null)
+          } catch (err: any) {
+            logarErroSeNecessario('pressaoGeral', 'Erro ao ler pressão geral', err)
           }
         }
-      } catch (err) {
-        console.error('Erro ao atualizar status:', err)
+      } catch (err: any) {
+        logarErroSeNecessario('geral', 'Erro ao atualizar status', err)
       }
     }
 
