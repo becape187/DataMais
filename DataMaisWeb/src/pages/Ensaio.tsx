@@ -71,17 +71,25 @@ const Ensaio = () => {
   }
 
   const interromperEnsaio = async () => {
+    if (!ensaioAtivo) return
+
+    const salvar = window.confirm('Deseja salvar este ensaio?')
+
     try {
       if (ensaioId) {
-        await api.post(`/ensaio/interromper/${ensaioId}`)
+        if (salvar) {
+          await api.post(`/ensaio/interromper/${ensaioId}`)
+        } else {
+          await api.post(`/ensaio/cancelar/${ensaioId}`)
+        }
       }
     } catch (err) {
-      console.error('Erro ao interromper ensaio:', err)
+      console.error('Erro ao interromper/cancelar ensaio:', err)
     } finally {
       setEnsaioAtivo(false)
       const evento: LogEvento = {
         id: Date.now(),
-        texto: `[${new Date().toLocaleTimeString('pt-BR')}] Ensaio interrompido`,
+        texto: `[${new Date().toLocaleTimeString('pt-BR')}] Ensaio ${salvar ? 'salvo' : 'descartado (não salvo)'}`,
         tipo: 'normal',
         comentarios: 0,
       }

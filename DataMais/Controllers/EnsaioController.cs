@@ -111,7 +111,67 @@ public class EnsaioController : ControllerBase
                 });
             }
 
+            // Finaliza ensaio
             ensaio.Status = "Concluido";
+            ensaio.DataFim = DateTime.UtcNow;
+            ensaio.DataAtualizacao = DateTime.UtcNow;
+
+            // Cria relatório vinculado ao ensaio
+            var dataRelatorio = ensaio.DataFim ?? DateTime.UtcNow;
+            var numeroRelatorio = $"REL-{ensaio.Numero}";
+
+            var relatorio = new Relatorio
+            {
+                Numero = numeroRelatorio,
+                Data = dataRelatorio,
+                Observacoes = $"Relatório gerado automaticamente a partir do ensaio {ensaio.Numero}.",
+                ClienteId = ensaio.ClienteId,
+                CilindroId = ensaio.CilindroId,
+                EnsaioId = ensaio.Id,
+                DataCriacao = DateTime.UtcNow,
+                DataAtualizacao = DateTime.UtcNow
+            };
+
+            _context.Relatorios.Add(relatorio);
+
+            await _context.SaveChangesAsync();
+
+            return Ok(new
+            {
+                message = "Ensaio interrompido e relatório gerado com sucesso",
+                status = ensaio.Status,
+                dataFim = ensaio.DataFim,
+                relatorio = new
+                {
+                    relatorio.Id,
+                    relatorio.Numero,
+                    relatorio.Data,
+                    relatorio.ClienteId,
+                    relatorio.CilindroId,
+                    relatorio.EnsaioId
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Erro ao interromper ensaio {EnsaioId}", id);
+            return StatusCode(500, new { message = "Erro ao interromper ensaio", error = ex.Message });
+        }
+    }
+
+    [HttpPost("cancelar/{id:int}")]
+    public async Task<IActionResult> CancelarEnsaio(int id)
+    {
+        try
+        {
+            var ensaio = await _context.Ensaios.FindAsync(id);
+            if (ensaio == null)
+            {
+                return NotFound(new { message = "Ensaio não encontrado" });
+            }
+
+            // Marca como cancelado (não salvo pelo usuário)
+            ensaio.Status = "Cancelado";
             ensaio.DataFim = DateTime.UtcNow;
             ensaio.DataAtualizacao = DateTime.UtcNow;
 
@@ -119,15 +179,15 @@ public class EnsaioController : ControllerBase
 
             return Ok(new
             {
-                message = "Ensaio interrompido com sucesso",
+                message = "Ensaio cancelado (não salvo)",
                 status = ensaio.Status,
                 dataFim = ensaio.DataFim
             });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Erro ao interromper ensaio {EnsaioId}", id);
-            return StatusCode(500, new { message = "Erro ao interromper ensaio", error = ex.Message });
+            _logger.LogError(ex, "Erro ao cancelar ensaio {EnsaioId}", id);
+            return StatusCode(500, new { message = "Erro ao cancelar ensaio", error = ex.Message });
         }
     }
 
