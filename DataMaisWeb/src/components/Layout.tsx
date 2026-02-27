@@ -15,7 +15,7 @@ interface ModbusRegistro {
 }
 
 // Versão do Layout - incrementar quando houver mudanças importantes
-// v1.0.3 - Adicionada atualização em tempo real das pressões (PRESSAO_A e PRESSAO_B) a cada 1 segundo
+// v1.0.4 - Atualizado para usar PRESSAO_A_CONV e PRESSAO_B_CONV (valores já convertidos pelo dispositivo)
 
 const Layout = ({ children }: LayoutProps) => {
   const location = useLocation()
@@ -43,8 +43,9 @@ const Layout = ({ children }: LayoutProps) => {
         
         const avancaReg = todosRegistros.find((r: any) => r.nome === 'BOTAO_AVANCA_IHM' && r.ativo)
         const recuaReg = todosRegistros.find((r: any) => r.nome === 'BOTAO_RECUA_IHM' && r.ativo)
-        const pressaoAReg = todosRegistros.find((r: any) => r.nome === 'PRESSAO_A' && r.ativo)
-        const pressaoBReg = todosRegistros.find((r: any) => r.nome === 'PRESSAO_B' && r.ativo)
+        // Usa sempre as pressões já convertidas pelo dispositivo
+        const pressaoAReg = todosRegistros.find((r: any) => r.nome === 'PRESSAO_A_CONV' && r.ativo)
+        const pressaoBReg = todosRegistros.find((r: any) => r.nome === 'PRESSAO_B_CONV' && r.ativo)
         
         setRegistros({
           avanca: avancaReg,
