@@ -422,6 +422,27 @@ const Dashboard = () => {
         }
       })
 
+      console.log('Registros Modbus encontrados para escrita:', {
+        INPUT_MIN: registrosModbus['INPUT_MIN']?.id,
+        INPUT_MAX: registrosModbus['INPUT_MAX']?.id,
+        OUTPUT_MIN: registrosModbus['OUTPUT_MIN']?.id,
+        OUTPUT_MAX: registrosModbus['OUTPUT_MAX']?.id,
+        INPUT_MIN_1: registrosModbus['INPUT_MIN_1']?.id,
+        INPUT_MAX_1: registrosModbus['INPUT_MAX_1']?.id,
+        OUTPUT_MIN_1: registrosModbus['OUTPUT_MIN_1']?.id,
+        OUTPUT_MAX_1: registrosModbus['OUTPUT_MAX_1']?.id,
+        INPUT_MIN_2: registrosModbus['INPUT_MIN_2']?.id,
+        INPUT_MAX_2: registrosModbus['INPUT_MAX_2']?.id,
+        OUTPUT_MIN_2: registrosModbus['OUTPUT_MIN_2']?.id,
+        OUTPUT_MAX_2: registrosModbus['OUTPUT_MAX_2']?.id
+      })
+
+      console.log('Sensores encontrados:', {
+        sensorA: sensorA ? { id: sensorA.id, nome: sensorA.nome, inputMin: sensorA.inputMin, inputMax: sensorA.inputMax, outputMin: sensorA.outputMin, outputMax: sensorA.outputMax } : null,
+        sensorB: sensorB ? { id: sensorB.id, nome: sensorB.nome, inputMin: sensorB.inputMin, inputMax: sensorB.inputMax, outputMin: sensorB.outputMin, outputMax: sensorB.outputMax } : null,
+        sensorGeral: sensorGeral ? { id: sensorGeral.id, nome: sensorGeral.nome, inputMin: sensorGeral.inputMin, inputMax: sensorGeral.inputMax, outputMin: sensorGeral.outputMin, outputMax: sensorGeral.outputMax } : null
+      })
+
       // Envia calibração para PRESSAO_A
       if (sensorA && sensorA.inputMin !== null && sensorA.inputMax !== null && 
           sensorA.outputMin !== null && sensorA.outputMax !== null) {

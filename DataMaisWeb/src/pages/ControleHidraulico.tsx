@@ -115,12 +115,6 @@ const ControleHidraulico = () => {
             case 'MOTOR_BOMBA':
               registrosEncontrados.statusMotor = reg
               break
-            case 'PRESSAO_A':
-              registrosEncontrados.pressaoA = reg
-              break
-            case 'PRESSAO_B':
-              registrosEncontrados.pressaoB = reg
-              break
             case 'PRESSAO_A_CONV':
               registrosEncontrados.pressaoAConv = reg
               break
