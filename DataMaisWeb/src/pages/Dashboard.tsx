@@ -167,7 +167,11 @@ const Dashboard = () => {
 
           switch (reg.nome) {
             case 'MOTOR_BOMBA':
-              registrosEncontrados.statusMotor = reg
+              // Prioriza o registro de LEITURA (ReadInputs - Input Discrete)
+              // Existem dois registros MOTOR_BOMBA: um para leitura e outro para escrita
+              if (!registrosEncontrados.statusMotor || reg.funcaoModbus === 'ReadInputs') {
+                registrosEncontrados.statusMotor = reg
+              }
               break
             case 'PRESSAO_A_CONV':
               registrosEncontrados.pressaoAConv = reg

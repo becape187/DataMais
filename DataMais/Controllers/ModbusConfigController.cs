@@ -643,8 +643,10 @@ public class ModbusConfigController : ControllerBase
             var botaoRegistro = await _context.ModbusConfigs
                 .FirstOrDefaultAsync(m => m.Nome == (acao == "ligar" ? "BOTAO_LIGA_MOTOR" : "BOTAO_DESLIGA_MOTOR") && m.Ativo);
 
+            // Busca o registro de LEITURA do status do motor (ReadInputs - Input Discrete)
+            // Existem dois registros MOTOR_BOMBA: um para leitura (ReadInputs) e outro para escrita (ReadCoils)
             var statusRegistro = await _context.ModbusConfigs
-                .FirstOrDefaultAsync(m => m.Nome == "MOTOR_BOMBA" && m.Ativo);
+                .FirstOrDefaultAsync(m => m.Nome == "MOTOR_BOMBA" && m.Ativo && m.FuncaoModbus == "ReadInputs");
 
             if (botaoRegistro == null)
             {
@@ -653,8 +655,11 @@ public class ModbusConfigController : ControllerBase
 
             if (statusRegistro == null)
             {
-                return NotFound(new { message = "Registro Modbus 'MOTOR_BOMBA' não encontrado ou inativo" });
+                return NotFound(new { message = "Registro Modbus 'MOTOR_BOMBA' (ReadInputs) não encontrado ou inativo" });
             }
+
+            _logger.LogInformation("Usando registro de leitura MOTOR_BOMBA: ID={RegistroId}, Função={FuncaoModbus}, Endereço={Endereco}", 
+                statusRegistro.Id, statusRegistro.FuncaoModbus, statusRegistro.EnderecoRegistro);
 
             // Lê o status atual do motor
             var statusAtual = await _modbusService.LerRegistroAsync(statusRegistro.Id);
@@ -705,24 +710,58 @@ public class ModbusConfigController : ControllerBase
 
             // 3. Desativa o botão
             _logger.LogInformation("Desativando botão {Acao} motor (registro {RegistroId})", acao, botaoRegistro.Id);
-            await _modbusService.EscreverRegistroAsync(configTemp, false);
+            var desativado = await _modbusService.EscreverRegistroAsync(configTemp, false);
+            if (!desativado)
+            {
+                _logger.LogWarning("Aviso: Não foi possível desativar botão {Acao} motor, mas continuando verificação", acao);
+            }
 
-            // 4. Verifica se o status mudou (timeout de 5 segundos, verifica a cada 200ms)
-            var timeout = TimeSpan.FromSeconds(5);
+            // 4. Aguarda um tempo inicial para o CLP processar o comando
+            await Task.Delay(300);
+
+            // 5. Verifica se o status mudou (timeout de 2 segundos, verifica a cada 200ms)
+            var timeout = TimeSpan.FromSeconds(2);
             var intervalo = TimeSpan.FromMilliseconds(200);
             var inicio = DateTime.UtcNow;
             bool statusAlterado = false;
+            object? ultimoStatusLido = null;
+            int tentativasLeitura = 0;
+
+            _logger.LogInformation("Iniciando verificação de status do motor após comando {Acao}. Status esperado: {StatusEsperado}", acao, statusEsperado);
 
             while (DateTime.UtcNow - inicio < timeout)
             {
                 await Task.Delay(intervalo);
-                var novoStatus = await _modbusService.LerRegistroAsync(statusRegistro.Id);
-                bool novoStatusBool = novoStatus is bool boolVal2 ? boolVal2 : (novoStatus?.ToString() == "1" || novoStatus?.ToString() == "True");
+                tentativasLeitura++;
 
-                if (novoStatusBool == statusEsperado)
+                try
                 {
-                    statusAlterado = true;
-                    break;
+                    var novoStatus = await _modbusService.LerRegistroAsync(statusRegistro.Id);
+                    ultimoStatusLido = novoStatus;
+
+                    if (novoStatus == null)
+                    {
+                        _logger.LogWarning("Leitura do status do motor retornou null na tentativa {Tentativa}", tentativasLeitura);
+                        continue;
+                    }
+
+                    bool novoStatusBool = novoStatus is bool boolVal2 ? boolVal2 : (novoStatus?.ToString() == "1" || novoStatus?.ToString() == "True");
+
+                    _logger.LogDebug("Tentativa {Tentativa}: Status lido = {StatusLido} (bool: {StatusBool}), Esperado: {StatusEsperado}", 
+                        tentativasLeitura, novoStatus, novoStatusBool, statusEsperado);
+
+                    if (novoStatusBool == statusEsperado)
+                    {
+                        statusAlterado = true;
+                        _logger.LogInformation("Status do motor alterado com sucesso após {Tentativas} tentativas e {TempoTotal}ms", 
+                            tentativasLeitura, (DateTime.UtcNow - inicio).TotalMilliseconds);
+                        break;
+                    }
+                }
+                catch (Exception exLeitura)
+                {
+                    _logger.LogWarning(exLeitura, "Erro ao ler status do motor na tentativa {Tentativa}", tentativasLeitura);
+                    // Continua tentando mesmo se houver erro na leitura
                 }
             }
 
@@ -737,10 +776,15 @@ public class ModbusConfigController : ControllerBase
             }
             else
             {
-                _logger.LogWarning("Timeout: Motor não respondeu ao comando de {Acao}", acao);
+                var tempoDecorrido = (DateTime.UtcNow - inicio).TotalSeconds;
+                _logger.LogWarning("Timeout: Motor não respondeu ao comando de {Acao} após {TempoDecorrido}s e {Tentativas} tentativas. Status inicial: {StatusInicial}, Último status lido: {UltimoStatus}", 
+                    acao, tempoDecorrido, tentativasLeitura, statusAtualBool, ultimoStatusLido);
+                
                 return StatusCode(500, new { 
-                    message = $"Timeout: Motor não respondeu ao comando de {acao}. Verifique o sistema.",
+                    message = $"Timeout: Motor não respondeu ao comando de {acao} após {tempoDecorrido:F1} segundos. Verifique o sistema e a comunicação Modbus.",
                     status = statusAtualBool,
+                    ultimoStatusLido = ultimoStatusLido?.ToString(),
+                    tentativas = tentativasLeitura,
                     sucesso = false
                 });
             }

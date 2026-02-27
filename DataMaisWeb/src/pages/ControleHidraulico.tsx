@@ -113,7 +113,11 @@ const ControleHidraulico = () => {
               registrosEncontrados.recuaCilindro = reg
               break
             case 'MOTOR_BOMBA':
-              registrosEncontrados.statusMotor = reg
+              // Prioriza o registro de LEITURA (ReadInputs - Input Discrete)
+              // Existem dois registros MOTOR_BOMBA: um para leitura e outro para escrita
+              if (!registrosEncontrados.statusMotor || reg.funcaoModbus === 'ReadInputs') {
+                registrosEncontrados.statusMotor = reg
+              }
               break
             case 'PRESSAO_A_CONV':
               registrosEncontrados.pressaoAConv = reg
@@ -431,10 +435,32 @@ const ControleHidraulico = () => {
         }
       }
     } catch (err: any) {
-      console.error('Erro ao ligar motor:', err)
-      const errorMsg = err.response?.data?.message || err.message || 'Erro ao ligar motor'
+      console.error('❌ Erro ao ligar motor:', err)
+      console.error('Erro da API:', err.response?.data)
+      
+      // Tenta obter mensagem detalhada do backend
+      let errorMsg = 'Erro ao ligar motor'
+      if (err.response?.data?.message) {
+        errorMsg = err.response.data.message
+      } else if (err.message) {
+        errorMsg = err.message
+      }
+      
+      // Adiciona informações adicionais se disponíveis
+      if (err.response?.data?.ultimoStatusLido !== undefined) {
+        errorMsg += ` (Status atual: ${err.response.data.ultimoStatusLido})`
+      }
+      if (err.response?.data?.tentativas) {
+        errorMsg += ` (Tentativas: ${err.response.data.tentativas})`
+      }
+      
       setError(errorMsg)
       setMessage({ type: 'error', text: errorMsg })
+      
+      // Atualiza status se veio na resposta (mesmo em caso de erro)
+      if (err.response?.data?.status !== undefined) {
+        setMotorStatus(err.response.data.status)
+      }
     } finally {
       setSaving(null)
     }
@@ -471,10 +497,32 @@ const ControleHidraulico = () => {
         }
       }
     } catch (err: any) {
-      console.error('Erro ao desligar motor:', err)
-      const errorMsg = err.response?.data?.message || err.message || 'Erro ao desligar motor'
+      console.error('❌ Erro ao desligar motor:', err)
+      console.error('Erro da API:', err.response?.data)
+      
+      // Tenta obter mensagem detalhada do backend
+      let errorMsg = 'Erro ao desligar motor'
+      if (err.response?.data?.message) {
+        errorMsg = err.response.data.message
+      } else if (err.message) {
+        errorMsg = err.message
+      }
+      
+      // Adiciona informações adicionais se disponíveis
+      if (err.response?.data?.ultimoStatusLido !== undefined) {
+        errorMsg += ` (Status atual: ${err.response.data.ultimoStatusLido})`
+      }
+      if (err.response?.data?.tentativas) {
+        errorMsg += ` (Tentativas: ${err.response.data.tentativas})`
+      }
+      
       setError(errorMsg)
       setMessage({ type: 'error', text: errorMsg })
+      
+      // Atualiza status se veio na resposta (mesmo em caso de erro)
+      if (err.response?.data?.status !== undefined) {
+        setMotorStatus(err.response.data.status)
+      }
     } finally {
       setSaving(null)
     }

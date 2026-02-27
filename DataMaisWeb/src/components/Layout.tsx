@@ -103,7 +103,11 @@ const Layout = ({ children }: LayoutProps) => {
         if (!isMounted) return
         
         const todosRegistros = response.data
-        const statusMotor = todosRegistros.find((r: any) => r.nome === 'MOTOR_BOMBA' && r.ativo)
+        // Busca o registro de LEITURA do status do motor (ReadInputs - Input Discrete)
+        // Existem dois registros MOTOR_BOMBA: um para leitura e outro para escrita
+        const statusMotor = todosRegistros.find((r: any) => 
+          r.nome === 'MOTOR_BOMBA' && r.ativo && r.funcaoModbus === 'ReadInputs'
+        )
         
         if (statusMotor && isMounted) {
           const readResponse = await api.get(`/ModbusConfig/${statusMotor.id}/read`, {
@@ -226,10 +230,37 @@ const Layout = ({ children }: LayoutProps) => {
         console.log(`✅ Motor ${acao === 'ligar' ? 'ligado' : 'desligado'} com sucesso!`)
       } else {
         console.error('❌ Erro:', response.data.message)
+        // Atualiza status se veio na resposta
+        if (response.data.status !== undefined) {
+          setIsLigado(response.data.status)
+        }
+        alert(response.data.message || 'Erro ao executar comando')
       }
     } catch (err: any) {
       console.error('❌ Erro ao executar comando:', err)
-      const errorMsg = err.response?.data?.message || err.message || 'Erro ao executar comando'
+      console.error('Erro da API:', err.response?.data)
+      
+      // Tenta obter mensagem detalhada do backend
+      let errorMsg = 'Erro ao executar comando'
+      if (err.response?.data?.message) {
+        errorMsg = err.response.data.message
+      } else if (err.message) {
+        errorMsg = err.message
+      }
+      
+      // Adiciona informações adicionais se disponíveis
+      if (err.response?.data?.ultimoStatusLido !== undefined) {
+        errorMsg += ` (Status atual: ${err.response.data.ultimoStatusLido})`
+      }
+      if (err.response?.data?.tentativas) {
+        errorMsg += ` (Tentativas: ${err.response.data.tentativas})`
+      }
+      
+      // Atualiza status se veio na resposta (mesmo em caso de erro)
+      if (err.response?.data?.status !== undefined) {
+        setIsLigado(err.response.data.status)
+      }
+      
       alert(errorMsg)
     } finally {
       setProcessando(false)
