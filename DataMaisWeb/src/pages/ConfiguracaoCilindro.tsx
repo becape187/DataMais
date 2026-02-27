@@ -169,13 +169,12 @@ const ConfiguracaoCilindro = () => {
       }
 
       // Preparar dados para envio
-      // Envia tanto em camelCase quanto em PascalCase para máxima compatibilidade com o backend
+      // O backend está configurado para aceitar camelCase (ver Program.cs)
       const cilindroData: any = {
         nome: formData.nome.trim(),
         codigoCliente: formData.codigoCliente.trim(),
         codigoInterno: formData.codigoInterno.trim(),
-        clienteId: clienteIdNum,
-        ClienteId: clienteIdNum
+        clienteId: clienteIdNum
       }
       
       console.log('Enviando dados do cilindro:', cilindroData) // Debug
@@ -238,6 +237,7 @@ const ConfiguracaoCilindro = () => {
       }
     } catch (error: any) {
       console.error('Erro ao salvar cilindro:', error)
+      console.error('Dados completos do erro:', JSON.stringify(error.response?.data, null, 2))
       
       // Extrair mensagens de erro detalhadas
       let errorMessage = 'Erro ao salvar cilindro'
@@ -259,6 +259,7 @@ const ConfiguracaoCilindro = () => {
             }
           })
           errorMessage = `Erros de validação:\n${validationErrors.join('\n')}`
+          console.error('Erros de validação detalhados:', errorData.errors)
         } else if (errorData.message) {
           errorMessage = errorData.message
         } else if (errorData.title) {

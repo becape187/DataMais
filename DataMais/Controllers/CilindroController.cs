@@ -115,20 +115,39 @@ public class CilindroController : ControllerBase
     {
         try
         {
+            // Log dos dados recebidos para debug
+            _logger.LogInformation($"Criando cilindro - Nome: {cilindro.Nome}, CodigoCliente: {cilindro.CodigoCliente}, CodigoInterno: {cilindro.CodigoInterno}, ClienteId: {cilindro.ClienteId}");
+
             // Validação explícita do ClienteId antes de verificar ModelState
             if (cilindro.ClienteId == 0)
             {
+                _logger.LogWarning("ClienteId é zero ou não foi fornecido");
                 return BadRequest(new { message = "ClienteId é obrigatório e deve ser um valor válido" });
             }
 
             if (!ModelState.IsValid)
             {
-                // Adiciona mensagem específica sobre ClienteId se estiver faltando
-                if (cilindro.ClienteId == 0)
+                // Coletar todos os erros de validação
+                var errors = new Dictionary<string, string[]>();
+                foreach (var key in ModelState.Keys)
                 {
-                    ModelState.AddModelError("ClienteId", "ClienteId é obrigatório");
+                    var state = ModelState[key];
+                    if (state?.Errors != null && state.Errors.Count > 0)
+                    {
+                        errors[key] = state.Errors.Select(e => e.ErrorMessage).ToArray();
+                    }
                 }
-                return BadRequest(ModelState);
+                
+                _logger.LogWarning($"Erros de validação: {string.Join(", ", errors.SelectMany(e => e.Value))}");
+                
+                return BadRequest(new 
+                { 
+                    type = "https://tools.ietf.org/html/rfc9110#section-15.5.1",
+                    title = "One or more validation errors occurred.",
+                    status = 400,
+                    errors = errors,
+                    traceId = System.Diagnostics.Activity.Current?.Id
+                });
             }
 
             // Verificar se cliente existe
