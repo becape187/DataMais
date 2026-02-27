@@ -222,5 +222,111 @@ public class RelatorioController : ControllerBase
 
         return (min, max, avg);
     }
+
+    /// <summary>
+    /// Busca os dados de pressão do InfluxDB para o gráfico do relatório.
+    /// Retorna os dados de pressão do período do ensaio associado ao relatório.
+    /// </summary>
+    [HttpGet("{id:int}/dados-grafico")]
+    public async Task<IActionResult> GetDadosGrafico(int id)
+    {
+        try
+        {
+            var relatorio = await _context.Relatorios
+                .Include(r => r.Ensaio)
+                .FirstOrDefaultAsync(r => r.Id == id);
+
+            if (relatorio == null)
+            {
+                return NotFound(new { message = "Relatório não encontrado" });
+            }
+
+            var ensaio = relatorio.Ensaio;
+            if (ensaio == null)
+            {
+                return Ok(new { dados = Array.Empty<object>() });
+            }
+
+            var appConfig = _configService.GetConfig();
+
+            if (string.IsNullOrWhiteSpace(appConfig.Influx.Url) ||
+                string.IsNullOrWhiteSpace(appConfig.Influx.Token) ||
+                string.IsNullOrWhiteSpace(appConfig.Influx.Organization) ||
+                string.IsNullOrWhiteSpace(appConfig.Influx.Bucket))
+            {
+                _logger.LogWarning("Configuração do InfluxDB incompleta. Não será possível buscar dados do gráfico para o relatório {RelatorioId}.", id);
+                return Ok(new { dados = Array.Empty<object>() });
+            }
+
+            var from = (ensaio.DataInicio ?? ensaio.DataCriacao).ToUniversalTime().AddMinutes(-1);
+            var to = (ensaio.DataFim ?? DateTime.UtcNow).ToUniversalTime().AddMinutes(1);
+
+            var flux = $@"from(bucket: ""{appConfig.Influx.Bucket}"")
+  |> range(start: {from:o}, stop: {to:o})
+  |> filter(fn: (r) => r._measurement == ""ensaio_pressao"" and r.ensaioId == ""{ensaio.Id}"" and r._field == ""pressao"")
+  |> sort(columns: [""_time""])
+  |> keep(columns: [""_time"", ""_value""])";
+
+            using var influxClient = new InfluxDBClient(appConfig.Influx.Url, appConfig.Influx.Token);
+            var queryApi = influxClient.GetQueryApi();
+
+            var dados = new List<object>();
+
+            try
+            {
+                var tables = await queryApi.QueryAsync(flux, appConfig.Influx.Organization);
+
+                foreach (var table in tables)
+                {
+                    foreach (var record in table.Records)
+                    {
+                        var time = record.GetTime();
+                        var value = record.GetValue();
+
+                        if (time != null && value != null)
+                        {
+                            // Converte o timestamp para formato legível (HH:mm:ss)
+                            var timeStr = time.Value.ToLocalTime().ToString("HH:mm:ss");
+                            
+                            double pressao = 0;
+                            if (value is IConvertible)
+                            {
+                                try
+                                {
+                                    pressao = Convert.ToDouble(value);
+                                }
+                                catch
+                                {
+                                    continue;
+                                }
+                            }
+                            else
+                            {
+                                continue;
+                            }
+
+                            dados.Add(new
+                            {
+                                time = timeStr,
+                                pressao = Math.Round(pressao, 2)
+                            });
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Erro ao buscar dados do InfluxDB para o gráfico do relatório {RelatorioId}", id);
+                return StatusCode(500, new { message = "Erro ao buscar dados do gráfico", error = ex.Message });
+            }
+
+            return Ok(new { dados });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Erro ao obter dados do gráfico do relatório {RelatorioId}", id);
+            return StatusCode(500, new { message = "Erro ao obter dados do gráfico", error = ex.Message });
+        }
+    }
 }
 

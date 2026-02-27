@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import api from '../config/api'
 import './VisualizarRelatorio.css'
 
@@ -20,10 +21,17 @@ interface RelatorioDetalhe {
   pressaoMedia?: number | null
 }
 
+interface DataPoint {
+  time: string
+  pressao: number
+}
+
 const VisualizarRelatorio = () => {
   const { id } = useParams<{ id: string }>()
   const [relatorio, setRelatorio] = useState<RelatorioDetalhe | null>(null)
   const [loading, setLoading] = useState(true)
+  const [dadosGrafico, setDadosGrafico] = useState<DataPoint[]>([])
+  const [loadingGrafico, setLoadingGrafico] = useState(true)
 
   useEffect(() => {
     const carregarRelatorio = async () => {
@@ -73,6 +81,31 @@ const VisualizarRelatorio = () => {
 
     carregarRelatorio()
   }, [id])
+
+  // Carrega os dados do gráfico
+  useEffect(() => {
+    const carregarDadosGrafico = async () => {
+      if (!id) return
+
+      try {
+        setLoadingGrafico(true)
+        const response = await api.get(`/Relatorio/${id}/dados-grafico`)
+        const dados = response.data.dados || []
+        setDadosGrafico(dados)
+      } catch (err) {
+        console.error('Erro ao carregar dados do gráfico:', err)
+        setDadosGrafico([])
+      } finally {
+        setLoadingGrafico(false)
+      }
+    }
+
+    if (relatorio && relatorio.ensaioId) {
+      carregarDadosGrafico()
+    } else {
+      setLoadingGrafico(false)
+    }
+  }, [id, relatorio])
 
   if (loading) {
     return (
@@ -200,10 +233,58 @@ const VisualizarRelatorio = () => {
 
         <div className="relatorio-section">
           <h3>Gráfico de Pressão</h3>
-          <div className="grafico-placeholder">
-            <p>Gráfico de pressão em tempo real do ensaio</p>
-            <p className="placeholder-note">Aqui será exibido o gráfico completo do ensaio</p>
-          </div>
+          {loadingGrafico ? (
+            <div className="grafico-placeholder">
+              <p>Carregando dados do gráfico...</p>
+            </div>
+          ) : dadosGrafico.length === 0 ? (
+            <div className="grafico-placeholder">
+              <p>Nenhum dado disponível para o gráfico</p>
+              <p className="placeholder-note">
+                {relatorio?.ensaioId 
+                  ? 'Não foram encontrados dados de pressão para este ensaio no período especificado.'
+                  : 'Este relatório não está vinculado a um ensaio.'}
+              </p>
+            </div>
+          ) : (
+            <div className="grafico-container">
+              <ResponsiveContainer width="100%" height={400}>
+                <LineChart data={dadosGrafico}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E0E0E0" />
+                  <XAxis 
+                    dataKey="time" 
+                    stroke="#666"
+                    tick={{ fill: '#666', fontSize: 11 }}
+                    label={{ value: 'Tempo', position: 'insideBottom', offset: -5, style: { fontSize: 12 } }}
+                  />
+                  <YAxis 
+                    stroke="#666"
+                    tick={{ fill: '#666', fontSize: 11 }}
+                    label={{ value: 'Pressão (bar)', angle: -90, position: 'insideLeft', style: { fontSize: 12 } }}
+                    domain={[0, 'dataMax + 50']}
+                  />
+                  <Tooltip 
+                    contentStyle={{ 
+                      backgroundColor: 'rgba(255, 255, 255, 0.95)',
+                      border: '1px solid #E0E0E0',
+                      borderRadius: '8px'
+                    }}
+                    formatter={(value: number) => [`${value.toFixed(2)} bar`, 'Pressão']}
+                  />
+                  <Legend />
+                  <Line 
+                    type="monotone" 
+                    dataKey="pressao" 
+                    stroke="var(--modec-red)" 
+                    strokeWidth={2}
+                    dot={false}
+                    name="Pressão (bar)"
+                    animationDuration={300}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          )}
         </div>
 
         <div className="relatorio-section">

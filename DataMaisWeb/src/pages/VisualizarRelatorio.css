@@ -173,6 +173,13 @@
   font-weight: 700;
 }
 
+.grafico-container {
+  background: var(--bg-light);
+  border-radius: 8px;
+  padding: 20px;
+  margin-top: 20px;
+}
+
 .grafico-placeholder {
   background: var(--bg-light);
   border: 2px dashed var(--border-color);
