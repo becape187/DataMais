@@ -85,66 +85,124 @@ const Layout = ({ children }: LayoutProps) => {
 
   // Busca o status do motor ao carregar
   useEffect(() => {
+    const abortController = new AbortController()
+    let isMounted = true
+    let requestInProgress = false
+
     const buscarStatusMotor = async () => {
+      // Evita requisições simultâneas
+      if (requestInProgress) {
+        return
+      }
+
+      requestInProgress = true
       try {
-        const response = await api.get('/ModbusConfig')
+        const response = await api.get('/ModbusConfig', {
+          signal: abortController.signal
+        })
+        if (!isMounted) return
+        
         const todosRegistros = response.data
         const statusMotor = todosRegistros.find((r: any) => r.nome === 'MOTOR_BOMBA' && r.ativo)
         
-        if (statusMotor) {
-          const readResponse = await api.get(`/ModbusConfig/${statusMotor.id}/read`)
-          const valor = readResponse.data.valor
-          setIsLigado(valor === true || valor === 1 || valor === '1')
+        if (statusMotor && isMounted) {
+          const readResponse = await api.get(`/ModbusConfig/${statusMotor.id}/read`, {
+            signal: abortController.signal
+          })
+          if (isMounted) {
+            const valor = readResponse.data.valor
+            setIsLigado(valor === true || valor === 1 || valor === '1')
+          }
         }
-      } catch (err) {
-        console.error('Erro ao buscar status do motor:', err)
+      } catch (err: any) {
+        if (err.name !== 'CanceledError' && err.code !== 'ERR_CANCELED' && isMounted) {
+          console.error('Erro ao buscar status do motor:', err)
+        }
+      } finally {
+        requestInProgress = false
       }
     }
 
     buscarStatusMotor()
     // Atualiza a cada 2 segundos
     const interval = setInterval(buscarStatusMotor, 2000)
-    return () => clearInterval(interval)
+    
+    return () => {
+      isMounted = false
+      abortController.abort()
+      clearInterval(interval)
+    }
   }, [])
 
   // Atualiza as pressões em tempo real a cada 1 segundo
   useEffect(() => {
     if (!registros.pressaoA && !registros.pressaoB) return
 
+    const abortController = new AbortController()
+    let isMounted = true
+    let requestInProgress = false
+
     const atualizarPressoes = async () => {
+      // Evita requisições simultâneas
+      if (requestInProgress) {
+        return
+      }
+
+      requestInProgress = true
       try {
         // Lê Pressão A
-        if (registros.pressaoA) {
+        if (registros.pressaoA && isMounted) {
           try {
-            const response = await api.get(`/ModbusConfig/${registros.pressaoA.id}/read`)
-            const valor = Number(response.data.valor)
-            setPressaoA(isNaN(valor) ? null : valor)
-          } catch (err) {
-            console.error('Erro ao ler Pressão A:', err)
-            setPressaoA(null)
+            const response = await api.get(`/ModbusConfig/${registros.pressaoA.id}/read`, {
+              signal: abortController.signal
+            })
+            if (isMounted) {
+              const valor = Number(response.data.valor)
+              setPressaoA(isNaN(valor) ? null : valor)
+            }
+          } catch (err: any) {
+            if (err.name !== 'CanceledError' && err.code !== 'ERR_CANCELED' && isMounted) {
+              console.error('Erro ao ler Pressão A:', err)
+              setPressaoA(null)
+            }
           }
         }
 
         // Lê Pressão B
-        if (registros.pressaoB) {
+        if (registros.pressaoB && isMounted) {
           try {
-            const response = await api.get(`/ModbusConfig/${registros.pressaoB.id}/read`)
-            const valor = Number(response.data.valor)
-            setPressaoB(isNaN(valor) ? null : valor)
-          } catch (err) {
-            console.error('Erro ao ler Pressão B:', err)
-            setPressaoB(null)
+            const response = await api.get(`/ModbusConfig/${registros.pressaoB.id}/read`, {
+              signal: abortController.signal
+            })
+            if (isMounted) {
+              const valor = Number(response.data.valor)
+              setPressaoB(isNaN(valor) ? null : valor)
+            }
+          } catch (err: any) {
+            if (err.name !== 'CanceledError' && err.code !== 'ERR_CANCELED' && isMounted) {
+              console.error('Erro ao ler Pressão B:', err)
+              setPressaoB(null)
+            }
           }
         }
-      } catch (err) {
-        console.error('Erro ao atualizar pressões:', err)
+      } catch (err: any) {
+        if (err.name !== 'CanceledError' && err.code !== 'ERR_CANCELED' && isMounted) {
+          console.error('Erro ao atualizar pressões:', err)
+        }
+      } finally {
+        requestInProgress = false
       }
     }
 
     // Atualiza imediatamente e depois a cada 1 segundo
     atualizarPressoes()
     const interval = setInterval(atualizarPressoes, 1000)
-    return () => clearInterval(interval)
+    
+    return () => {
+      isMounted = false
+      abortController.abort()
+      clearInterval(interval)
+    }
   }, [registros.pressaoA?.id, registros.pressaoB?.id])
 
   const handleLigaDesliga = async () => {

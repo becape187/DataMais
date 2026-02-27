@@ -29,24 +29,47 @@ const Ensaio = () => {
   useEffect(() => {
     if (!ensaioAtivo || !ensaioId) return
 
-    const interval = setInterval(async () => {
-      try {
-        const response = await api.get(`/ensaio/${ensaioId}/pressao-atual`)
-        const ponto: DataPoint = {
-          time: response.data.time,
-          pressao: response.data.pressao,
-        }
+    const abortController = new AbortController()
+    let isMounted = true
+    let requestInProgress = false
 
-        setDados(prev => {
-          const novos = [...prev, ponto]
-          return novos.slice(-100) // Mantém apenas os últimos 100 pontos
+    const interval = setInterval(async () => {
+      // Evita requisições simultâneas
+      if (requestInProgress) {
+        return
+      }
+
+      requestInProgress = true
+      try {
+        const response = await api.get(`/ensaio/${ensaioId}/pressao-atual`, {
+          signal: abortController.signal
         })
-      } catch (err) {
-        console.error('Erro ao ler pressão atual do ensaio:', err)
+        
+        if (isMounted) {
+          const ponto: DataPoint = {
+            time: response.data.time,
+            pressao: response.data.pressao,
+          }
+
+          setDados(prev => {
+            const novos = [...prev, ponto]
+            return novos.slice(-100) // Mantém apenas os últimos 100 pontos
+          })
+        }
+      } catch (err: any) {
+        if (err.name !== 'CanceledError' && err.code !== 'ERR_CANCELED' && isMounted) {
+          console.error('Erro ao ler pressão atual do ensaio:', err)
+        }
+      } finally {
+        requestInProgress = false
       }
     }, 1000) // leitura a cada 1 segundo
 
-    return () => clearInterval(interval)
+    return () => {
+      isMounted = false
+      abortController.abort()
+      clearInterval(interval)
+    }
   }, [ensaioAtivo, ensaioId])
 
   const iniciarEnsaio = async () => {

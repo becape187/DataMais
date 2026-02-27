@@ -266,63 +266,105 @@ const Dashboard = () => {
   useEffect(() => {
     if (!registros.statusMotor && !registros.pressaoAConv && !registros.pressaoBConv && !registros.pressaoGeralConv) return
 
+    const abortController = new AbortController()
+    let isMounted = true
+    let requestInProgress = false
+
     const atualizarStatus = async () => {
+      // Evita requisições simultâneas
+      if (requestInProgress) {
+        return
+      }
+
+      requestInProgress = true
       try {
         // Lê status do motor
-        if (registros.statusMotor) {
+        if (registros.statusMotor && isMounted) {
           try {
-            const response = await api.get(`/ModbusConfig/${registros.statusMotor.id}/read`)
-            const valor = response.data.valor
-            setMotorStatus(valor === true || valor === 1 || valor === '1')
-          } catch (err) {
-            console.error('Erro ao ler status do motor:', err)
+            const response = await api.get(`/ModbusConfig/${registros.statusMotor.id}/read`, {
+              signal: abortController.signal
+            })
+            if (isMounted) {
+              const valor = response.data.valor
+              setMotorStatus(valor === true || valor === 1 || valor === '1')
+            }
+          } catch (err: any) {
+            if (err.name !== 'CanceledError' && err.code !== 'ERR_CANCELED' && isMounted) {
+              console.error('Erro ao ler status do motor:', err)
+            }
           }
         }
 
         // Lê pressão A convertida diretamente do Modbus
-        if (registros.pressaoAConv) {
+        if (registros.pressaoAConv && isMounted) {
           try {
-            const response = await api.get(`/ModbusConfig/${registros.pressaoAConv.id}/read`)
-            const valor = Number(response.data.valor)
-            setPressaoA(isNaN(valor) ? null : valor)
-          } catch (err) {
-            console.error('Erro ao ler pressão A convertida:', err)
-            setPressaoA(null)
+            const response = await api.get(`/ModbusConfig/${registros.pressaoAConv.id}/read`, {
+              signal: abortController.signal
+            })
+            if (isMounted) {
+              const valor = Number(response.data.valor)
+              setPressaoA(isNaN(valor) ? null : valor)
+            }
+          } catch (err: any) {
+            if (err.name !== 'CanceledError' && err.code !== 'ERR_CANCELED' && isMounted) {
+              console.error('Erro ao ler pressão A convertida:', err)
+              setPressaoA(null)
+            }
           }
         }
 
         // Lê pressão B convertida diretamente do Modbus
-        if (registros.pressaoBConv) {
+        if (registros.pressaoBConv && isMounted) {
           try {
-            const response = await api.get(`/ModbusConfig/${registros.pressaoBConv.id}/read`)
-            const valor = Number(response.data.valor)
-            setPressaoB(isNaN(valor) ? null : valor)
-          } catch (err) {
-            console.error('Erro ao ler pressão B convertida:', err)
-            setPressaoB(null)
+            const response = await api.get(`/ModbusConfig/${registros.pressaoBConv.id}/read`, {
+              signal: abortController.signal
+            })
+            if (isMounted) {
+              const valor = Number(response.data.valor)
+              setPressaoB(isNaN(valor) ? null : valor)
+            }
+          } catch (err: any) {
+            if (err.name !== 'CanceledError' && err.code !== 'ERR_CANCELED' && isMounted) {
+              console.error('Erro ao ler pressão B convertida:', err)
+              setPressaoB(null)
+            }
           }
         }
 
         // Lê pressão geral convertida diretamente do Modbus
-        if (registros.pressaoGeralConv) {
+        if (registros.pressaoGeralConv && isMounted) {
           try {
-            const response = await api.get(`/ModbusConfig/${registros.pressaoGeralConv.id}/read`)
-            const valor = Number(response.data.valor)
-            setPressaoGeral(isNaN(valor) ? null : valor)
-          } catch (err) {
-            console.error('Erro ao ler pressão geral convertida:', err)
-            setPressaoGeral(null)
+            const response = await api.get(`/ModbusConfig/${registros.pressaoGeralConv.id}/read`, {
+              signal: abortController.signal
+            })
+            if (isMounted) {
+              const valor = Number(response.data.valor)
+              setPressaoGeral(isNaN(valor) ? null : valor)
+            }
+          } catch (err: any) {
+            if (err.name !== 'CanceledError' && err.code !== 'ERR_CANCELED' && isMounted) {
+              console.error('Erro ao ler pressão geral convertida:', err)
+              setPressaoGeral(null)
+            }
           }
         }
-      } catch (err) {
-        console.error('Erro ao atualizar status:', err)
+      } catch (err: any) {
+        if (err.name !== 'CanceledError' && err.code !== 'ERR_CANCELED' && isMounted) {
+          console.error('Erro ao atualizar status:', err)
+        }
+      } finally {
+        requestInProgress = false
       }
     }
 
     atualizarStatus()
     const interval = setInterval(atualizarStatus, 2000) // Atualiza a cada 2 segundos
 
-    return () => clearInterval(interval)
+    return () => {
+      isMounted = false
+      abortController.abort()
+      clearInterval(interval)
+    }
   }, [
     registros.statusMotor?.id, 
     registros.pressaoAConv?.id, 
