@@ -125,6 +125,13 @@ public class CilindroController : ControllerBase
                 return BadRequest(new { message = "ClienteId é obrigatório e deve ser um valor válido" });
             }
 
+            // Remove erros de validação da propriedade de navegação "Cliente" 
+            // pois só precisamos do ClienteId, não do objeto Cliente completo
+            if (ModelState.ContainsKey("Cliente"))
+            {
+                ModelState.Remove("Cliente");
+            }
+
             if (!ModelState.IsValid)
             {
                 // Coletar todos os erros de validação
