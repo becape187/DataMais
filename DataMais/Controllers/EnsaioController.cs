@@ -4,7 +4,6 @@ using System.ComponentModel.DataAnnotations;
 using DataMais.Data;
 using DataMais.Models;
 using DataMais.Services;
-using DataMais.Configuration;
 using InfluxDB.Client;
 using InfluxDB.Client.Api.Domain;
 using InfluxDB.Client.Writes;
@@ -234,7 +233,7 @@ namespace DataMais.Controllers;
     {
         try
         {
-            ModbusConfig? pressaoRegistro = null;
+            DataMais.Models.ModbusConfig? pressaoRegistro = null;
 
             var ensaio = await _context.Ensaios.FindAsync(id);
             if (ensaio == null)
@@ -291,7 +290,7 @@ namespace DataMais.Controllers;
                 return NotFound(new { message = "Registro Modbus de pressão não encontrado (PRESSAO_GERAL_CONV / PRESSAO_GERAL / PRESSAO_A_CONV / PRESSAO_B_CONV)" });
             }
 
-            var valorObj = await _modbusService.LerRegistroAsync(pressaoRegistro.Id);
+            var valorObj = await _modbusService.LerRegistroAsync(pressaoRegistro!.Id);
             if (valorObj == null)
             {
                 return StatusCode(500, new { message = "Falha ao ler pressão do Modbus" });
@@ -391,7 +390,7 @@ namespace DataMais.Controllers;
         using var influxClient = new InfluxDBClient(appConfig.Influx.Url, appConfig.Influx.Token);
         var deleteApi = influxClient.GetDeleteApi();
 
-        await deleteApi.DeleteAsync(from, to, predicate, appConfig.Influx.Bucket, appConfig.Influx.Organization);
+        await deleteApi.Delete(from, to, predicate, appConfig.Influx.Bucket, appConfig.Influx.Organization);
 
         _logger.LogInformation("Leituras do ensaio {EnsaioId} removidas do InfluxDB no intervalo {From} - {To}", ensaio.Id, from, to);
     }
