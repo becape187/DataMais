@@ -21,6 +21,22 @@ interface ModbusRegistro {
   ativo: boolean
 }
 
+interface Sensor {
+  id: number
+  nome: string
+  tipo: string
+  inputMin?: number
+  outputMin?: number
+  inputMax?: number
+  outputMax?: number
+  modbusConfigId?: number
+  modbusConfig?: {
+    id: number
+    nome: string
+  }
+  ativo: boolean
+}
+
 // Versão da página - incrementar quando houver mudanças importantes
 const VERSAO_PAGINA = '1.0.3'
 
@@ -40,24 +56,33 @@ const ControleHidraulico = () => {
     pressaoB?: ModbusRegistro
   }>({})
 
+  // Estados dos sensores
+  const [sensores, setSensores] = useState<{
+    sensorA?: Sensor
+    sensorB?: Sensor
+    pressaoGeral?: Sensor
+  }>({})
+
   // Estados de controle
   const [motorStatus, setMotorStatus] = useState(false)
   const [pressaoA, setPressaoA] = useState<number | null>(null)
   const [pressaoB, setPressaoB] = useState<number | null>(null)
+  const [pressaoGeral, setPressaoGeral] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
 
-  // Busca os registros Modbus específicos
+  // Busca os registros Modbus específicos e sensores
   useEffect(() => {
-    const buscarRegistros = async () => {
+    const buscarRegistrosESensores = async () => {
       try {
         setLoading(true)
         setError(null)
 
-        const response = await api.get('/ModbusConfig')
-        const todosRegistros: ModbusRegistro[] = response.data
+        // Busca registros Modbus
+        const responseModbus = await api.get('/ModbusConfig')
+        const todosRegistros: ModbusRegistro[] = responseModbus.data
 
         const registrosEncontrados: typeof registros = {}
 
@@ -98,6 +123,51 @@ const ControleHidraulico = () => {
 
         setRegistros(registrosEncontrados)
 
+        // Busca sensores
+        try {
+          const responseSensores = await api.get('/Sensor')
+          const todosSensores: Sensor[] = responseSensores.data
+
+          const sensoresEncontrados: typeof sensores = {}
+
+          // Busca sensores por nome (A, B e pressão geral)
+          todosSensores.forEach(sensor => {
+            if (!sensor.ativo) return
+
+            const nomeUpper = sensor.nome.toUpperCase()
+            if (nomeUpper.includes('A') && nomeUpper.includes('PRESSÃO')) {
+              sensoresEncontrados.sensorA = sensor
+            } else if (nomeUpper.includes('B') && nomeUpper.includes('PRESSÃO')) {
+              sensoresEncontrados.sensorB = sensor
+            } else if (nomeUpper.includes('GERAL') || nomeUpper.includes('PRESSÃO GERAL')) {
+              sensoresEncontrados.pressaoGeral = sensor
+            }
+          })
+
+          // Se não encontrou por nome, tenta buscar por tipo e ordem
+          if (!sensoresEncontrados.sensorA || !sensoresEncontrados.sensorB) {
+            const sensoresPressao = todosSensores.filter(s => 
+              s.ativo && s.tipo.toLowerCase().includes('pressão')
+            )
+            
+            if (sensoresPressao.length >= 1 && !sensoresEncontrados.sensorA) {
+              sensoresEncontrados.sensorA = sensoresPressao[0]
+            }
+            if (sensoresPressao.length >= 2 && !sensoresEncontrados.sensorB) {
+              sensoresEncontrados.sensorB = sensoresPressao[1]
+            }
+            if (sensoresPressao.length >= 3 && !sensoresEncontrados.pressaoGeral) {
+              sensoresEncontrados.pressaoGeral = sensoresPressao[2]
+            }
+          }
+
+          setSensores(sensoresEncontrados)
+          console.log('Sensores encontrados:', sensoresEncontrados)
+        } catch (err: any) {
+          console.warn('Erro ao buscar sensores:', err)
+          // Não bloqueia a aplicação se não encontrar sensores
+        }
+
         console.log('Registros Modbus encontrados:', registrosEncontrados)
 
         // Verifica quais registros não foram encontrados
@@ -126,7 +196,7 @@ const ControleHidraulico = () => {
       }
     }
 
-    buscarRegistros()
+    buscarRegistrosESensores()
   }, [])
 
   // Atualiza status do motor e pressões periodicamente
@@ -142,16 +212,58 @@ const ControleHidraulico = () => {
           setMotorStatus(valor === true || valor === 1 || valor === '1')
         }
 
-        // Lê pressão A
-        if (registros.pressaoA) {
-          const response = await api.get(`/ModbusConfig/${registros.pressaoA.id}/read`)
-          setPressaoA(Number(response.data.valor))
+        // Lê pressão A usando o endpoint do sensor que aplica conversão linear
+        if (sensores.sensorA?.id) {
+          try {
+            const response = await api.get(`/Sensor/${sensores.sensorA.id}/read`)
+            const valor = Number(response.data.valorConvertido)
+            setPressaoA(valor)
+          } catch (err) {
+            console.error('Erro ao ler pressão A:', err)
+            setPressaoA(null)
+          }
+        } else if (registros.pressaoA) {
+          // Fallback: lê direto do Modbus se não houver sensor configurado
+          try {
+            const response = await api.get(`/ModbusConfig/${registros.pressaoA.id}/read`)
+            setPressaoA(Number(response.data.valor))
+          } catch (err) {
+            console.error('Erro ao ler pressão A:', err)
+            setPressaoA(null)
+          }
         }
 
-        // Lê pressão B
-        if (registros.pressaoB) {
-          const response = await api.get(`/ModbusConfig/${registros.pressaoB.id}/read`)
-          setPressaoB(Number(response.data.valor))
+        // Lê pressão B usando o endpoint do sensor que aplica conversão linear
+        if (sensores.sensorB?.id) {
+          try {
+            const response = await api.get(`/Sensor/${sensores.sensorB.id}/read`)
+            const valor = Number(response.data.valorConvertido)
+            setPressaoB(valor)
+          } catch (err) {
+            console.error('Erro ao ler pressão B:', err)
+            setPressaoB(null)
+          }
+        } else if (registros.pressaoB) {
+          // Fallback: lê direto do Modbus se não houver sensor configurado
+          try {
+            const response = await api.get(`/ModbusConfig/${registros.pressaoB.id}/read`)
+            setPressaoB(Number(response.data.valor))
+          } catch (err) {
+            console.error('Erro ao ler pressão B:', err)
+            setPressaoB(null)
+          }
+        }
+
+        // Lê pressão geral usando o endpoint do sensor que aplica conversão linear
+        if (sensores.pressaoGeral?.id) {
+          try {
+            const response = await api.get(`/Sensor/${sensores.pressaoGeral.id}/read`)
+            const valor = Number(response.data.valorConvertido)
+            setPressaoGeral(valor)
+          } catch (err) {
+            console.error('Erro ao ler pressão geral:', err)
+            setPressaoGeral(null)
+          }
         }
       } catch (err) {
         console.error('Erro ao atualizar status:', err)
@@ -162,7 +274,14 @@ const ControleHidraulico = () => {
     const interval = setInterval(atualizarStatus, 2000) // Atualiza a cada 2 segundos
 
     return () => clearInterval(interval)
-  }, [registros.statusMotor?.id, registros.pressaoA?.id, registros.pressaoB?.id])
+  }, [
+    registros.statusMotor?.id, 
+    registros.pressaoA?.id, 
+    registros.pressaoB?.id,
+    sensores.sensorA?.id,
+    sensores.sensorB?.id,
+    sensores.pressaoGeral?.id
+  ])
 
   const escreverRegistro = async (
     registro: ModbusRegistro, 
@@ -572,12 +691,27 @@ const ControleHidraulico = () => {
           <div className="info-panel">
             <div className="info-item">
               <span className="info-label">Pressão A:</span>
-              <span className="info-value">{pressaoA !== null ? `${pressaoA} bar` : '--'}</span>
+              <span className="info-value">
+                {pressaoA !== null ? `${pressaoA.toFixed(2)} bar` : '--'}
+                {sensores.sensorA && ` (${sensores.sensorA.nome})`}
+              </span>
             </div>
             <div className="info-item">
               <span className="info-label">Pressão B:</span>
-              <span className="info-value">{pressaoB !== null ? `${pressaoB} bar` : '--'}</span>
+              <span className="info-value">
+                {pressaoB !== null ? `${pressaoB.toFixed(2)} bar` : '--'}
+                {sensores.sensorB && ` (${sensores.sensorB.nome})`}
+              </span>
             </div>
+            {pressaoGeral !== null && (
+              <div className="info-item">
+                <span className="info-label">Pressão Geral:</span>
+                <span className="info-value">
+                  {pressaoGeral.toFixed(2)} bar
+                  {sensores.pressaoGeral && ` (${sensores.pressaoGeral.nome})`}
+                </span>
+              </div>
+            )}
             <div className="info-item">
               <span className="info-label">Motor:</span>
               <span className="info-value">{motorStatus ? 'Ligado' : 'Desligado'}</span>

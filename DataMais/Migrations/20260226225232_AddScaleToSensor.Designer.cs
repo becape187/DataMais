@@ -3,6 +3,7 @@ using System;
 using DataMais.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace DataMais.Migrations
 {
     [DbContext(typeof(DataMaisDbContext))]
-    partial class DataMaisDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260226225232_AddScaleToSensor")]
+    partial class AddScaleToSensor
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -401,12 +404,6 @@ namespace DataMais.Migrations
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)");
 
-                    b.Property<decimal?>("InputMax")
-                        .HasColumnType("decimal(10,6)");
-
-                    b.Property<decimal?>("InputMin")
-                        .HasColumnType("decimal(10,6)");
-
                     b.Property<int?>("ModbusConfigId")
                         .HasColumnType("integer");
 
@@ -415,10 +412,7 @@ namespace DataMais.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
-                    b.Property<decimal?>("OutputMax")
-                        .HasColumnType("decimal(10,6)");
-
-                    b.Property<decimal?>("OutputMin")
+                    b.Property<decimal?>("Scale")
                         .HasColumnType("decimal(10,6)");
 
                     b.Property<string>("Tipo")

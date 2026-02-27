@@ -1,28 +1,45 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useParams, Link } from 'react-router-dom'
+import api from '../config/api'
 import './ConfiguracaoSensor.css'
-
-interface PontoCalibracao {
-  x: number
-  y: number
-}
 
 const ConfiguracaoSensor = () => {
   const { id } = useParams<{ id: string }>()
-  const [pontos, setPontos] = useState<PontoCalibracao[]>([
-    { x: 0, y: 0 },
-    { x: 0, y: 0 },
-    { x: 0, y: 0 },
-    { x: 0, y: 0 }
-  ])
-  const [range, setRange] = useState('0-350')
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  
+  // Campos de calibração linear (2 pontos)
+  const [x1, setX1] = useState<number>(0) // InputMin (valor AD mínimo)
+  const [y1, setY1] = useState<number>(0) // OutputMin (valor medido mínimo)
+  const [x2, setX2] = useState<number>(0) // InputMax (valor AD máximo)
+  const [y2, setY2] = useState<number>(0) // OutputMax (valor medido máximo)
+  
   const [certificado, setCertificado] = useState<File | null>(null)
 
-  const handlePontoChange = (index: number, field: 'x' | 'y', value: number) => {
-    const novosPontos = [...pontos]
-    novosPontos[index][field] = value
-    setPontos(novosPontos)
-  }
+  useEffect(() => {
+    const carregarSensor = async () => {
+      if (!id) return
+      
+      try {
+        setLoading(true)
+        const response = await api.get(`/Sensor/${id}`)
+        const sensor = response.data
+        
+        setX1(sensor.inputMin || 0)
+        setY1(sensor.outputMin || 0)
+        setX2(sensor.inputMax || 0)
+        setY2(sensor.outputMax || 0)
+      } catch (err: any) {
+        console.error('Erro ao carregar sensor:', err)
+        setError('Erro ao carregar dados do sensor')
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    carregarSensor()
+  }, [id])
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -30,10 +47,29 @@ const ConfiguracaoSensor = () => {
     }
   }
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    // Aqui seria a lógica de salvar
-    alert('Configuração salva com sucesso!')
+    
+    if (!id) return
+
+    try {
+      setSaving(true)
+      setError(null)
+
+      await api.put(`/Sensor/${id}`, {
+        inputMin: x1,
+        outputMin: y1,
+        inputMax: x2,
+        outputMax: y2
+      })
+
+      alert('Configuração salva com sucesso!')
+    } catch (err: any) {
+      console.error('Erro ao salvar configuração:', err)
+      setError('Erro ao salvar configuração: ' + (err.response?.data?.message || err.message))
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -46,54 +82,94 @@ const ConfiguracaoSensor = () => {
         </div>
       </div>
 
+      {loading && (
+        <div className="loading-message">
+          Carregando configuração do sensor...
+        </div>
+      )}
+
+      {error && (
+        <div className="message message-error">
+          {error}
+        </div>
+      )}
+
       <form onSubmit={handleSubmit} className="config-form">
         <div className="form-section">
-          <h2>Informações do Sensor</h2>
-          <div className="form-row">
-            <div className="form-group">
-              <label>Range do Sensor (bar)</label>
-              <input 
-                type="text" 
-                value={range}
-                onChange={(e) => setRange(e.target.value)}
-                placeholder="0-350"
-              />
-            </div>
-          </div>
-        </div>
-
-        <div className="form-section">
-          <h2>Pontos de Correção de Curva</h2>
+          <h2>Calibração Linear do Sensor</h2>
           <p className="section-description">
-            Configure 4 pontos para correção da curva de calibração
+            Configure dois pontos para calibração linear: (x1, y1) e (x2, y2)
+            <br />
+            <strong>x1, x2:</strong> Valores AD (Analógico-Digital) lidos do Modbus
+            <br />
+            <strong>y1, y2:</strong> Valores medidos correspondentes (ex: pressão em bar)
           </p>
-          <div className="pontos-grid">
-            {pontos.map((ponto, index) => (
-              <div key={index} className="ponto-card">
-                <h3>Ponto {index} (x{index}, y{index})</h3>
-                <div className="ponto-inputs">
-                  <div className="form-group">
-                    <label>X{index}</label>
-                    <input 
-                      type="number" 
-                      step="0.01"
-                      value={ponto.x}
-                      onChange={(e) => handlePontoChange(index, 'x', parseFloat(e.target.value) || 0)}
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label>Y{index}</label>
-                    <input 
-                      type="number" 
-                      step="0.01"
-                      value={ponto.y}
-                      onChange={(e) => handlePontoChange(index, 'y', parseFloat(e.target.value) || 0)}
-                    />
-                  </div>
+          
+          <div className="calibracao-grid">
+            <div className="ponto-card">
+              <h3>Ponto 1 (Mínimo)</h3>
+              <div className="ponto-inputs">
+                <div className="form-group">
+                  <label>X1 - InputMin (Valor AD mínimo)</label>
+                  <input 
+                    type="number" 
+                    step="0.01"
+                    value={x1}
+                    onChange={(e) => setX1(parseFloat(e.target.value) || 0)}
+                    required
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Y1 - OutputMin (Valor medido mínimo)</label>
+                  <input 
+                    type="number" 
+                    step="0.01"
+                    value={y1}
+                    onChange={(e) => setY1(parseFloat(e.target.value) || 0)}
+                    required
+                  />
                 </div>
               </div>
-            ))}
+            </div>
+
+            <div className="ponto-card">
+              <h3>Ponto 2 (Máximo)</h3>
+              <div className="ponto-inputs">
+                <div className="form-group">
+                  <label>X2 - InputMax (Valor AD máximo)</label>
+                  <input 
+                    type="number" 
+                    step="0.01"
+                    value={x2}
+                    onChange={(e) => setX2(parseFloat(e.target.value) || 0)}
+                    required
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Y2 - OutputMax (Valor medido máximo)</label>
+                  <input 
+                    type="number" 
+                    step="0.01"
+                    value={y2}
+                    onChange={(e) => setY2(parseFloat(e.target.value) || 0)}
+                    required
+                  />
+                </div>
+              </div>
+            </div>
           </div>
+
+          {(x1 !== 0 || y1 !== 0 || x2 !== 0 || y2 !== 0) && x2 !== x1 && (
+            <div className="calibracao-info">
+              <h4>Fórmula de Conversão:</h4>
+              <p>
+                <code>Output = (({y2} - {y1}) / ({x2} - {x1})) × (Input - {x1}) + {y1}</code>
+              </p>
+              <p>
+                <strong>Inclinação (slope):</strong> {((y2 - y1) / (x2 - x1)).toFixed(6)}
+              </p>
+            </div>
+          )}
         </div>
 
         <div className="form-section">
@@ -138,8 +214,8 @@ const ConfiguracaoSensor = () => {
           <Link to="/sensores" className="btn btn-secondary">
             Cancelar
           </Link>
-          <button type="submit" className="btn btn-primary">
-            💾 Salvar Configuração
+          <button type="submit" className="btn btn-primary" disabled={saving || loading}>
+            {saving ? '⏳ Salvando...' : '💾 Salvar Configuração'}
           </button>
         </div>
       </form>

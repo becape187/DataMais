@@ -1,50 +1,63 @@
+import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
+import api from '../config/api'
 import './Sensores.css'
 
 interface Sensor {
   id: number
   nome: string
-  modelo: string
-  range: string
-  status: 'ativo' | 'inativo'
-  ultimaCalibracao: string
+  descricao?: string
+  tipo: string
+  unidade?: string
+  inputMin?: number
+  outputMin?: number
+  inputMax?: number
+  outputMax?: number
+  modbusConfigId?: number
+  modbusConfig?: {
+    id: number
+    nome: string
+    enderecoRegistro: number
+    fatorConversao?: number
+    offset?: number
+  }
+  ativo: boolean
+  dataCriacao?: string
+  dataAtualizacao?: string
 }
 
 const Sensores = () => {
-  const sensores: Sensor[] = [
-    { 
-      id: 1, 
-      nome: 'Sensor de Pressão 01', 
-      modelo: 'PT-350', 
-      range: '0-350 bar',
-      status: 'ativo',
-      ultimaCalibracao: '15/11/2024'
-    },
-    { 
-      id: 2, 
-      nome: 'Sensor de Pressão 02', 
-      modelo: 'PT-350', 
-      range: '0-350 bar',
-      status: 'ativo',
-      ultimaCalibracao: '15/11/2024'
-    },
-    { 
-      id: 3, 
-      nome: 'Sensor de Pressão 03', 
-      modelo: 'PT-350', 
-      range: '0-350 bar',
-      status: 'ativo',
-      ultimaCalibracao: '10/11/2024'
-    },
-    { 
-      id: 4, 
-      nome: 'Sensor de Pressão 04', 
-      modelo: 'PT-350', 
-      range: '0-350 bar',
-      status: 'inativo',
-      ultimaCalibracao: '05/11/2024'
-    },
-  ]
+  const [sensores, setSensores] = useState<Sensor[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    const buscarSensores = async () => {
+      try {
+        setLoading(true)
+        setError(null)
+        const response = await api.get('/Sensor')
+        setSensores(response.data)
+      } catch (err: any) {
+        console.error('Erro ao buscar sensores:', err)
+        setError('Erro ao carregar sensores: ' + (err.response?.data?.message || err.message))
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    buscarSensores()
+  }, [])
+
+  const formatarData = (data?: string) => {
+    if (!data) return '--'
+    try {
+      const date = new Date(data)
+      return date.toLocaleDateString('pt-BR')
+    } catch {
+      return '--'
+    }
+  }
 
   return (
     <div className="sensores">
@@ -58,27 +71,59 @@ const Sensores = () => {
         </button>
       </div>
 
+      {error && (
+        <div className="message message-error">
+          {error}
+        </div>
+      )}
+
+      {loading && (
+        <div className="loading-message">
+          Carregando sensores...
+        </div>
+      )}
+
+      {!loading && sensores.length === 0 && (
+        <div className="message">
+          Nenhum sensor cadastrado. Clique em "Novo Sensor" para adicionar.
+        </div>
+      )}
+
       <div className="sensores-grid">
         {sensores.map(sensor => (
           <div key={sensor.id} className="sensor-card">
             <div className="sensor-header">
               <div>
                 <h3>{sensor.nome}</h3>
-                <p className="sensor-modelo">{sensor.modelo}</p>
+                <p className="sensor-modelo">{sensor.tipo} {sensor.unidade ? `(${sensor.unidade})` : ''}</p>
               </div>
-              <span className={`status-badge ${sensor.status}`}>
-                {sensor.status === 'ativo' ? '● Ativo' : '○ Inativo'}
+              <span className={`status-badge ${sensor.ativo ? 'ativo' : 'inativo'}`}>
+                {sensor.ativo ? '● Ativo' : '○ Inativo'}
               </span>
             </div>
             
             <div className="sensor-info">
               <div className="info-row">
-                <span className="info-label">Range:</span>
-                <span className="info-value">{sensor.range}</span>
+                <span className="info-label">Tipo:</span>
+                <span className="info-value">{sensor.tipo}</span>
               </div>
+              {(sensor.inputMin !== null && sensor.inputMin !== undefined) && (
+                <div className="info-row">
+                  <span className="info-label">Calibração:</span>
+                  <span className="info-value">
+                    ({sensor.inputMin}, {sensor.outputMin}) → ({sensor.inputMax}, {sensor.outputMax})
+                  </span>
+                </div>
+              )}
+              {sensor.modbusConfig && (
+                <div className="info-row">
+                  <span className="info-label">Modbus:</span>
+                  <span className="info-value">{sensor.modbusConfig.nome}</span>
+                </div>
+              )}
               <div className="info-row">
-                <span className="info-label">Última Calibração:</span>
-                <span className="info-value">{sensor.ultimaCalibracao}</span>
+                <span className="info-label">Criado em:</span>
+                <span className="info-value">{formatarData(sensor.dataCriacao)}</span>
               </div>
             </div>
 

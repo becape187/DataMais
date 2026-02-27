@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace DataMais.Models;
 
@@ -24,6 +25,20 @@ public class Sensor
     // Referência à configuração Modbus
     public int? ModbusConfigId { get; set; }
     public virtual ModbusConfig? ModbusConfig { get; set; }
+
+    // Calibração linear: InputMin/OutputMin (ponto 1) e InputMax/OutputMax (ponto 2)
+    // Conversão: Output = ((OutputMax - OutputMin) / (InputMax - InputMin)) * (Input - InputMin) + OutputMin
+    [Column(TypeName = "decimal(10,6)")]
+    public decimal? InputMin { get; set; } // Valor AD mínimo (x1)
+
+    [Column(TypeName = "decimal(10,6)")]
+    public decimal? OutputMin { get; set; } // Valor medido mínimo correspondente (y1)
+
+    [Column(TypeName = "decimal(10,6)")]
+    public decimal? InputMax { get; set; } // Valor AD máximo (x2)
+
+    [Column(TypeName = "decimal(10,6)")]
+    public decimal? OutputMax { get; set; } // Valor medido máximo correspondente (y2)
 
     public bool Ativo { get; set; } = true;
 
