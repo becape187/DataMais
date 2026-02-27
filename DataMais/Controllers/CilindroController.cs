@@ -115,9 +115,29 @@ public class CilindroController : ControllerBase
     {
         try
         {
+            // Validação explícita do ClienteId antes de verificar ModelState
+            if (cilindro.ClienteId == 0)
+            {
+                return BadRequest(new { message = "ClienteId é obrigatório e deve ser um valor válido" });
+            }
+
             if (!ModelState.IsValid)
             {
+                // Adiciona mensagem específica sobre ClienteId se estiver faltando
+                if (cilindro.ClienteId == 0)
+                {
+                    ModelState.AddModelError("ClienteId", "ClienteId é obrigatório");
+                }
                 return BadRequest(ModelState);
+            }
+
+            // Verificar se cliente existe
+            var clienteExiste = await _context.Clientes
+                .AnyAsync(c => c.Id == cilindro.ClienteId);
+            
+            if (!clienteExiste)
+            {
+                return BadRequest(new { message = $"Cliente com ID {cilindro.ClienteId} não encontrado" });
             }
 
             // Verificar se código interno já existe
@@ -137,15 +157,6 @@ public class CilindroController : ControllerBase
             if (codigoClienteExiste)
             {
                 return Conflict(new { message = "Código cliente já cadastrado para este cliente" });
-            }
-
-            // Verificar se cliente existe
-            var clienteExiste = await _context.Clientes
-                .AnyAsync(c => c.Id == cilindro.ClienteId);
-            
-            if (!clienteExiste)
-            {
-                return BadRequest(new { message = "Cliente não encontrado" });
             }
 
             cilindro.DataCriacao = DateTime.UtcNow;

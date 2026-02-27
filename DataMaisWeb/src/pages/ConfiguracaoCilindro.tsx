@@ -162,13 +162,21 @@ const ConfiguracaoCilindro = () => {
         return
       }
 
+      const clienteIdNum = Number(clienteId)
+      if (isNaN(clienteIdNum) || clienteIdNum === 0) {
+        alert('Erro: Cliente ID inválido. Por favor, recarregue a página e tente novamente.')
+        return
+      }
+
       // Preparar dados para envio
       const cilindroData: any = {
         nome: formData.nome.trim(),
         codigoCliente: formData.codigoCliente.trim(),
         codigoInterno: formData.codigoInterno.trim(),
-        clienteId: Number(clienteId)
+        clienteId: clienteIdNum
       }
+      
+      console.log('Enviando dados do cilindro:', cilindroData) // Debug
 
       // Adicionar campos opcionais apenas se tiverem valor
       if (formData.descricao && formData.descricao.trim()) {
