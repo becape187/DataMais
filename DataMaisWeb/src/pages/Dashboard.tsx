@@ -5,6 +5,7 @@ import './Dashboard.css'
 interface ModbusRegistro {
   id: number
   nome: string
+  funcaoModbus?: string
   ativo: boolean
 }
 
@@ -41,22 +42,6 @@ interface Cilindro {
   codigoInterno: string
 }
 
-interface Sensor {
-  id: number
-  nome: string
-  tipo: string
-  inputMin?: number
-  outputMin?: number
-  inputMax?: number
-  outputMax?: number
-  ativo: boolean
-}
-
-interface ModbusRegistro {
-  id: number
-  nome: string
-  ativo: boolean
-}
 
 const Dashboard = () => {
   // Estados para dados reais
