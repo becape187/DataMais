@@ -437,15 +437,6 @@ const Dashboard = () => {
       {/* Card de destaque - Cliente e Cilindro */}
       {(clienteSelecionado || cilindroSelecionado) && (
         <div className="sistema-card">
-          <div className="sistema-header">
-            <h2>🔧 Sistema Configurado</h2>
-            <button 
-              className="btn btn-secondary btn-small"
-              onClick={() => setShowConfigModal(true)}
-            >
-              ✏️ Alterar
-            </button>
-          </div>
           <div className="sistema-content">
             <div className="sistema-item">
               <div className="sistema-icon">🏢</div>

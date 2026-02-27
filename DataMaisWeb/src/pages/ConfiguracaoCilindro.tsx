@@ -169,11 +169,13 @@ const ConfiguracaoCilindro = () => {
       }
 
       // Preparar dados para envio
+      // Envia tanto em camelCase quanto em PascalCase para máxima compatibilidade com o backend
       const cilindroData: any = {
         nome: formData.nome.trim(),
         codigoCliente: formData.codigoCliente.trim(),
         codigoInterno: formData.codigoInterno.trim(),
-        clienteId: clienteIdNum
+        clienteId: clienteIdNum,
+        ClienteId: clienteIdNum
       }
       
       console.log('Enviando dados do cilindro:', cilindroData) // Debug

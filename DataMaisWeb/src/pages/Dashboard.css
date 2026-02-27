@@ -225,11 +225,11 @@ table tbody tr:hover {
 
 /* Card de Sistema - Destaque */
 .sistema-card {
-  background: linear-gradient(135deg, var(--modec-red) 0%, #c01e24 100%);
+  background: linear-gradient(135deg, #0b2147 0%, #1f4f96 50%, #2780e3 100%);
   border-radius: 16px;
   padding: 32px;
   margin-bottom: 32px;
-  box-shadow: 0 8px 24px rgba(192, 30, 36, 0.3);
+  box-shadow: 0 8px 24px rgba(15, 35, 80, 0.35);
   color: white;
   position: relative;
   overflow: hidden;
@@ -269,8 +269,9 @@ table tbody tr:hover {
 
 .sistema-content {
   display: flex;
-  align-items: center;
-  gap: 32px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 20px;
   position: relative;
   z-index: 1;
 }
@@ -279,7 +280,6 @@ table tbody tr:hover {
   display: flex;
   align-items: center;
   gap: 16px;
-  flex: 1;
 }
 
 .sistema-icon {
@@ -316,10 +316,10 @@ table tbody tr:hover {
 }
 
 .sistema-divider {
-  width: 2px;
-  height: 60px;
-  background: rgba(255, 255, 255, 0.3);
-  border-radius: 2px;
+  width: 100%;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.35);
+  border-radius: 1px;
 }
 
 /* Modal Styles */
