@@ -285,8 +285,9 @@ public class RelatorioController : ControllerBase
 
                         if (time != null && value != null)
                         {
-                            // Converte o timestamp para formato legível (HH:mm:ss)
-                            var timeStr = time.Value.ToLocalTime().ToString("HH:mm:ss");
+                            // Converte o timestamp Instant para DateTime local e depois para formato legível (HH:mm:ss)
+                            var dateTime = time.Value.ToDateTimeUtc().ToLocalTime();
+                            var timeStr = dateTime.ToString("HH:mm:ss");
                             
                             double pressao = 0;
                             if (value is IConvertible)
