@@ -5,6 +5,13 @@ public class AppConfig
     public DatabaseConfig Database { get; set; } = new();
     public InfluxConfig Influx { get; set; } = new();
     public ModbusConfig Modbus { get; set; } = new();
+    public SistemaConfig Sistema { get; set; } = new();
+}
+
+public class SistemaConfig
+{
+    public int? ClienteId { get; set; }
+    public int? CilindroId { get; set; }
 }
 
 public class ModbusConfig

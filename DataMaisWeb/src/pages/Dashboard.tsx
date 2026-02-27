@@ -34,6 +34,13 @@ interface Cliente {
   relatorios?: Relatorio[]
 }
 
+interface Cilindro {
+  id: number
+  nome: string
+  codigoCliente: string
+  codigoInterno: string
+}
+
 const Dashboard = () => {
   // Estados para dados reais
   const [motorStatus, setMotorStatus] = useState(false)
@@ -45,6 +52,14 @@ const Dashboard = () => {
   const [relatorios, setRelatorios] = useState<Relatorio[]>([])
   const [loading, setLoading] = useState(true)
   const [modbusConectado, setModbusConectado] = useState(false)
+  
+  // Estados para cliente e cilindro selecionado
+  const [clienteSelecionado, setClienteSelecionado] = useState<Cliente | null>(null)
+  const [cilindroSelecionado, setCilindroSelecionado] = useState<Cilindro | null>(null)
+  const [clientes, setClientes] = useState<Cliente[]>([])
+  const [cilindros, setCilindros] = useState<Cilindro[]>([])
+  const [showConfigModal, setShowConfigModal] = useState(false)
+  const [savingConfig, setSavingConfig] = useState(false)
 
   // Estados dos registros Modbus
   const [registros, setRegistros] = useState<{
@@ -59,6 +74,64 @@ const Dashboard = () => {
     sensorB?: Sensor
     pressaoGeral?: Sensor
   }>({})
+
+  // Busca cliente e cilindro selecionados
+  useEffect(() => {
+    const buscarConfiguracaoSistema = async () => {
+      try {
+        const response = await api.get('/config')
+        const config = response.data
+        
+        if (config?.sistema?.clienteId) {
+          try {
+            const clienteResponse = await api.get(`/Cliente/${config.sistema.clienteId}`)
+            setClienteSelecionado(clienteResponse.data)
+            
+            // Busca cilindros do cliente
+            if (config.sistema.cilindroId) {
+              try {
+                const cilindroResponse = await api.get(`/cilindro/${config.sistema.cilindroId}`)
+                setCilindroSelecionado(cilindroResponse.data)
+              } catch (err) {
+                console.warn('Erro ao buscar cilindro selecionado:', err)
+              }
+            }
+          } catch (err) {
+            console.warn('Erro ao buscar cliente selecionado:', err)
+          }
+        }
+      } catch (err) {
+        console.warn('Erro ao buscar configuração do sistema:', err)
+      }
+    }
+
+    buscarConfiguracaoSistema()
+  }, [])
+
+  // Busca lista de clientes e cilindros para o modal
+  useEffect(() => {
+    if (showConfigModal) {
+      const buscarListas = async () => {
+        try {
+          const clientesResponse = await api.get('/Cliente')
+          setClientes(clientesResponse.data || [])
+          
+          if (clienteSelecionado?.id) {
+            try {
+              const cilindrosResponse = await api.get(`/Cilindro/cliente/${clienteSelecionado.id}`)
+              setCilindros(cilindrosResponse.data || [])
+            } catch (err) {
+              console.warn('Erro ao buscar cilindros:', err)
+            }
+          }
+        } catch (err) {
+          console.error('Erro ao buscar listas:', err)
+        }
+      }
+      
+      buscarListas()
+    }
+  }, [showConfigModal, clienteSelecionado?.id])
 
   // Busca os registros Modbus e sensores
   useEffect(() => {
@@ -299,12 +372,174 @@ const Dashboard = () => {
     }
   }
 
+  const handleSalvarConfiguracao = async () => {
+    try {
+      setSavingConfig(true)
+      
+      // Busca config atual
+      const configResponse = await api.get('/config')
+      const config = configResponse.data
+      
+      // Atualiza com cliente e cilindro selecionados
+      const configAtualizado = {
+        ...config,
+        sistema: {
+          clienteId: clienteSelecionado?.id || null,
+          cilindroId: cilindroSelecionado?.id || null
+        }
+      }
+      
+      await api.post('/config', configAtualizado)
+      setShowConfigModal(false)
+      
+      // Recarrega a página para atualizar os dados
+      window.location.reload()
+    } catch (err: any) {
+      console.error('Erro ao salvar configuração:', err)
+      alert('Erro ao salvar configuração: ' + (err.response?.data?.message || err.message))
+    } finally {
+      setSavingConfig(false)
+    }
+  }
+
+  const handleClienteChange = async (clienteId: number) => {
+    const cliente = clientes.find(c => c.id === clienteId)
+    setClienteSelecionado(cliente || null)
+    setCilindroSelecionado(null) // Reseta cilindro quando muda cliente
+    
+    // Busca cilindros do cliente selecionado
+    if (clienteId) {
+      try {
+        const response = await api.get(`/Cilindro/cliente/${clienteId}`)
+        setCilindros(response.data || [])
+      } catch (err) {
+        console.error('Erro ao buscar cilindros:', err)
+        setCilindros([])
+      }
+    }
+  }
+
   return (
     <div className="dashboard">
       <div className="page-header">
-        <h1>Dashboard</h1>
-        <p className="page-subtitle">Visão geral do sistema</p>
+        <div>
+          <h1>Dashboard</h1>
+          <p className="page-subtitle">Visão geral do sistema</p>
+        </div>
+        <button 
+          className="btn btn-primary"
+          onClick={() => setShowConfigModal(true)}
+        >
+          ⚙️ Configurar Sistema
+        </button>
       </div>
+
+      {/* Card de destaque - Cliente e Cilindro */}
+      {(clienteSelecionado || cilindroSelecionado) && (
+        <div className="sistema-card">
+          <div className="sistema-header">
+            <h2>🔧 Sistema Configurado</h2>
+            <button 
+              className="btn btn-secondary btn-small"
+              onClick={() => setShowConfigModal(true)}
+            >
+              ✏️ Alterar
+            </button>
+          </div>
+          <div className="sistema-content">
+            <div className="sistema-item">
+              <div className="sistema-icon">🏢</div>
+              <div className="sistema-info">
+                <span className="sistema-label">Cliente</span>
+                <span className="sistema-value">{clienteSelecionado?.nome || 'Não selecionado'}</span>
+              </div>
+            </div>
+            <div className="sistema-divider"></div>
+            <div className="sistema-item">
+              <div className="sistema-icon">⚙️</div>
+              <div className="sistema-info">
+                <span className="sistema-label">Cilindro Instalado</span>
+                <span className="sistema-value">
+                  {cilindroSelecionado 
+                    ? `${cilindroSelecionado.nome} (${cilindroSelecionado.codigoCliente})`
+                    : 'Não selecionado'}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de configuração */}
+      {showConfigModal && (
+        <div className="modal-overlay" onClick={() => setShowConfigModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Configurar Sistema</h2>
+              <button className="modal-close" onClick={() => setShowConfigModal(false)}>×</button>
+            </div>
+            <div className="modal-form">
+              <div className="form-group">
+                <label>Cliente *</label>
+                <select
+                  value={clienteSelecionado?.id || ''}
+                  onChange={(e) => handleClienteChange(Number(e.target.value))}
+                  required
+                >
+                  <option value="">Selecione um cliente</option>
+                  {clientes.map(cliente => (
+                    <option key={cliente.id} value={cliente.id}>
+                      {cliente.nome}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              
+              <div className="form-group">
+                <label>Cilindro Instalado</label>
+                <select
+                  value={cilindroSelecionado?.id || ''}
+                  onChange={(e) => {
+                    const cilindro = cilindros.find(c => c.id === Number(e.target.value))
+                    setCilindroSelecionado(cilindro || null)
+                  }}
+                  disabled={!clienteSelecionado}
+                >
+                  <option value="">Selecione um cilindro</option>
+                  {cilindros.map(cilindro => (
+                    <option key={cilindro.id} value={cilindro.id}>
+                      {cilindro.nome} ({cilindro.codigoCliente})
+                    </option>
+                  ))}
+                </select>
+                {!clienteSelecionado && (
+                  <small style={{ color: '#666', marginTop: '4px', display: 'block' }}>
+                    Selecione um cliente primeiro
+                  </small>
+                )}
+              </div>
+
+              <div className="modal-actions">
+                <button 
+                  type="button" 
+                  className="btn btn-secondary" 
+                  onClick={() => setShowConfigModal(false)}
+                >
+                  Cancelar
+                </button>
+                <button 
+                  type="button" 
+                  className="btn btn-primary" 
+                  onClick={handleSalvarConfiguracao}
+                  disabled={savingConfig || !clienteSelecionado}
+                >
+                  {savingConfig ? 'Salvando...' : 'Salvar Configuração'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {loading && (
         <div className="loading-message">

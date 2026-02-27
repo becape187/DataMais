@@ -125,8 +125,24 @@ public class ConfigService
                 TimeoutMs = int.Parse(Environment.GetEnvironmentVariable("MODBUS_TIMEOUT_MS") ?? "5000"),
                 RetryCount = int.Parse(Environment.GetEnvironmentVariable("MODBUS_RETRY_COUNT") ?? "3"),
                 PoolingIntervalMs = int.Parse(Environment.GetEnvironmentVariable("MODBUS_POOLING_INTERVAL_MS") ?? "100")
+            },
+            Sistema = new SistemaConfig
+            {
+                ClienteId = ParseIntOrNull(Environment.GetEnvironmentVariable("SISTEMA_CLIENTE_ID")),
+                CilindroId = ParseIntOrNull(Environment.GetEnvironmentVariable("SISTEMA_CILINDRO_ID"))
             }
         };
+    }
+
+    private int? ParseIntOrNull(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+        
+        if (int.TryParse(value, out int result))
+            return result;
+        
+        return null;
     }
 
     public void SaveConfig(AppConfig config)
@@ -149,7 +165,11 @@ public class ConfigService
             "# Modbus Configuration",
             $"MODBUS_TIMEOUT_MS={config.Modbus.TimeoutMs}",
             $"MODBUS_RETRY_COUNT={config.Modbus.RetryCount}",
-            $"MODBUS_POOLING_INTERVAL_MS={config.Modbus.PoolingIntervalMs}"
+            $"MODBUS_POOLING_INTERVAL_MS={config.Modbus.PoolingIntervalMs}",
+            "",
+            "# Sistema Configuration",
+            config.Sistema.ClienteId.HasValue ? $"SISTEMA_CLIENTE_ID={config.Sistema.ClienteId.Value}" : "# SISTEMA_CLIENTE_ID=",
+            config.Sistema.CilindroId.HasValue ? $"SISTEMA_CILINDRO_ID={config.Sistema.CilindroId.Value}" : "# SISTEMA_CILINDRO_ID="
         };
 
         File.WriteAllLines(_envFilePath, envContent);
