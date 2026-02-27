@@ -41,6 +41,23 @@ interface Cilindro {
   codigoInterno: string
 }
 
+interface Sensor {
+  id: number
+  nome: string
+  tipo: string
+  inputMin?: number
+  outputMin?: number
+  inputMax?: number
+  outputMax?: number
+  ativo: boolean
+}
+
+interface ModbusRegistro {
+  id: number
+  nome: string
+  ativo: boolean
+}
+
 const Dashboard = () => {
   // Estados para dados reais
   const [motorStatus, setMotorStatus] = useState(false)
@@ -372,9 +389,122 @@ const Dashboard = () => {
     }
   }
 
+  const enviarCalibracaoViaModbus = async () => {
+    try {
+      // Busca sensores configurados
+      const responseSensores = await api.get('/Sensor')
+      const todosSensores: Sensor[] = responseSensores.data
+
+      // Identifica sensores A, B e Geral
+      const sensorA = todosSensores.find(s => {
+        const nomeUpper = s.nome.toUpperCase()
+        return s.ativo && nomeUpper.includes('A') && nomeUpper.includes('PRESSÃO')
+      })
+
+      const sensorB = todosSensores.find(s => {
+        const nomeUpper = s.nome.toUpperCase()
+        return s.ativo && nomeUpper.includes('B') && nomeUpper.includes('PRESSÃO')
+      })
+
+      const sensorGeral = todosSensores.find(s => {
+        const nomeUpper = s.nome.toUpperCase()
+        return s.ativo && (nomeUpper.includes('GERAL') || (nomeUpper.includes('PRESSÃO') && !nomeUpper.includes('A') && !nomeUpper.includes('B')))
+      })
+
+      // Busca registros Modbus para escrita
+      const responseModbus = await api.get('/ModbusConfig')
+      const todosRegistros: ModbusRegistro[] = responseModbus.data
+
+      const registrosModbus: Record<string, ModbusRegistro> = {}
+      todosRegistros.forEach(reg => {
+        if (reg.ativo) {
+          registrosModbus[reg.nome] = reg
+        }
+      })
+
+      // Envia calibração para PRESSAO_A
+      if (sensorA && sensorA.inputMin !== null && sensorA.inputMax !== null && 
+          sensorA.outputMin !== null && sensorA.outputMax !== null) {
+        const registros = {
+          INPUT_MIN: registrosModbus['INPUT_MIN'],
+          INPUT_MAX: registrosModbus['INPUT_MAX'],
+          OUTPUT_MIN: registrosModbus['OUTPUT_MIN'],
+          OUTPUT_MAX: registrosModbus['OUTPUT_MAX']
+        }
+
+        if (registros.INPUT_MIN) {
+          await api.post(`/ModbusConfig/${registros.INPUT_MIN.id}/write`, { valor: sensorA.inputMin })
+        }
+        if (registros.INPUT_MAX) {
+          await api.post(`/ModbusConfig/${registros.INPUT_MAX.id}/write`, { valor: sensorA.inputMax })
+        }
+        if (registros.OUTPUT_MIN) {
+          await api.post(`/ModbusConfig/${registros.OUTPUT_MIN.id}/write`, { valor: sensorA.outputMin })
+        }
+        if (registros.OUTPUT_MAX) {
+          await api.post(`/ModbusConfig/${registros.OUTPUT_MAX.id}/write`, { valor: sensorA.outputMax })
+        }
+      }
+
+      // Envia calibração para PRESSAO_B
+      if (sensorB && sensorB.inputMin !== null && sensorB.inputMax !== null && 
+          sensorB.outputMin !== null && sensorB.outputMax !== null) {
+        const registros = {
+          INPUT_MIN_1: registrosModbus['INPUT_MIN_1'],
+          INPUT_MAX_1: registrosModbus['INPUT_MAX_1'],
+          OUTPUT_MIN_1: registrosModbus['OUTPUT_MIN_1'],
+          OUTPUT_MAX_1: registrosModbus['OUTPUT_MAX_1']
+        }
+
+        if (registros.INPUT_MIN_1) {
+          await api.post(`/ModbusConfig/${registros.INPUT_MIN_1.id}/write`, { valor: sensorB.inputMin })
+        }
+        if (registros.INPUT_MAX_1) {
+          await api.post(`/ModbusConfig/${registros.INPUT_MAX_1.id}/write`, { valor: sensorB.inputMax })
+        }
+        if (registros.OUTPUT_MIN_1) {
+          await api.post(`/ModbusConfig/${registros.OUTPUT_MIN_1.id}/write`, { valor: sensorB.outputMin })
+        }
+        if (registros.OUTPUT_MAX_1) {
+          await api.post(`/ModbusConfig/${registros.OUTPUT_MAX_1.id}/write`, { valor: sensorB.outputMax })
+        }
+      }
+
+      // Envia calibração para PRESSAO_GERAL
+      if (sensorGeral && sensorGeral.inputMin !== null && sensorGeral.inputMax !== null && 
+          sensorGeral.outputMin !== null && sensorGeral.outputMax !== null) {
+        const registros = {
+          INPUT_MIN_2: registrosModbus['INPUT_MIN_2'],
+          INPUT_MAX_2: registrosModbus['INPUT_MAX_2'],
+          OUTPUT_MIN_2: registrosModbus['OUTPUT_MIN_2'],
+          OUTPUT_MAX_2: registrosModbus['OUTPUT_MAX_2']
+        }
+
+        if (registros.INPUT_MIN_2) {
+          await api.post(`/ModbusConfig/${registros.INPUT_MIN_2.id}/write`, { valor: sensorGeral.inputMin })
+        }
+        if (registros.INPUT_MAX_2) {
+          await api.post(`/ModbusConfig/${registros.INPUT_MAX_2.id}/write`, { valor: sensorGeral.inputMax })
+        }
+        if (registros.OUTPUT_MIN_2) {
+          await api.post(`/ModbusConfig/${registros.OUTPUT_MIN_2.id}/write`, { valor: sensorGeral.outputMin })
+        }
+        if (registros.OUTPUT_MAX_2) {
+          await api.post(`/ModbusConfig/${registros.OUTPUT_MAX_2.id}/write`, { valor: sensorGeral.outputMax })
+        }
+      }
+    } catch (err: any) {
+      console.error('Erro ao enviar calibração via Modbus:', err)
+      throw err // Propaga o erro para ser tratado no handleSalvarConfiguracao
+    }
+  }
+
   const handleSalvarConfiguracao = async () => {
     try {
       setSavingConfig(true)
+      
+      // Envia calibrações dos sensores via Modbus
+      await enviarCalibracaoViaModbus()
       
       // Usa endpoint específico para salvar apenas configurações do sistema
       // Isso evita problemas de permissão ao tentar salvar no arquivo .env completo

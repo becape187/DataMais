@@ -54,6 +54,9 @@ const ControleHidraulico = () => {
     statusMotor?: ModbusRegistro
     pressaoA?: ModbusRegistro
     pressaoB?: ModbusRegistro
+    pressaoAConv?: ModbusRegistro
+    pressaoBConv?: ModbusRegistro
+    pressaoGeralConv?: ModbusRegistro
   }>({})
 
   // Estados dos sensores
@@ -118,6 +121,15 @@ const ControleHidraulico = () => {
             case 'PRESSAO_B':
               registrosEncontrados.pressaoB = reg
               break
+            case 'PRESSAO_A_CONV':
+              registrosEncontrados.pressaoAConv = reg
+              break
+            case 'PRESSAO_B_CONV':
+              registrosEncontrados.pressaoBConv = reg
+              break
+            case 'PRESSAO_GERAL_CONV':
+              registrosEncontrados.pressaoGeralConv = reg
+              break
           }
         })
 
@@ -179,8 +191,9 @@ const ControleHidraulico = () => {
         if (!registrosEncontrados.avancaCilindro) registrosFaltando.push('BOTAO_AVANCA_IHM')
         if (!registrosEncontrados.recuaCilindro) registrosFaltando.push('BOTAO_RECUA_IHM')
         if (!registrosEncontrados.statusMotor) registrosFaltando.push('MOTOR_BOMBA')
-        if (!registrosEncontrados.pressaoA) registrosFaltando.push('PRESSAO_A')
-        if (!registrosEncontrados.pressaoB) registrosFaltando.push('PRESSAO_B')
+        if (!registrosEncontrados.pressaoAConv) registrosFaltando.push('PRESSAO_A_CONV')
+        if (!registrosEncontrados.pressaoBConv) registrosFaltando.push('PRESSAO_B_CONV')
+        if (!registrosEncontrados.pressaoGeralConv) registrosFaltando.push('PRESSAO_GERAL_CONV')
 
         if (registrosFaltando.length > 0) {
           console.warn('Registros Modbus não encontrados:', registrosFaltando)
@@ -220,7 +233,7 @@ const ControleHidraulico = () => {
 
   // Atualiza status do motor e pressões periodicamente
   useEffect(() => {
-    if (!registros.statusMotor && !registros.pressaoA && !registros.pressaoB) return
+    if (!registros.statusMotor && !registros.pressaoAConv && !registros.pressaoBConv && !registros.pressaoGeralConv) return
 
     const atualizarStatus = async () => {
       try {
@@ -236,53 +249,33 @@ const ControleHidraulico = () => {
           }
         }
 
-        // Lê pressão A usando o endpoint do sensor que aplica conversão linear
-        if (sensores.sensorA?.id) {
+        // Lê pressão A convertida diretamente do Modbus
+        if (registros.pressaoAConv) {
           try {
-            const response = await api.get(`/Sensor/${sensores.sensorA.id}/read`, { timeout: 15000 })
-            const valor = Number(response.data.valorConvertido)
-            setPressaoA(valor)
-          } catch (err: any) {
-            logarErroSeNecessario('pressaoA', 'Erro ao ler pressão A', err)
-            // Mantém o último valor em caso de erro temporário
-          }
-        } else if (registros.pressaoA) {
-          // Fallback: lê direto do Modbus se não houver sensor configurado
-          try {
-            const response = await api.get(`/ModbusConfig/${registros.pressaoA.id}/read`, { timeout: 15000 })
+            const response = await api.get(`/ModbusConfig/${registros.pressaoAConv.id}/read`, { timeout: 15000 })
             setPressaoA(Number(response.data.valor))
           } catch (err: any) {
-            logarErroSeNecessario('pressaoA', 'Erro ao ler pressão A', err)
+            logarErroSeNecessario('pressaoA', 'Erro ao ler pressão A convertida', err)
           }
         }
 
-        // Lê pressão B usando o endpoint do sensor que aplica conversão linear
-        if (sensores.sensorB?.id) {
+        // Lê pressão B convertida diretamente do Modbus
+        if (registros.pressaoBConv) {
           try {
-            const response = await api.get(`/Sensor/${sensores.sensorB.id}/read`, { timeout: 15000 })
-            const valor = Number(response.data.valorConvertido)
-            setPressaoB(valor)
-          } catch (err: any) {
-            logarErroSeNecessario('pressaoB', 'Erro ao ler pressão B', err)
-          }
-        } else if (registros.pressaoB) {
-          // Fallback: lê direto do Modbus se não houver sensor configurado
-          try {
-            const response = await api.get(`/ModbusConfig/${registros.pressaoB.id}/read`, { timeout: 15000 })
+            const response = await api.get(`/ModbusConfig/${registros.pressaoBConv.id}/read`, { timeout: 15000 })
             setPressaoB(Number(response.data.valor))
           } catch (err: any) {
-            logarErroSeNecessario('pressaoB', 'Erro ao ler pressão B', err)
+            logarErroSeNecessario('pressaoB', 'Erro ao ler pressão B convertida', err)
           }
         }
 
-        // Lê pressão geral usando o endpoint do sensor que aplica conversão linear
-        if (sensores.pressaoGeral?.id) {
+        // Lê pressão geral convertida diretamente do Modbus
+        if (registros.pressaoGeralConv) {
           try {
-            const response = await api.get(`/Sensor/${sensores.pressaoGeral.id}/read`, { timeout: 15000 })
-            const valor = Number(response.data.valorConvertido)
-            setPressaoGeral(valor)
+            const response = await api.get(`/ModbusConfig/${registros.pressaoGeralConv.id}/read`, { timeout: 15000 })
+            setPressaoGeral(Number(response.data.valor))
           } catch (err: any) {
-            logarErroSeNecessario('pressaoGeral', 'Erro ao ler pressão geral', err)
+            logarErroSeNecessario('pressaoGeral', 'Erro ao ler pressão geral convertida', err)
           }
         }
       } catch (err: any) {
@@ -296,11 +289,9 @@ const ControleHidraulico = () => {
     return () => clearInterval(interval)
   }, [
     registros.statusMotor?.id, 
-    registros.pressaoA?.id, 
-    registros.pressaoB?.id,
-    sensores.sensorA?.id,
-    sensores.sensorB?.id,
-    sensores.pressaoGeral?.id
+    registros.pressaoAConv?.id, 
+    registros.pressaoBConv?.id,
+    registros.pressaoGeralConv?.id
   ])
 
   const escreverRegistro = async (
