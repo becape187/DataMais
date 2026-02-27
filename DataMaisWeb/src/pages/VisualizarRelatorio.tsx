@@ -269,7 +269,10 @@ const VisualizarRelatorio = () => {
                       border: '1px solid #E0E0E0',
                       borderRadius: '8px'
                     }}
-                    formatter={(value: number) => [`${value.toFixed(2)} bar`, 'Pressão']}
+                    formatter={(value: number | undefined) => {
+                      if (value === undefined || value === null) return ['N/A', 'Pressão']
+                      return [`${value.toFixed(2)} bar`, 'Pressão']
+                    }}
                   />
                   <Legend />
                   <Line 

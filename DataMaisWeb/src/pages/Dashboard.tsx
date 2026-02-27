@@ -15,6 +15,10 @@ interface Sensor {
   tipo: string
   scale?: number
   modbusConfigId?: number
+  inputMin?: number
+  inputMax?: number
+  outputMin?: number
+  outputMax?: number
   ativo: boolean
 }
 
