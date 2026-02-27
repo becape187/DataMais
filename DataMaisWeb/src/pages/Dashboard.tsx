@@ -81,8 +81,9 @@ const Dashboard = () => {
   // Estados dos registros Modbus
   const [registros, setRegistros] = useState<{
     statusMotor?: ModbusRegistro
-    pressaoA?: ModbusRegistro
-    pressaoB?: ModbusRegistro
+    pressaoAConv?: ModbusRegistro
+    pressaoBConv?: ModbusRegistro
+    pressaoGeralConv?: ModbusRegistro
   }>({})
 
   // Estados dos sensores
@@ -168,11 +169,14 @@ const Dashboard = () => {
             case 'MOTOR_BOMBA':
               registrosEncontrados.statusMotor = reg
               break
-            case 'PRESSAO_A':
-              registrosEncontrados.pressaoA = reg
+            case 'PRESSAO_A_CONV':
+              registrosEncontrados.pressaoAConv = reg
               break
-            case 'PRESSAO_B':
-              registrosEncontrados.pressaoB = reg
+            case 'PRESSAO_B_CONV':
+              registrosEncontrados.pressaoBConv = reg
+              break
+            case 'PRESSAO_GERAL_CONV':
+              registrosEncontrados.pressaoGeralConv = reg
               break
           }
         })
@@ -281,7 +285,7 @@ const Dashboard = () => {
 
   // Atualiza status do motor e pressões periodicamente
   useEffect(() => {
-    if (!registros.statusMotor && !registros.pressaoA && !registros.pressaoB) return
+    if (!registros.statusMotor && !registros.pressaoAConv && !registros.pressaoBConv && !registros.pressaoGeralConv) return
 
     const atualizarStatus = async () => {
       try {
@@ -296,53 +300,38 @@ const Dashboard = () => {
           }
         }
 
-        // Lê pressão A e aplica escala do sensor
-        if (registros.pressaoA) {
+        // Lê pressão A convertida diretamente do Modbus
+        if (registros.pressaoAConv) {
           try {
-            const response = await api.get(`/ModbusConfig/${registros.pressaoA.id}/read`)
-            let valor = Number(response.data.valor)
-            
-            if (sensores.sensorA?.scale) {
-              valor = valor * sensores.sensorA.scale
-            }
-            
-            setPressaoA(valor)
+            const response = await api.get(`/ModbusConfig/${registros.pressaoAConv.id}/read`)
+            const valor = Number(response.data.valor)
+            setPressaoA(isNaN(valor) ? null : valor)
           } catch (err) {
-            console.error('Erro ao ler pressão A:', err)
+            console.error('Erro ao ler pressão A convertida:', err)
             setPressaoA(null)
           }
         }
 
-        // Lê pressão B e aplica escala do sensor
-        if (registros.pressaoB) {
+        // Lê pressão B convertida diretamente do Modbus
+        if (registros.pressaoBConv) {
           try {
-            const response = await api.get(`/ModbusConfig/${registros.pressaoB.id}/read`)
-            let valor = Number(response.data.valor)
-            
-            if (sensores.sensorB?.scale) {
-              valor = valor * sensores.sensorB.scale
-            }
-            
-            setPressaoB(valor)
+            const response = await api.get(`/ModbusConfig/${registros.pressaoBConv.id}/read`)
+            const valor = Number(response.data.valor)
+            setPressaoB(isNaN(valor) ? null : valor)
           } catch (err) {
-            console.error('Erro ao ler pressão B:', err)
+            console.error('Erro ao ler pressão B convertida:', err)
             setPressaoB(null)
           }
         }
 
-        // Lê pressão geral se o sensor estiver configurado
-        if (sensores.pressaoGeral?.modbusConfigId) {
+        // Lê pressão geral convertida diretamente do Modbus
+        if (registros.pressaoGeralConv) {
           try {
-            const response = await api.get(`/ModbusConfig/${sensores.pressaoGeral.modbusConfigId}/read`)
-            let valor = Number(response.data.valor)
-            
-            if (sensores.pressaoGeral.scale) {
-              valor = valor * sensores.pressaoGeral.scale
-            }
-            
-            setPressaoGeral(valor)
+            const response = await api.get(`/ModbusConfig/${registros.pressaoGeralConv.id}/read`)
+            const valor = Number(response.data.valor)
+            setPressaoGeral(isNaN(valor) ? null : valor)
           } catch (err) {
-            console.error('Erro ao ler pressão geral:', err)
+            console.error('Erro ao ler pressão geral convertida:', err)
             setPressaoGeral(null)
           }
         }
@@ -357,21 +346,13 @@ const Dashboard = () => {
     return () => clearInterval(interval)
   }, [
     registros.statusMotor?.id, 
-    registros.pressaoA?.id, 
-    registros.pressaoB?.id,
-    sensores.sensorA?.id,
-    sensores.sensorB?.id,
-    sensores.pressaoGeral?.id
+    registros.pressaoAConv?.id, 
+    registros.pressaoBConv?.id,
+    registros.pressaoGeralConv?.id
   ])
 
-  // Calcula pressão atual (média entre A e B, ou a maior, ou pressão geral)
-  const pressaoAtual = pressaoGeral !== null 
-    ? pressaoGeral 
-    : (pressaoA !== null && pressaoB !== null) 
-      ? (pressaoA + pressaoB) / 2 
-      : pressaoA !== null 
-        ? pressaoA 
-        : pressaoB
+  // Calcula pressão atual: sempre usa a pressão geral convertida, se existir
+  const pressaoAtual = pressaoGeral
 
   // Formata data para exibição
   const formatarData = (data: string) => {
@@ -750,7 +731,7 @@ const Dashboard = () => {
           <div className="stat-content">
             <h3>Pressão Atual</h3>
             <p className="stat-value">
-              {pressaoAtual !== null ? `${pressaoAtual.toFixed(1)} bar` : 'N/A'}
+              {pressaoAtual !== null ? `${Math.round(pressaoAtual)} bar` : 'N/A'}
             </p>
             <span className="stat-badge info">Normal</span>
           </div>

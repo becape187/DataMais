@@ -697,14 +697,14 @@ const ControleHidraulico = () => {
             <div className="info-item">
               <span className="info-label">Pressão A:</span>
               <span className="info-value">
-                {pressaoA !== null ? `${pressaoA.toFixed(2)} bar` : '--'}
+                {pressaoA !== null ? `${Math.round(pressaoA)} bar` : '--'}
                 {sensores.sensorA && ` (${sensores.sensorA.nome})`}
               </span>
             </div>
             <div className="info-item">
               <span className="info-label">Pressão B:</span>
               <span className="info-value">
-                {pressaoB !== null ? `${pressaoB.toFixed(2)} bar` : '--'}
+                {pressaoB !== null ? `${Math.round(pressaoB)} bar` : '--'}
                 {sensores.sensorB && ` (${sensores.sensorB.nome})`}
               </span>
             </div>
@@ -712,7 +712,7 @@ const ControleHidraulico = () => {
               <div className="info-item">
                 <span className="info-label">Pressão Geral:</span>
                 <span className="info-value">
-                  {pressaoGeral.toFixed(2)} bar
+                  {`${Math.round(pressaoGeral)} bar`}
                   {sensores.pressaoGeral && ` (${sensores.pressaoGeral.nome})`}
                 </span>
               </div>

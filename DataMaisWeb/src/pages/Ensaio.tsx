@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
+import api from '../config/api'
 import './Ensaio.css'
 
 interface DataPoint {
@@ -16,88 +17,76 @@ interface LogEvento {
 }
 
 const Ensaio = () => {
-  // Dados fictícios iniciais para demonstração
-  const gerarDadosFicticios = (): DataPoint[] => {
-    const dados: DataPoint[] = []
-    const agora = new Date()
-    
-    for (let i = 0; i < 60; i++) {
-      const tempo = new Date(agora.getTime() - (60 - i) * 500)
-      // Simula uma curva de pressão realista
-      const pressao = Math.sin((i / 60) * Math.PI * 2) * 100 + 150 + Math.random() * 20
-      dados.push({
-        time: tempo.toLocaleTimeString('pt-BR'),
-        pressao: Math.max(0, Math.min(350, pressao))
-      })
-    }
-    return dados
-  }
-
   const navigate = useNavigate()
   const [ensaioAtivo, setEnsaioAtivo] = useState(false)
-  const [dados, setDados] = useState<DataPoint[]>(gerarDadosFicticios())
-  const [logEventos, setLogEventos] = useState<LogEvento[]>([
-    { id: 1, texto: '[14:25:30] Ensaio iniciado', tipo: 'normal', comentarios: 0 },
-    { id: 2, texto: '[14:25:45] Pressão estabilizada em 120 bar', tipo: 'normal', comentarios: 0 },
-    { id: 3, texto: '[14:26:10] Desvio detectado: Pressão 245.8 bar', tipo: 'desvio', comentarios: 2 },
-    { id: 4, texto: '[14:26:30] Pressão normalizada', tipo: 'normal', comentarios: 0 },
-    { id: 5, texto: '[14:27:00] Ciclo de pressão completo', tipo: 'normal', comentarios: 0 },
-    { id: 6, texto: '[14:27:15] Pressão em 180 bar - dentro dos limites', tipo: 'normal', comentarios: 0 },
-    { id: 7, texto: '[14:27:45] Desvio detectado: Pressão 298.2 bar', tipo: 'desvio', comentarios: 0 },
-    { id: 8, texto: '[14:28:00] Pressão retornando ao normal', tipo: 'normal', comentarios: 0 }
-  ])
+  const [ensaioId, setEnsaioId] = useState<number | null>(null)
+  const [dados, setDados] = useState<DataPoint[]>([])
+  const [logEventos, setLogEventos] = useState<LogEvento[]>([])
 
   useEffect(() => {
-    if (!ensaioAtivo) return
+    if (!ensaioAtivo || !ensaioId) return
 
-    const interval = setInterval(() => {
-      const novoPonto: DataPoint = {
-        time: new Date().toLocaleTimeString('pt-BR'),
-        pressao: Math.random() * 350
-      }
-      
-      setDados(prev => {
-        const novos = [...prev, novoPonto]
-        return novos.slice(-100) // Mantém apenas os últimos 100 pontos
-      })
-
-      // Simula eventos de desvio
-      if (Math.random() > 0.95) {
-        const evento: LogEvento = {
-          id: Date.now(),
-          texto: `[${new Date().toLocaleTimeString('pt-BR')}] Desvio detectado: Pressão ${novoPonto.pressao.toFixed(2)} bar`,
-          tipo: 'desvio',
-          comentarios: 0
+    const interval = setInterval(async () => {
+      try {
+        const response = await api.get(`/ensaio/${ensaioId}/pressao-atual`)
+        const ponto: DataPoint = {
+          time: response.data.time,
+          pressao: response.data.pressao,
         }
-        setLogEventos(prev => [evento, ...prev].slice(0, 50))
+
+        setDados(prev => {
+          const novos = [...prev, ponto]
+          return novos.slice(-100) // Mantém apenas os últimos 100 pontos
+        })
+      } catch (err) {
+        console.error('Erro ao ler pressão atual do ensaio:', err)
       }
-    }, 500)
+    }, 1000) // leitura a cada 1 segundo
 
     return () => clearInterval(interval)
-  }, [ensaioAtivo])
+  }, [ensaioAtivo, ensaioId])
 
-  const iniciarEnsaio = () => {
-    setEnsaioAtivo(true)
-    setDados([])
-    setLogEventos([])
-    const evento: LogEvento = {
-      id: Date.now(),
-      texto: `[${new Date().toLocaleTimeString('pt-BR')}] Ensaio iniciado`,
-      tipo: 'normal',
-      comentarios: 0
+  const iniciarEnsaio = async () => {
+    try {
+      const response = await api.post('/ensaio/iniciar')
+      const id = response.data.id as number
+
+      setEnsaioId(id)
+      setEnsaioAtivo(true)
+      setDados([])
+      setLogEventos([])
+
+      const evento: LogEvento = {
+        id: Date.now(),
+        texto: `[${new Date().toLocaleTimeString('pt-BR')}] Ensaio iniciado (ID ${id})`,
+        tipo: 'normal',
+        comentarios: 0,
+      }
+      setLogEventos([evento])
+    } catch (err: any) {
+      console.error('Erro ao iniciar ensaio:', err)
+      const msg = err?.response?.data?.message || 'Erro ao iniciar ensaio'
+      alert(msg)
     }
-    setLogEventos([evento])
   }
 
-  const interromperEnsaio = () => {
-    setEnsaioAtivo(false)
-    const evento: LogEvento = {
-      id: Date.now(),
-      texto: `[${new Date().toLocaleTimeString('pt-BR')}] Ensaio interrompido`,
-      tipo: 'normal',
-      comentarios: 0
+  const interromperEnsaio = async () => {
+    try {
+      if (ensaioId) {
+        await api.post(`/ensaio/interromper/${ensaioId}`)
+      }
+    } catch (err) {
+      console.error('Erro ao interromper ensaio:', err)
+    } finally {
+      setEnsaioAtivo(false)
+      const evento: LogEvento = {
+        id: Date.now(),
+        texto: `[${new Date().toLocaleTimeString('pt-BR')}] Ensaio interrompido`,
+        tipo: 'normal',
+        comentarios: 0,
+      }
+      setLogEventos(prev => [evento, ...prev])
     }
-    setLogEventos(prev => [evento, ...prev])
   }
 
   const abrirComentarios = (eventoId: number) => {

@@ -324,12 +324,12 @@ const Layout = ({ children }: LayoutProps) => {
             <div className="display-row">
               <div className="display-box pressao-box">
                 <span className="display-value pressao-value">
-                  {pressaoA !== null ? pressaoA.toFixed(1) : '--'}<span className="display-unit">bar</span>
+                  {pressaoA !== null ? Math.round(pressaoA) : '--'}<span className="display-unit">bar</span>
                 </span>
               </div>
               <div className="display-box pressao-box">
                 <span className="display-value pressao-value">
-                  {pressaoB !== null ? pressaoB.toFixed(1) : '--'}<span className="display-unit">bar</span>
+                  {pressaoB !== null ? Math.round(pressaoB) : '--'}<span className="display-unit">bar</span>
                 </span>
               </div>
             </div>
