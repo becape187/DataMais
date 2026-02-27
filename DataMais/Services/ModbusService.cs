@@ -316,7 +316,8 @@ public class ModbusService
             _tcpClients[key] = tcpClient;
             _lastUsed[key] = DateTime.UtcNow;
 
-            _logger.LogInformation("Nova conexão Modbus criada: {IpAddress}:{Port}", ipAddress, port);
+            // Log apenas em Debug para evitar poluição de logs (conexões são cíclicas)
+            _logger.LogDebug("Nova conexão Modbus criada: {IpAddress}:{Port}", ipAddress, port);
             return master;
         }
         catch (Exception ex)

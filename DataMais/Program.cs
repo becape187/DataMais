@@ -5,6 +5,12 @@ using DataMais.Configuration;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Configurar níveis de log: reduzir verbosidade de logs cíclicos
+// Entity Framework: apenas Warning e Error (não loga queries SQL)
+builder.Logging.AddFilter("Microsoft.EntityFrameworkCore.Database.Command", LogLevel.Warning);
+// ModbusService: apenas Warning e Error (evita logs de conexões cíclicas)
+builder.Logging.AddFilter("DataMais.Services.ModbusService", LogLevel.Warning);
+
 // Configurar Kestrel para escutar em 0.0.0.0:5000 em produção
 // Isso permite que o nginx faça proxy reverso corretamente
 if (builder.Environment.IsProduction())
@@ -57,7 +63,11 @@ if (string.IsNullOrWhiteSpace(appConfig.Database.Password))
 }
 
 builder.Services.AddDbContext<DataMaisDbContext>(options =>
-    options.UseNpgsql(connectionString));
+{
+    options.UseNpgsql(connectionString);
+    // Desabilita logs de queries SQL (apenas erros serão logados)
+    options.LogTo(_ => { }, LogLevel.Warning);
+});
 
 // Registra o ConfigService como singleton
 builder.Services.AddSingleton<ConfigService>(configService);
