@@ -203,7 +203,7 @@ public class EnsaioController : ControllerBase
                     !string.IsNullOrWhiteSpace(appConfig.Influx.Organization) &&
                     !string.IsNullOrWhiteSpace(appConfig.Influx.Bucket))
                 {
-                    using var influxClient = new InfluxDBClient(appConfig.Influx.Url, appConfig.Influx.Token.ToCharArray());
+                    using var influxClient = new InfluxDBClient(appConfig.Influx.Url, appConfig.Influx.Token);
                     var writeApi = influxClient.GetWriteApiAsync();
 
                     var point = PointData
