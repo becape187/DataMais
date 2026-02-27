@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.ComponentModel.DataAnnotations;
 using DataMais.Data;
 using DataMais.Models;
 
@@ -111,26 +112,12 @@ public class CilindroController : ControllerBase
     }
 
     [HttpPost]
-    public async Task<IActionResult> Create([FromBody] Cilindro cilindro)
+    public async Task<IActionResult> Create([FromBody] CilindroCreateDto dto)
     {
         try
         {
             // Log dos dados recebidos para debug
-            _logger.LogInformation($"Criando cilindro - Nome: {cilindro.Nome}, CodigoCliente: {cilindro.CodigoCliente}, CodigoInterno: {cilindro.CodigoInterno}, ClienteId: {cilindro.ClienteId}");
-
-            // Validação explícita do ClienteId antes de verificar ModelState
-            if (cilindro.ClienteId == 0)
-            {
-                _logger.LogWarning("ClienteId é zero ou não foi fornecido");
-                return BadRequest(new { message = "ClienteId é obrigatório e deve ser um valor válido" });
-            }
-
-            // Remove erros de validação da propriedade de navegação "Cliente" 
-            // pois só precisamos do ClienteId, não do objeto Cliente completo
-            if (ModelState.ContainsKey("Cliente"))
-            {
-                ModelState.Remove("Cliente");
-            }
+            _logger.LogInformation($"Criando cilindro - Nome: {dto.Nome}, CodigoCliente: {dto.CodigoCliente}, CodigoInterno: {dto.CodigoInterno}, ClienteId: {dto.ClienteId}");
 
             if (!ModelState.IsValid)
             {
@@ -157,18 +144,25 @@ public class CilindroController : ControllerBase
                 });
             }
 
+            // Validação explícita do ClienteId
+            if (dto.ClienteId == 0)
+            {
+                _logger.LogWarning("ClienteId é zero ou não foi fornecido");
+                return BadRequest(new { message = "ClienteId é obrigatório e deve ser um valor válido" });
+            }
+
             // Verificar se cliente existe
             var clienteExiste = await _context.Clientes
-                .AnyAsync(c => c.Id == cilindro.ClienteId);
+                .AnyAsync(c => c.Id == dto.ClienteId);
             
             if (!clienteExiste)
             {
-                return BadRequest(new { message = $"Cliente com ID {cilindro.ClienteId} não encontrado" });
+                return BadRequest(new { message = $"Cliente com ID {dto.ClienteId} não encontrado" });
             }
 
             // Verificar se código interno já existe
             var codigoInternoExiste = await _context.Cilindros
-                .AnyAsync(c => c.CodigoInterno == cilindro.CodigoInterno);
+                .AnyAsync(c => c.CodigoInterno == dto.CodigoInterno);
             
             if (codigoInternoExiste)
             {
@@ -177,15 +171,51 @@ public class CilindroController : ControllerBase
 
             // Verificar se código cliente já existe para o mesmo cliente
             var codigoClienteExiste = await _context.Cilindros
-                .AnyAsync(c => c.ClienteId == cilindro.ClienteId && 
-                    c.CodigoCliente == cilindro.CodigoCliente);
+                .AnyAsync(c => c.ClienteId == dto.ClienteId && 
+                    c.CodigoCliente == dto.CodigoCliente);
             
             if (codigoClienteExiste)
             {
                 return Conflict(new { message = "Código cliente já cadastrado para este cliente" });
             }
 
-            cilindro.DataCriacao = DateTime.UtcNow;
+            // Criar o objeto Cilindro a partir do DTO
+            var cilindro = new Cilindro
+            {
+                Nome = dto.Nome,
+                Descricao = dto.Descricao,
+                CodigoCliente = dto.CodigoCliente,
+                CodigoInterno = dto.CodigoInterno,
+                Modelo = dto.Modelo,
+                Fabricante = dto.Fabricante,
+                DataFabricacao = dto.DataFabricacao,
+                DiametroInterno = dto.DiametroInterno,
+                ComprimentoHaste = dto.ComprimentoHaste,
+                DiametroHaste = dto.DiametroHaste,
+                MaximaPressaoSuportadaA = dto.MaximaPressaoSuportadaA,
+                MaximaPressaoSuportadaB = dto.MaximaPressaoSuportadaB,
+                MaximaPressaoSegurancaA = dto.MaximaPressaoSegurancaA,
+                MaximaPressaoSegurancaB = dto.MaximaPressaoSegurancaB,
+                PreCargaA = dto.PreCargaA,
+                CargaNominalA = dto.CargaNominalA,
+                TempoRampaSubidaA = dto.TempoRampaSubidaA,
+                TempoDuracaoCargaA = dto.TempoDuracaoCargaA,
+                TempoRampaDescidaA = dto.TempoRampaDescidaA,
+                PercentualVariacaoAlarmeA = dto.PercentualVariacaoAlarmeA,
+                HistereseAlarmeA = dto.HistereseAlarmeA,
+                PercentualVariacaoDesligaProcessoA = dto.PercentualVariacaoDesligaProcessoA,
+                PreCargaB = dto.PreCargaB,
+                CargaNominalB = dto.CargaNominalB,
+                TempoRampaSubidaB = dto.TempoRampaSubidaB,
+                TempoDuracaoCargaB = dto.TempoDuracaoCargaB,
+                TempoRampaDescidaB = dto.TempoRampaDescidaB,
+                PercentualVariacaoAlarmeB = dto.PercentualVariacaoAlarmeB,
+                HistereseAlarmeB = dto.HistereseAlarmeB,
+                PercentualVariacaoDesligaProcessoB = dto.PercentualVariacaoDesligaProcessoB,
+                ClienteId = dto.ClienteId,
+                DataCriacao = DateTime.UtcNow
+            };
+
             _context.Cilindros.Add(cilindro);
             await _context.SaveChangesAsync();
 
@@ -321,4 +351,58 @@ public class CilindroController : ControllerBase
             return StatusCode(500, new { message = "Erro ao deletar cilindro" });
         }
     }
+}
+
+// DTO para criação de cilindro (sem propriedades de navegação)
+public class CilindroCreateDto
+{
+    [Required]
+    [MaxLength(200)]
+    public string Nome { get; set; } = string.Empty;
+
+    [MaxLength(1000)]
+    public string? Descricao { get; set; }
+
+    [Required]
+    [MaxLength(50)]
+    public string CodigoCliente { get; set; } = string.Empty;
+
+    [Required]
+    [MaxLength(50)]
+    public string CodigoInterno { get; set; } = string.Empty;
+
+    [MaxLength(100)]
+    public string? Modelo { get; set; }
+
+    [MaxLength(100)]
+    public string? Fabricante { get; set; }
+
+    public DateTime? DataFabricacao { get; set; }
+
+    public decimal? DiametroInterno { get; set; }
+    public decimal? ComprimentoHaste { get; set; }
+    public decimal? DiametroHaste { get; set; }
+    public decimal? MaximaPressaoSuportadaA { get; set; }
+    public decimal? MaximaPressaoSuportadaB { get; set; }
+    public decimal? MaximaPressaoSegurancaA { get; set; }
+    public decimal? MaximaPressaoSegurancaB { get; set; }
+    public decimal? PreCargaA { get; set; }
+    public decimal? CargaNominalA { get; set; }
+    public decimal? TempoRampaSubidaA { get; set; }
+    public decimal? TempoDuracaoCargaA { get; set; }
+    public decimal? TempoRampaDescidaA { get; set; }
+    public decimal? PercentualVariacaoAlarmeA { get; set; }
+    public decimal? HistereseAlarmeA { get; set; }
+    public decimal? PercentualVariacaoDesligaProcessoA { get; set; }
+    public decimal? PreCargaB { get; set; }
+    public decimal? CargaNominalB { get; set; }
+    public decimal? TempoRampaSubidaB { get; set; }
+    public decimal? TempoDuracaoCargaB { get; set; }
+    public decimal? TempoRampaDescidaB { get; set; }
+    public decimal? PercentualVariacaoAlarmeB { get; set; }
+    public decimal? HistereseAlarmeB { get; set; }
+    public decimal? PercentualVariacaoDesligaProcessoB { get; set; }
+
+    [Required]
+    public int ClienteId { get; set; }
 }
