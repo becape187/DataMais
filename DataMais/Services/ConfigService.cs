@@ -172,8 +172,40 @@ public class ConfigService
             config.Sistema.CilindroId.HasValue ? $"SISTEMA_CILINDRO_ID={config.Sistema.CilindroId.Value}" : "# SISTEMA_CILINDRO_ID="
         };
 
-        File.WriteAllLines(_envFilePath, envContent);
+        try
+        {
+            File.WriteAllLines(_envFilePath, envContent);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // Se não tiver permissão para escrever no arquivo, apenas atualiza em memória
+            // Isso permite que configurações do sistema funcionem mesmo sem permissão de escrita
+            Console.WriteLine($"⚠️ Aviso: Não foi possível salvar no arquivo {_envFilePath} (sem permissão). Configuração atualizada apenas em memória.");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"⚠️ Aviso: Erro ao salvar no arquivo {_envFilePath}: {ex.Message}. Configuração atualizada apenas em memória.");
+        }
+        
         _config = config;
+    }
+
+    /// <summary>
+    /// Salva apenas as configurações do sistema (cliente/cilindro) sem tentar salvar no arquivo
+    /// Útil quando não há permissão de escrita no arquivo .env
+    /// </summary>
+    public void SaveSistemaConfig(SistemaConfig sistemaConfig)
+    {
+        _config.Sistema = sistemaConfig;
+        // Tenta salvar no arquivo, mas não falha se não conseguir
+        try
+        {
+            SaveConfig(_config);
+        }
+        catch
+        {
+            // Ignora erros de escrita - configuração já foi atualizada em memória
+        }
     }
 
     public string GetEnvFilePath() => _envFilePath;

@@ -376,27 +376,22 @@ const Dashboard = () => {
     try {
       setSavingConfig(true)
       
-      // Busca config atual
-      const configResponse = await api.get('/config')
-      const config = configResponse.data
-      
-      // Atualiza com cliente e cilindro selecionados
-      const configAtualizado = {
-        ...config,
-        sistema: {
-          clienteId: clienteSelecionado?.id || null,
-          cilindroId: cilindroSelecionado?.id || null
-        }
+      // Usa endpoint específico para salvar apenas configurações do sistema
+      // Isso evita problemas de permissão ao tentar salvar no arquivo .env completo
+      const sistemaConfig = {
+        clienteId: clienteSelecionado?.id || null,
+        cilindroId: cilindroSelecionado?.id || null
       }
       
-      await api.post('/config', configAtualizado)
+      await api.post('/config/sistema', sistemaConfig)
       setShowConfigModal(false)
       
       // Recarrega a página para atualizar os dados
       window.location.reload()
     } catch (err: any) {
       console.error('Erro ao salvar configuração:', err)
-      alert('Erro ao salvar configuração: ' + (err.response?.data?.message || err.message))
+      const errorMessage = err.response?.data?.message || err.message || 'Erro desconhecido'
+      alert('Erro ao salvar configuração: ' + errorMessage)
     } finally {
       setSavingConfig(false)
     }
