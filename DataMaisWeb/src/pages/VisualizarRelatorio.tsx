@@ -39,6 +39,90 @@ const VisualizarRelatorio = () => {
   const [loadingGrafico, setLoadingGrafico] = useState(true)
   const relatorioContainerRef = useRef<HTMLDivElement>(null)
 
+  // Calcula as estatísticas de pressão a partir dos dados do gráfico
+  // A análise começa APENAS a partir do momento que a pressão atinge o setpoint pela primeira vez
+  const calcularEstatisticasPressao = () => {
+    if (!relatorio || !relatorio.pressaoCargaConfigurada || dadosGrafico.length === 0) {
+      return { max: null, min: null, avg: null }
+    }
+
+    const setpoint = relatorio.pressaoCargaConfigurada
+    const camaraTestada = relatorio.camaraTestada?.trim().toUpperCase()
+
+    // Determina qual campo de pressão usar
+    const campoPressao = camaraTestada === 'B' ? 'pressaoB' : 'pressaoA'
+
+    // Encontra o primeiro ponto onde a pressão >= setpoint
+    let inicioAnalise = -1
+    for (let i = 0; i < dadosGrafico.length; i++) {
+      const ponto = dadosGrafico[i]
+      const pressao = campoPressao === 'pressaoA' ? ponto.pressaoA : ponto.pressaoB
+      
+      if (pressao != null && pressao >= setpoint) {
+        inicioAnalise = i
+        break // Encontrou o primeiro ponto que alcança o setpoint
+      }
+    }
+
+    // Se nunca alcançou o setpoint, retorna null
+    if (inicioAnalise === -1) {
+      return { max: null, min: null, avg: null }
+    }
+
+    // A partir do momento que alcançou o setpoint, coleta TODOS os valores
+    // (mesmo que depois caia abaixo do setpoint)
+    const valoresFiltrados: number[] = []
+    
+    for (let i = inicioAnalise; i < dadosGrafico.length; i++) {
+      const ponto = dadosGrafico[i]
+      const pressao = campoPressao === 'pressaoA' ? ponto.pressaoA : ponto.pressaoB
+      
+      if (pressao != null) {
+        valoresFiltrados.push(pressao)
+      }
+    }
+
+    if (valoresFiltrados.length === 0) {
+      return { max: null, min: null, avg: null }
+    }
+
+    const max = Math.max(...valoresFiltrados)
+    const min = Math.min(...valoresFiltrados)
+    const avg = valoresFiltrados.reduce((sum, val) => sum + val, 0) / valoresFiltrados.length
+
+    return { max, min, avg }
+  }
+
+  const estatisticasPressao = calcularEstatisticasPressao()
+
+  // Calcula o resultado baseado na pressão mínima calculada dos dados do gráfico
+  // Regra: Aprovado se pressão mínima >= 95% do setpoint (desvio máximo de 5%)
+  // Reprovado se pressão mínima < 95% do setpoint (desvio > 5%)
+  const calcularResultado = (): string | null => {
+    // Verifica se temos os dados necessários
+    if (!relatorio || !relatorio.pressaoCargaConfigurada || estatisticasPressao.min == null) {
+      return null
+    }
+
+    const setpoint = relatorio.pressaoCargaConfigurada
+    // Calcula o limite mínimo: 95% do setpoint (permite desvio máximo de 5%)
+    // Exemplo: setpoint 320 bar → limite mínimo = 304 bar (320 * 0.95)
+    const limiteMinimo = setpoint * 0.95
+
+    // Usa a pressão mínima calculada dos dados do gráfico (após filtrar >= setpoint)
+    const pressaoMinima = estatisticasPressao.min
+
+    // Aprovado: pressão mínima >= 95% do setpoint (desvio <= 5%)
+    // Reprovado: pressão mínima < 95% do setpoint (desvio > 5%)
+    if (pressaoMinima >= limiteMinimo) {
+      return 'Aprovado'
+    } else {
+      return 'Reprovado'
+    }
+  }
+
+  const resultadoCalculado = calcularResultado()
+
   useEffect(() => {
     const carregarRelatorio = async () => {
       if (!id) return
@@ -196,36 +280,71 @@ const VisualizarRelatorio = () => {
     }
 
     try {
-      // Captura o elemento como canvas
-      const canvas = await html2canvas(relatorioContainerRef.current, {
-        scale: 2, // Melhora a qualidade
+      // Dimensões do PDF A4
+      const pdfWidth = 210 // A4 width in mm
+      const pdfHeight = 297 // A4 height in mm
+      const margin = 10 // Margem em mm
+      const contentWidth = pdfWidth - (margin * 2) // Largura útil: 190mm
+      
+      // Largura desejada em pixels para renderização (baseada na largura do PDF)
+      // 190mm = 7.48 inches = ~718 pixels a 96 DPI
+      const targetWidthPx = 718
+      
+      const originalElement = relatorioContainerRef.current
+      
+      // Cria um clone do elemento para renderização
+      const clone = originalElement.cloneNode(true) as HTMLElement
+      
+      // Posiciona o clone fora da tela com a largura desejada
+      clone.style.position = 'absolute'
+      clone.style.left = '-9999px'
+      clone.style.top = '0'
+      clone.style.width = `${targetWidthPx}px`
+      clone.style.maxWidth = `${targetWidthPx}px`
+      clone.style.transform = 'none'
+      clone.style.transformOrigin = 'top left'
+      
+      // Adiciona o clone ao body temporariamente
+      document.body.appendChild(clone)
+      
+      // Aguarda um frame para garantir que o layout seja aplicado
+      await new Promise(resolve => requestAnimationFrame(resolve))
+      
+      // Captura o clone como canvas
+      const canvas = await html2canvas(clone, {
+        scale: 2, // Qualidade alta
         useCORS: true,
         logging: false,
         backgroundColor: '#ffffff',
-        windowWidth: relatorioContainerRef.current.scrollWidth,
-        windowHeight: relatorioContainerRef.current.scrollHeight
+        width: targetWidthPx,
+        windowWidth: targetWidthPx
       })
 
-      // Calcula as dimensões do PDF
-      const imgWidth = 210 // A4 width in mm
-      const pageHeight = 297 // A4 height in mm
-      const imgHeight = (canvas.height * imgWidth) / canvas.width
-      let heightLeft = imgHeight
+      // Remove o clone do DOM
+      document.body.removeChild(clone)
 
+      // Calcula as dimensões da imagem no PDF mantendo proporções
+      const imgWidth = contentWidth
+      const imgHeight = (canvas.height * contentWidth) / canvas.width
+      
       // Cria o PDF
       const pdf = new jsPDF('p', 'mm', 'a4')
-      let position = 0
+      const pageContentHeight = pdfHeight - (margin * 2) // Altura útil: 277mm
+      let heightLeft = imgHeight
+      let position = margin
 
       // Adiciona a primeira página
-      pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, position, imgWidth, imgHeight)
-      heightLeft -= pageHeight
+      const firstPageHeight = Math.min(imgHeight, pageContentHeight)
+      pdf.addImage(canvas.toDataURL('image/png', 1.0), 'PNG', margin, position, imgWidth, firstPageHeight)
+      heightLeft -= firstPageHeight
 
       // Adiciona páginas adicionais se necessário
       while (heightLeft > 0) {
-        position = heightLeft - imgHeight
         pdf.addPage()
-        pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, position, imgWidth, imgHeight)
-        heightLeft -= pageHeight
+        position = margin
+        const pageImgHeight = Math.min(heightLeft, pageContentHeight)
+        pdf.addImage(canvas.toDataURL('image/png', 1.0), 'PNG', margin, position, imgWidth, pageImgHeight)
+        heightLeft -= pageImgHeight
       }
 
       // Faz o download
@@ -233,6 +352,10 @@ const VisualizarRelatorio = () => {
     } catch (error) {
       console.error('Erro ao gerar PDF:', error)
       alert('Erro ao gerar PDF. Tente novamente.')
+      
+      // Garante que o clone seja removido mesmo em caso de erro
+      const clones = document.querySelectorAll('[style*="left: -9999px"]')
+      clones.forEach(clone => clone.remove())
     }
   }
 
@@ -329,8 +452,8 @@ const VisualizarRelatorio = () => {
             </div>
             <div className="info-card">
               <span className="info-label">Resultado</span>
-              <span className={`info-value resultado ${relatorio.resultado?.toLowerCase() === 'aprovado' ? 'aprovado' : 'reprovado'}`}>
-                {relatorio.resultado || '-'}
+              <span className={`info-value resultado ${resultadoCalculado?.toLowerCase() === 'aprovado' ? 'aprovado' : 'reprovado'}`}>
+                {resultadoCalculado || '-'}
               </span>
             </div>
           </div>
@@ -348,19 +471,19 @@ const VisualizarRelatorio = () => {
             <div className="pressao-card">
               <span className="pressao-label">Pressão Máxima</span>
               <span className="pressao-value">
-                {relatorio.pressaoMaxima != null ? `${Math.round(relatorio.pressaoMaxima)} bar` : '-'}
+                {estatisticasPressao.max != null ? `${Math.round(estatisticasPressao.max)} bar` : '-'}
               </span>
             </div>
             <div className="pressao-card">
               <span className="pressao-label">Pressão Mínima</span>
               <span className="pressao-value">
-                {relatorio.pressaoMinima != null ? `${Math.round(relatorio.pressaoMinima)} bar` : '-'}
+                {estatisticasPressao.min != null ? `${Math.round(estatisticasPressao.min)} bar` : '-'}
               </span>
             </div>
             <div className="pressao-card">
               <span className="pressao-label">Pressão Média</span>
               <span className="pressao-value">
-                {relatorio.pressaoMedia != null ? `${Math.round(relatorio.pressaoMedia)} bar` : '-'}
+                {estatisticasPressao.avg != null ? `${Math.round(estatisticasPressao.avg)} bar` : '-'}
               </span>
             </div>
           </div>
@@ -431,24 +554,27 @@ const VisualizarRelatorio = () => {
                     }}
                   />
                   <Legend />
-                  <Line 
-                    type="monotone" 
-                    dataKey="pressaoA" 
-                    stroke="#dc3545" 
-                    strokeWidth={2}
-                    dot={false}
-                    name="Pressão A (bar)"
-                    animationDuration={300}
-                  />
-                  <Line 
-                    type="monotone" 
-                    dataKey="pressaoB" 
-                    stroke="#007bff" 
-                    strokeWidth={2}
-                    dot={false}
-                    name="Pressão B (bar)"
-                    animationDuration={300}
-                  />
+                  {relatorio.camaraTestada?.trim().toUpperCase() === 'B' ? (
+                    <Line 
+                      type="monotone" 
+                      dataKey="pressaoB" 
+                      stroke="#007bff" 
+                      strokeWidth={2}
+                      dot={false}
+                      name="Pressão B (bar)"
+                      animationDuration={300}
+                    />
+                  ) : (
+                    <Line 
+                      type="monotone" 
+                      dataKey="pressaoA" 
+                      stroke="#dc3545" 
+                      strokeWidth={2}
+                      dot={false}
+                      name="Pressão A (bar)"
+                      animationDuration={300}
+                    />
+                  )}
                 </LineChart>
               </ResponsiveContainer>
             </div>

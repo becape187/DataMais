@@ -236,32 +236,60 @@ public class RelatorioController : ControllerBase
         try
         {
             var tables = await queryApi.QueryAsync(flux, appConfig.Influx.Organization);
-            var valoresFiltrados = new List<double>();
-
+            
+            // Primeiro, coleta todos os dados ordenados por tempo
+            var todosDados = new List<(DateTime time, double pressao)>();
+            
             foreach (var table in tables)
             {
                 foreach (var record in table.Records)
                 {
                     var value = record.GetValue();
-                    if (value != null && value is IConvertible)
+                    var time = record.GetTime();
+                    if (value != null && value is IConvertible && time != null)
                     {
                         try
                         {
                             var pressao = Convert.ToDouble(value);
-                            // Adiciona apenas valores >= setpoint
-                            if (pressao >= setpoint)
-                            {
-                                valoresFiltrados.Add(pressao);
-                            }
+                            var dateTime = time.Value.ToDateTimeUtc();
+                            todosDados.Add((dateTime, pressao));
                         }
                         catch { }
                     }
                 }
             }
 
-            if (valoresFiltrados.Count == 0)
+            // Ordena por tempo para garantir ordem cronológica
+            todosDados = todosDados.OrderBy(d => d.time).ToList();
+
+            // Encontra o primeiro ponto onde a pressão >= setpoint
+            int inicioAnalise = -1;
+            for (int i = 0; i < todosDados.Count; i++)
+            {
+                if (todosDados[i].pressao >= setpoint)
+                {
+                    inicioAnalise = i;
+                    break; // Encontrou o primeiro ponto que alcança o setpoint
+                }
+            }
+
+            // Se nunca alcançou o setpoint, retorna null
+            if (inicioAnalise == -1)
             {
                 _logger.LogWarning("Nenhum dado de pressão >= setpoint ({Setpoint}) encontrado para o ensaio {EnsaioId}.", setpoint, ensaio.Id);
+                return (null, null, null);
+            }
+
+            // A partir do momento que alcançou o setpoint, coleta TODOS os valores
+            // (mesmo que depois caia abaixo do setpoint)
+            var valoresFiltrados = new List<double>();
+            for (int i = inicioAnalise; i < todosDados.Count; i++)
+            {
+                valoresFiltrados.Add(todosDados[i].pressao);
+            }
+
+            if (valoresFiltrados.Count == 0)
+            {
                 return (null, null, null);
             }
 
