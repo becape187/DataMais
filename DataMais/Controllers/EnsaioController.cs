@@ -99,13 +99,246 @@ namespace DataMais.Controllers;
             _context.Ensaios.Add(ensaio);
             await _context.SaveChangesAsync();
 
-            return Ok(new
+            // Executa comandos Modbus para iniciar o ensaio
+            var errosModbus = new List<string>();
+
+            try
+            {
+                // 1. Liga a câmara correspondente (Avança para Câmara A, Recua para Câmara B)
+                var nomeBotaoCamara = camara == "A" ? "BOTAO_AVANCA_IHM" : "BOTAO_RECUA_IHM";
+                var botaoCamara = await _context.ModbusConfigs
+                    .FirstOrDefaultAsync(m => m.Nome == nomeBotaoCamara && m.Ativo);
+
+                if (botaoCamara != null)
+                {
+                    string funcaoEscrita = botaoCamara.TipoDado == "Boolean" || botaoCamara.FuncaoModbus == "ReadCoils" 
+                        ? "WriteSingleCoil" 
+                        : "WriteSingleRegister";
+
+                    var configTemp = new ModbusConfig
+                    {
+                        Id = botaoCamara.Id,
+                        Nome = botaoCamara.Nome,
+                        IpAddress = botaoCamara.IpAddress,
+                        Port = botaoCamara.Port,
+                        SlaveId = botaoCamara.SlaveId,
+                        FuncaoModbus = funcaoEscrita,
+                        EnderecoRegistro = botaoCamara.EnderecoRegistro,
+                        QuantidadeRegistros = botaoCamara.QuantidadeRegistros,
+                        TipoDado = botaoCamara.TipoDado,
+                        Ativo = botaoCamara.Ativo
+                    };
+
+                    var camaraAtivada = await _modbusService.EscreverRegistroAsync(configTemp, true);
+                    if (!camaraAtivada)
+                    {
+                        errosModbus.Add($"Erro ao ativar {nomeBotaoCamara}");
+                    }
+                    else
+                    {
+                        _logger.LogInformation("Câmara {Camara} ({Botao}) ativada com sucesso", camara, nomeBotaoCamara);
+                    }
+                }
+                else
+                {
+                    errosModbus.Add($"Registro '{nomeBotaoCamara}' não encontrado");
+                }
+
+                // 2. Escreve Pressão de Carga
+                var pressaoRegistro = await _context.ModbusConfigs
+                    .FirstOrDefaultAsync(m => m.Nome == "PRESSAO_CARGA" && m.Ativo);
+
+                if (pressaoRegistro != null)
+                {
+                    string funcaoEscrita = pressaoRegistro.TipoDado == "Boolean" || pressaoRegistro.FuncaoModbus == "ReadCoils" 
+                        ? "WriteSingleCoil" 
+                        : "WriteSingleRegister";
+
+                    var configTemp = new ModbusConfig
+                    {
+                        Id = pressaoRegistro.Id,
+                        Nome = pressaoRegistro.Nome,
+                        IpAddress = pressaoRegistro.IpAddress,
+                        Port = pressaoRegistro.Port,
+                        SlaveId = pressaoRegistro.SlaveId,
+                        FuncaoModbus = funcaoEscrita,
+                        EnderecoRegistro = pressaoRegistro.EnderecoRegistro,
+                        QuantidadeRegistros = pressaoRegistro.QuantidadeRegistros,
+                        TipoDado = pressaoRegistro.TipoDado,
+                        Ativo = pressaoRegistro.Ativo
+                    };
+
+                    object valorPressao = funcaoEscrita == "WriteSingleRegister" 
+                        ? (ushort)Math.Round(request.PressaoCarga) 
+                        : (object)(request.PressaoCarga > 0);
+
+                    var pressaoEscrita = await _modbusService.EscreverRegistroAsync(configTemp, valorPressao);
+                    if (!pressaoEscrita)
+                    {
+                        errosModbus.Add("Erro ao escrever PRESSAO_CARGA");
+                    }
+                    else
+                    {
+                        _logger.LogInformation("Pressão de carga {Pressao} escrita com sucesso", request.PressaoCarga);
+                    }
+                }
+                else
+                {
+                    errosModbus.Add("Registro 'PRESSAO_CARGA' não encontrado");
+                }
+
+                // 3. Escreve Tempo de Carga
+                var tempoRegistro = await _context.ModbusConfigs
+                    .FirstOrDefaultAsync(m => m.Nome == "TEMPO_CARGA" && m.Ativo);
+
+                if (tempoRegistro != null)
+                {
+                    string funcaoEscrita = tempoRegistro.TipoDado == "Boolean" || tempoRegistro.FuncaoModbus == "ReadCoils" 
+                        ? "WriteSingleCoil" 
+                        : "WriteSingleRegister";
+
+                    var configTemp = new ModbusConfig
+                    {
+                        Id = tempoRegistro.Id,
+                        Nome = tempoRegistro.Nome,
+                        IpAddress = tempoRegistro.IpAddress,
+                        Port = tempoRegistro.Port,
+                        SlaveId = tempoRegistro.SlaveId,
+                        FuncaoModbus = funcaoEscrita,
+                        EnderecoRegistro = tempoRegistro.EnderecoRegistro,
+                        QuantidadeRegistros = tempoRegistro.QuantidadeRegistros,
+                        TipoDado = tempoRegistro.TipoDado,
+                        Ativo = tempoRegistro.Ativo
+                    };
+
+                    object valorTempo = funcaoEscrita == "WriteSingleRegister" 
+                        ? (ushort)Math.Round(request.TempoCarga) 
+                        : (object)(request.TempoCarga > 0);
+
+                    var tempoEscrito = await _modbusService.EscreverRegistroAsync(configTemp, valorTempo);
+                    if (!tempoEscrito)
+                    {
+                        errosModbus.Add("Erro ao escrever TEMPO_CARGA");
+                    }
+                    else
+                    {
+                        _logger.LogInformation("Tempo de carga {Tempo} escrito com sucesso", request.TempoCarga);
+                    }
+                }
+                else
+                {
+                    errosModbus.Add("Registro 'TEMPO_CARGA' não encontrado");
+                }
+
+                // 4. Inicia o registro e verifica se está rodando (seguindo o padrão do motor)
+                var iniciaRegistro = await _context.ModbusConfigs
+                    .FirstOrDefaultAsync(m => m.Nome == "INICIA_REGISTRO" && m.Ativo);
+
+                var registroRodando = await _context.ModbusConfigs
+                    .FirstOrDefaultAsync(m => m.Nome == "REGISTRO_RODANDO" && m.Ativo && m.FuncaoModbus == "ReadInputs");
+
+                if (iniciaRegistro != null && registroRodando != null)
+                {
+                    string funcaoEscrita = iniciaRegistro.TipoDado == "Boolean" || iniciaRegistro.FuncaoModbus == "ReadCoils" 
+                        ? "WriteSingleCoil" 
+                        : "WriteSingleRegister";
+
+                    var configTemp = new ModbusConfig
+                    {
+                        Id = iniciaRegistro.Id,
+                        Nome = iniciaRegistro.Nome,
+                        IpAddress = iniciaRegistro.IpAddress,
+                        Port = iniciaRegistro.Port,
+                        SlaveId = iniciaRegistro.SlaveId,
+                        FuncaoModbus = funcaoEscrita,
+                        EnderecoRegistro = iniciaRegistro.EnderecoRegistro,
+                        QuantidadeRegistros = iniciaRegistro.QuantidadeRegistros,
+                        TipoDado = iniciaRegistro.TipoDado,
+                        Ativo = iniciaRegistro.Ativo
+                    };
+
+                    // 1. Ativa o botão (mantém ativado até receber confirmação)
+                    var iniciado = await _modbusService.EscreverRegistroAsync(configTemp, true);
+                    if (!iniciado)
+                    {
+                        errosModbus.Add("Erro ao ativar INICIA_REGISTRO");
+                    }
+                    else
+                    {
+                        // 2. Aguarda um tempo inicial para o CLP processar o comando
+                        await Task.Delay(300);
+
+                        // 3. Verifica se o status mudou (aguarda confirmação via REGISTRO_RODANDO)
+                        // O botão permanece ativado enquanto aguarda a confirmação
+                        var timeout = TimeSpan.FromSeconds(2);
+                        var intervalo = TimeSpan.FromMilliseconds(200);
+                        var inicioVerificacao = DateTime.UtcNow;
+                        bool rodando = false;
+                        int tentativasLeitura = 0;
+
+                        while (DateTime.UtcNow - inicioVerificacao < timeout)
+                        {
+                            await Task.Delay(intervalo);
+                            tentativasLeitura++;
+
+                            try
+                            {
+                                var status = await _modbusService.LerRegistroAsync(registroRodando.Id);
+                                bool statusBool = status is bool boolVal ? boolVal : (status?.ToString() == "1" || status?.ToString() == "True");
+                                
+                                if (statusBool)
+                                {
+                                    rodando = true;
+                                    _logger.LogInformation("REGISTRO_RODANDO confirmado após {Tentativas} tentativas", tentativasLeitura);
+                                    break;
+                                }
+                            }
+                            catch (Exception exLeitura)
+                            {
+                                _logger.LogWarning(exLeitura, "Erro ao ler REGISTRO_RODANDO na tentativa {Tentativa}", tentativasLeitura);
+                            }
+                        }
+
+                        // 4. Desativa o botão após receber confirmação ou timeout
+                        await _modbusService.EscreverRegistroAsync(configTemp, false);
+
+                        if (!rodando)
+                        {
+                            errosModbus.Add("Registro não iniciou após 2 segundos. Verifique REGISTRO_RODANDO.");
+                        }
+                    }
+                }
+                else
+                {
+                    if (iniciaRegistro == null)
+                        errosModbus.Add("Registro 'INICIA_REGISTRO' não encontrado");
+                    if (registroRodando == null)
+                        errosModbus.Add("Registro 'REGISTRO_RODANDO' (ReadInputs) não encontrado");
+                }
+            }
+            catch (Exception exModbus)
+            {
+                _logger.LogError(exModbus, "Erro ao executar comandos Modbus ao iniciar ensaio");
+                errosModbus.Add($"Erro ao executar comandos Modbus: {exModbus.Message}");
+            }
+
+            // Retorna resposta com avisos se houver erros Modbus, mas o ensaio foi criado
+            var resposta = new
             {
                 id = ensaio.Id,
                 numero = ensaio.Numero,
                 status = ensaio.Status,
-                dataInicio = ensaio.DataInicio
-            });
+                dataInicio = ensaio.DataInicio,
+                avisosModbus = errosModbus.Any() ? errosModbus : null
+            };
+
+            if (errosModbus.Any())
+            {
+                _logger.LogWarning("Ensaio {EnsaioId} criado, mas com avisos Modbus: {Avisos}", ensaio.Id, string.Join(", ", errosModbus));
+                return Ok(resposta);
+            }
+
+            return Ok(resposta);
         }
         catch (Exception ex)
         {

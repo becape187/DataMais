@@ -25,6 +25,37 @@ const Ensaio = () => {
   const [camara, setCamara] = useState<'A' | 'B' | ''>('')
   const [pressaoCarga, setPressaoCarga] = useState<string>('')
   const [tempoCarga, setTempoCarga] = useState<string>('')
+  const [registroRodando, setRegistroRodando] = useState<boolean | null>(null)
+
+  // Verifica REGISTRO_RODANDO ao carregar a página
+  useEffect(() => {
+    const verificarRegistroRodando = async () => {
+      try {
+        const response = await api.get('/ModbusConfig/registro/rodando')
+        setRegistroRodando(response.data.rodando)
+        
+        if (response.data.rodando) {
+          const evento: LogEvento = {
+            id: Date.now(),
+            texto: `[${new Date().toLocaleTimeString('pt-BR')}] Registro está rodando`,
+            tipo: 'normal',
+            comentarios: 0,
+          }
+          setLogEventos(prev => [evento, ...prev])
+        }
+      } catch (err: any) {
+        console.error('Erro ao verificar REGISTRO_RODANDO:', err)
+        setRegistroRodando(null)
+      }
+    }
+
+    verificarRegistroRodando()
+    
+    // Verifica periodicamente a cada 5 segundos
+    const interval = setInterval(verificarRegistroRodando, 5000)
+    
+    return () => clearInterval(interval)
+  }, [])
 
   useEffect(() => {
     if (!ensaioAtivo || !ensaioId) return
@@ -103,6 +134,17 @@ const Ensaio = () => {
       setEnsaioAtivo(true)
       setDados([])
       setLogEventos([])
+
+      // Verifica avisos Modbus se houver
+      if (response.data.avisosModbus && response.data.avisosModbus.length > 0) {
+        const avisos = response.data.avisosModbus.join('\n')
+        alert(`Ensaio iniciado, mas com avisos:\n${avisos}`)
+      }
+
+      // Atualiza status do registro rodando
+      if (response.data.registroRodando !== undefined) {
+        setRegistroRodando(response.data.registroRodando)
+      }
 
       const evento: LogEvento = {
         id: Date.now(),
@@ -219,6 +261,12 @@ const Ensaio = () => {
           <span className="stat-mini-label">Status</span>
           <span className={`stat-mini-value ${ensaioAtivo ? 'status-active' : 'status-inactive'}`}>
             {ensaioAtivo ? '● Ativo' : '○ Inativo'}
+          </span>
+        </div>
+        <div className="stat-mini">
+          <span className="stat-mini-label">Registro</span>
+          <span className={`stat-mini-value ${registroRodando ? 'status-active' : registroRodando === false ? 'status-inactive' : ''}`}>
+            {registroRodando === null ? '○ Verificando...' : registroRodando ? '● Rodando' : '○ Parado'}
           </span>
         </div>
       </div>
