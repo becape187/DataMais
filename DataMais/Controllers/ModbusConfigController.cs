@@ -662,10 +662,11 @@ public class ModbusConfigController : ControllerBase
 
             var valor = await _modbusService.LerRegistroAsync(registro.Id);
             bool rodando = valor is bool boolVal ? boolVal : (valor?.ToString() == "1" || valor?.ToString() == "True");
+            string valorStr = valor?.ToString() ?? string.Empty;
 
             return Ok(new { 
                 rodando,
-                valor: valor?.ToString()
+                valor = valorStr
             });
         }
         catch (Exception ex)
