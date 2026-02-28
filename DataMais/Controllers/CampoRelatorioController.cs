@@ -121,15 +121,13 @@ public class CampoRelatorioController : ControllerBase
             // Calcula a próxima ordem
             var maxOrdem = await _context.CamposRelatorio
                 .Where(c => c.DataExclusao == null)
-                .Select(c => (int?)c.Ordem)
-                .DefaultIfEmpty(0)
-                .MaxAsync();
+                .MaxAsync(c => (int?)c.Ordem) ?? 0;
 
             var campo = new CampoRelatorio
             {
                 Nome = request.Nome.Trim(),
                 TipoResposta = request.TipoResposta,
-                Ordem = (maxOrdem ?? 0) + 1,
+                Ordem = maxOrdem + 1,
                 DataCriacao = DateTime.UtcNow
             };
 
