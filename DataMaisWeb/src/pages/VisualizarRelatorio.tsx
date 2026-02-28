@@ -24,7 +24,8 @@ interface RelatorioDetalhe {
 
 interface DataPoint {
   time: string
-  pressao: number
+  pressaoA?: number | null
+  pressaoB?: number | null
 }
 
 const VisualizarRelatorio = () => {
@@ -116,12 +117,13 @@ const VisualizarRelatorio = () => {
     }
 
     // Cabeçalho do CSV
-    const cabecalho = ['Tempo', 'Pressão (bar)']
+    const cabecalho = ['Tempo', 'Pressão A (bar)', 'Pressão B (bar)']
     
     // Dados formatados
     const linhas = dadosGrafico.map(ponto => [
       ponto.time,
-      ponto.pressao.toFixed(2)
+      ponto.pressaoA != null ? ponto.pressaoA.toFixed(2) : '',
+      ponto.pressaoB != null ? ponto.pressaoB.toFixed(2) : ''
     ])
 
     // Combina cabeçalho e dados
@@ -155,7 +157,8 @@ const VisualizarRelatorio = () => {
     // Prepara os dados para a planilha
     const dadosPlanilha = dadosGrafico.map(ponto => ({
       'Tempo': ponto.time,
-      'Pressão (bar)': ponto.pressao
+      'Pressão A (bar)': ponto.pressaoA != null ? ponto.pressaoA : '',
+      'Pressão B (bar)': ponto.pressaoB != null ? ponto.pressaoB : ''
     }))
 
     // Cria a workbook
@@ -165,7 +168,8 @@ const VisualizarRelatorio = () => {
     // Ajusta largura das colunas
     ws['!cols'] = [
       { wch: 15 }, // Coluna Tempo
-      { wch: 18 }  // Coluna Pressão
+      { wch: 18 }, // Coluna Pressão A
+      { wch: 18 }  // Coluna Pressão B
     ]
 
     // Adiciona a planilha ao workbook
@@ -357,19 +361,28 @@ const VisualizarRelatorio = () => {
                       border: '1px solid #E0E0E0',
                       borderRadius: '8px'
                     }}
-                    formatter={(value: number | undefined) => {
-                      if (value === undefined || value === null) return ['N/A', 'Pressão']
-                      return [`${value.toFixed(2)} bar`, 'Pressão']
+                    formatter={(value: number | undefined, name: string) => {
+                      if (value === undefined || value === null) return ['N/A', name]
+                      return [`${value.toFixed(2)} bar`, name]
                     }}
                   />
                   <Legend />
                   <Line 
                     type="monotone" 
-                    dataKey="pressao" 
-                    stroke="var(--modec-red)" 
+                    dataKey="pressaoA" 
+                    stroke="#dc3545" 
                     strokeWidth={2}
                     dot={false}
-                    name="Pressão (bar)"
+                    name="Pressão A (bar)"
+                    animationDuration={300}
+                  />
+                  <Line 
+                    type="monotone" 
+                    dataKey="pressaoB" 
+                    stroke="#007bff" 
+                    strokeWidth={2}
+                    dot={false}
+                    name="Pressão B (bar)"
                     animationDuration={300}
                   />
                 </LineChart>

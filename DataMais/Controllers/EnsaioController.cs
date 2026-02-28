@@ -459,15 +459,14 @@ namespace DataMais.Controllers;
     }
 
     /// <summary>
-    /// Lê a pressão atual via Modbus, grava no InfluxDB e retorna o ponto para o frontend.
+    /// Lê as pressões A e B via Modbus, grava no InfluxDB e retorna os pontos para o frontend.
+    /// Sempre lê e salva ambas as pressões, independente da câmara selecionada.
     /// </summary>
     [HttpGet("{id:int}/pressao-atual")]
     public async Task<IActionResult> LerPressaoAtual(int id)
     {
         try
         {
-            DataMais.Models.ModbusConfig? pressaoRegistro = null;
-
             var ensaio = await _context.Ensaios.FindAsync(id);
             if (ensaio == null)
             {
@@ -479,79 +478,85 @@ namespace DataMais.Controllers;
                 return BadRequest(new { message = $"Ensaio não está em execução (status atual: {ensaio.Status})" });
             }
 
-            // Define registro de pressão preferencial com base na câmara testada
-            string? registroPreferencial = null;
-            if (string.Equals(ensaio.CamaraTestada, "A", StringComparison.OrdinalIgnoreCase))
-            {
-                registroPreferencial = "PRESSAO_A_CONV";
-            }
-            else if (string.Equals(ensaio.CamaraTestada, "B", StringComparison.OrdinalIgnoreCase))
-            {
-                registroPreferencial = "PRESSAO_B_CONV";
-            }
+            // Busca registros Modbus para pressão A e B
+            var pressaoARegistro = await _context.ModbusConfigs
+                .Where(m => m.Ativo && m.Nome == "PRESSAO_A_CONV")
+                .FirstOrDefaultAsync();
 
-            // Procura registro de pressão convertida (preferencialmente da câmara configurada, depois geral)
-            var query = _context.ModbusConfigs
-                .Where(m => m.Ativo);
+            var pressaoBRegistro = await _context.ModbusConfigs
+                .Where(m => m.Ativo && m.Nome == "PRESSAO_B_CONV")
+                .FirstOrDefaultAsync();
 
-            if (!string.IsNullOrWhiteSpace(registroPreferencial))
+            // Se não encontrar os registros específicos, tenta alternativas
+            if (pressaoARegistro == null)
             {
-                var preferencial = await query
-                    .Where(m => m.Nome == registroPreferencial)
+                pressaoARegistro = await _context.ModbusConfigs
+                    .Where(m => m.Ativo && (m.Nome == "PRESSAO_A" || m.Nome == "PRESSAO_GERAL_CONV" || m.Nome == "PRESSAO_GERAL"))
                     .FirstOrDefaultAsync();
+            }
 
-                if (preferencial != null)
+            if (pressaoBRegistro == null)
+            {
+                pressaoBRegistro = await _context.ModbusConfigs
+                    .Where(m => m.Ativo && (m.Nome == "PRESSAO_B" || m.Nome == "PRESSAO_GERAL_CONV" || m.Nome == "PRESSAO_GERAL"))
+                    .FirstOrDefaultAsync();
+            }
+
+            double? pressaoA = null;
+            double? pressaoB = null;
+
+            // Lê pressão A
+            if (pressaoARegistro != null)
+            {
+                try
                 {
-                    pressaoRegistro = preferencial;
+                    var valorAObj = await _modbusService.LerRegistroAsync(pressaoARegistro.Id);
+                    if (valorAObj != null)
+                    {
+                        var valorA = Convert.ToDouble(valorAObj);
+                        if (!double.IsNaN(valorA) && !double.IsInfinity(valorA))
+                        {
+                            pressaoA = Math.Max(0, Math.Min(1000, valorA));
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Erro ao ler pressão A do Modbus para ensaio {EnsaioId}", id);
                 }
             }
 
-            if (pressaoRegistro == null)
+            // Lê pressão B
+            if (pressaoBRegistro != null)
             {
-                pressaoRegistro = await _context.ModbusConfigs
-                    .Where(m => m.Ativo)
-                    .Where(m => m.Nome == "PRESSAO_GERAL_CONV"
-                                || m.Nome == "PRESSAO_GERAL"
-                                || m.Nome == "PRESSAO_A_CONV"
-                                || m.Nome == "PRESSAO_B_CONV")
-                    .OrderBy(m => m.Nome) // GERAL_CONV primeiro, depois alternativas
-                    .FirstOrDefaultAsync();
+                try
+                {
+                    var valorBObj = await _modbusService.LerRegistroAsync(pressaoBRegistro.Id);
+                    if (valorBObj != null)
+                    {
+                        var valorB = Convert.ToDouble(valorBObj);
+                        if (!double.IsNaN(valorB) && !double.IsInfinity(valorB))
+                        {
+                            pressaoB = Math.Max(0, Math.Min(1000, valorB));
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Erro ao ler pressão B do Modbus para ensaio {EnsaioId}", id);
+                }
             }
 
-            if (pressaoRegistro == null)
+            // Se não conseguiu ler nenhuma pressão, retorna erro
+            if (!pressaoA.HasValue && !pressaoB.HasValue)
             {
-                return NotFound(new { message = "Registro Modbus de pressão não encontrado (PRESSAO_GERAL_CONV / PRESSAO_GERAL / PRESSAO_A_CONV / PRESSAO_B_CONV)" });
+                return StatusCode(500, new { message = "Falha ao ler pressões A e B do Modbus" });
             }
-
-            var valorObj = await _modbusService.LerRegistroAsync(pressaoRegistro!.Id);
-            if (valorObj == null)
-            {
-                return StatusCode(500, new { message = "Falha ao ler pressão do Modbus" });
-            }
-
-            double pressao;
-            try
-            {
-                pressao = Convert.ToDouble(valorObj);
-            }
-            catch
-            {
-                _logger.LogWarning("Valor de pressão inválido retornado do Modbus: {Valor}", valorObj);
-                return StatusCode(500, new { message = "Valor de pressão inválido retornado do Modbus" });
-            }
-
-            // Garante que a pressão fique em um intervalo razoável (0 a 1000 bar)
-            if (double.IsNaN(pressao) || double.IsInfinity(pressao))
-            {
-                return StatusCode(500, new { message = "Valor de pressão inválido (NaN ou infinito)" });
-            }
-
-            pressao = Math.Max(0, Math.Min(1000, pressao));
 
             var timestamp = DateTime.UtcNow;
             var timeLabel = DateTime.Now.ToString("HH:mm:ss");
 
-            // Grava no InfluxDB (melhor para séries temporais)
+            // Grava ambas as pressões no InfluxDB
             try
             {
                 var appConfig = _configService.GetConfig();
@@ -569,8 +574,19 @@ namespace DataMais.Controllers;
                         .Tag("ensaioId", ensaio.Id.ToString())
                         .Tag("clienteId", ensaio.ClienteId.ToString())
                         .Tag("cilindroId", ensaio.CilindroId.ToString())
-                        .Field("pressao", pressao)
                         .Timestamp(timestamp, WritePrecision.Ns);
+
+                    // Adiciona campo pressaoA se disponível
+                    if (pressaoA.HasValue)
+                    {
+                        point = point.Field("pressaoA", pressaoA.Value);
+                    }
+
+                    // Adiciona campo pressaoB se disponível
+                    if (pressaoB.HasValue)
+                    {
+                        point = point.Field("pressaoB", pressaoB.Value);
+                    }
 
                     await writeApi.WritePointAsync(point, appConfig.Influx.Bucket, appConfig.Influx.Organization);
                 }
@@ -588,7 +604,8 @@ namespace DataMais.Controllers;
             return Ok(new
             {
                 time = timeLabel,
-                pressao
+                pressaoA: pressaoA,
+                pressaoB: pressaoB
             });
         }
         catch (Exception ex)

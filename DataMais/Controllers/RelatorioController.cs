@@ -5,6 +5,7 @@ using DataMais.Models;
 using DataMais.Services;
 using InfluxDB.Client;
 using InfluxDB.Client.Core.Flux.Domain;
+using System.Linq;
 
 namespace DataMais.Controllers;
 
@@ -261,22 +262,29 @@ public class RelatorioController : ControllerBase
             var from = (ensaio.DataInicio ?? ensaio.DataCriacao).ToUniversalTime().AddMinutes(-1);
             var to = (ensaio.DataFim ?? DateTime.UtcNow).ToUniversalTime().AddMinutes(1);
 
-            var flux = $@"from(bucket: ""{appConfig.Influx.Bucket}"")
+            // Busca ambas as pressões A e B
+            var fluxA = $@"from(bucket: ""{appConfig.Influx.Bucket}"")
   |> range(start: {from:o}, stop: {to:o})
-  |> filter(fn: (r) => r._measurement == ""ensaio_pressao"" and r.ensaioId == ""{ensaio.Id}"" and r._field == ""pressao"")
+  |> filter(fn: (r) => r._measurement == ""ensaio_pressao"" and r.ensaioId == ""{ensaio.Id}"" and r._field == ""pressaoA"")
+  |> sort(columns: [""_time""])
+  |> keep(columns: [""_time"", ""_value""])";
+
+            var fluxB = $@"from(bucket: ""{appConfig.Influx.Bucket}"")
+  |> range(start: {from:o}, stop: {to:o})
+  |> filter(fn: (r) => r._measurement == ""ensaio_pressao"" and r.ensaioId == ""{ensaio.Id}"" and r._field == ""pressaoB"")
   |> sort(columns: [""_time""])
   |> keep(columns: [""_time"", ""_value""])";
 
             using var influxClient = new InfluxDBClient(appConfig.Influx.Url, appConfig.Influx.Token);
             var queryApi = influxClient.GetQueryApi();
 
-            var dados = new List<object>();
+            var dados = new Dictionary<string, Dictionary<string, double>>();
 
             try
             {
-                var tables = await queryApi.QueryAsync(flux, appConfig.Influx.Organization);
-
-                foreach (var table in tables)
+                // Busca pressão A
+                var tablesA = await queryApi.QueryAsync(fluxA, appConfig.Influx.Organization);
+                foreach (var table in tablesA)
                 {
                     foreach (var record in table.Records)
                     {
@@ -285,7 +293,6 @@ public class RelatorioController : ControllerBase
 
                         if (time != null && value != null)
                         {
-                            // Converte o timestamp Instant para DateTime local e depois para formato legível (HH:mm:ss)
                             var dateTime = time.Value.ToDateTimeUtc().ToLocalTime();
                             var timeStr = dateTime.ToString("HH:mm:ss");
                             
@@ -306,22 +313,70 @@ public class RelatorioController : ControllerBase
                                 continue;
                             }
 
-                            dados.Add(new
+                            if (!dados.ContainsKey(timeStr))
                             {
-                                time = timeStr,
-                                pressao = Math.Round(pressao, 2)
-                            });
+                                dados[timeStr] = new Dictionary<string, double>();
+                            }
+                            dados[timeStr]["pressaoA"] = Math.Round(pressao, 2);
                         }
                     }
                 }
+
+                // Busca pressão B
+                var tablesB = await queryApi.QueryAsync(fluxB, appConfig.Influx.Organization);
+                foreach (var table in tablesB)
+                {
+                    foreach (var record in table.Records)
+                    {
+                        var time = record.GetTime();
+                        var value = record.GetValue();
+
+                        if (time != null && value != null)
+                        {
+                            var dateTime = time.Value.ToDateTimeUtc().ToLocalTime();
+                            var timeStr = dateTime.ToString("HH:mm:ss");
+                            
+                            double pressao = 0;
+                            if (value is IConvertible)
+                            {
+                                try
+                                {
+                                    pressao = Convert.ToDouble(value);
+                                }
+                                catch
+                                {
+                                    continue;
+                                }
+                            }
+                            else
+                            {
+                                continue;
+                            }
+
+                            if (!dados.ContainsKey(timeStr))
+                            {
+                                dados[timeStr] = new Dictionary<string, double>();
+                            }
+                            dados[timeStr]["pressaoB"] = Math.Round(pressao, 2);
+                        }
+                    }
+                }
+
+                // Converte o dicionário para lista de objetos
+                var dadosLista = dados.Select(kvp => new
+                {
+                    time = kvp.Key,
+                    pressaoA = kvp.Value.ContainsKey("pressaoA") ? (double?)kvp.Value["pressaoA"] : null,
+                    pressaoB = kvp.Value.ContainsKey("pressaoB") ? (double?)kvp.Value["pressaoB"] : null
+                }).OrderBy(d => d.time).ToList();
+
+                return Ok(new { dados = dadosLista });
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Erro ao buscar dados do InfluxDB para o gráfico do relatório {RelatorioId}", id);
                 return StatusCode(500, new { message = "Erro ao buscar dados do gráfico", error = ex.Message });
             }
-
-            return Ok(new { dados });
         }
         catch (Exception ex)
         {

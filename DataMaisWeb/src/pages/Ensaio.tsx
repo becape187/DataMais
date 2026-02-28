@@ -6,7 +6,8 @@ import './Ensaio.css'
 
 interface DataPoint {
   time: string
-  pressao: number
+  pressaoA?: number | null
+  pressaoB?: number | null
 }
 
 interface LogEvento {
@@ -163,7 +164,8 @@ const Ensaio = () => {
         if (isMounted) {
           const ponto: DataPoint = {
             time: response.data.time,
-            pressao: response.data.pressao,
+            pressaoA: response.data.pressaoA,
+            pressaoB: response.data.pressaoB,
           }
 
           setDados(prev => {
@@ -328,9 +330,19 @@ const Ensaio = () => {
 
       <div className="ensaio-stats">
         <div className="stat-mini">
-          <span className="stat-mini-label">Pressão Atual</span>
+          <span className="stat-mini-label">Pressão A</span>
           <span className="stat-mini-value">
-            {dados.length > 0 ? dados[dados.length - 1].pressao.toFixed(2) : '0.00'} bar
+            {dados.length > 0 && dados[dados.length - 1].pressaoA != null 
+              ? dados[dados.length - 1].pressaoA!.toFixed(2) 
+              : 'N/A'} bar
+          </span>
+        </div>
+        <div className="stat-mini">
+          <span className="stat-mini-label">Pressão B</span>
+          <span className="stat-mini-value">
+            {dados.length > 0 && dados[dados.length - 1].pressaoB != null 
+              ? dados[dados.length - 1].pressaoB!.toFixed(2) 
+              : 'N/A'} bar
           </span>
         </div>
         <div className="stat-mini">
@@ -379,15 +391,28 @@ const Ensaio = () => {
                     border: '1px solid #E0E0E0',
                     borderRadius: '8px'
                   }}
+                  formatter={(value: number | undefined, name: string) => {
+                    if (value === undefined || value === null) return ['N/A', name]
+                    return [`${value.toFixed(2)} bar`, name]
+                  }}
                 />
                 <Legend />
                 <Line 
                   type="monotone" 
-                  dataKey="pressao" 
-                  stroke="var(--modec-red)" 
+                  dataKey="pressaoA" 
+                  stroke="#dc3545" 
                   strokeWidth={3}
                   dot={false}
-                  name="Pressão (bar)"
+                  name="Pressão A (bar)"
+                  animationDuration={300}
+                />
+                <Line 
+                  type="monotone" 
+                  dataKey="pressaoB" 
+                  stroke="#007bff" 
+                  strokeWidth={3}
+                  dot={false}
+                  name="Pressão B (bar)"
                   animationDuration={300}
                 />
               </LineChart>
