@@ -303,13 +303,19 @@ const VisualizarRelatorio = () => {
       clone.style.transform = 'none'
       clone.style.transformOrigin = 'top left'
       
+      // Esconde os botões de exportação no clone (apenas para PDF/impressão)
+      const exportButtons = clone.querySelectorAll('.export-button, .export-buttons')
+      exportButtons.forEach(btn => {
+        (btn as HTMLElement).style.display = 'none'
+      })
+      
       // Adiciona o clone ao body temporariamente
       document.body.appendChild(clone)
       
       // Aguarda um frame para garantir que o layout seja aplicado
       await new Promise(resolve => requestAnimationFrame(resolve))
       
-      // Captura o clone como canvas com largura fixa de 1080px
+      // Captura o clone como canvas com largura fixa de 1200px
       const canvas = await html2canvas(clone, {
         scale: 2, // Qualidade alta
         useCORS: true,
@@ -390,6 +396,12 @@ const VisualizarRelatorio = () => {
       clone.style.maxWidth = `${renderWidthPx}px`
       clone.style.transform = 'none'
       clone.style.transformOrigin = 'top left'
+      
+      // Esconde os botões de exportação no clone (apenas para PDF/impressão)
+      const exportButtons = clone.querySelectorAll('.export-button, .export-buttons')
+      exportButtons.forEach(btn => {
+        (btn as HTMLElement).style.display = 'none'
+      })
       
       // Adiciona o clone ao body temporariamente
       document.body.appendChild(clone)
@@ -593,17 +605,17 @@ const VisualizarRelatorio = () => {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
             <h3 style={{ margin: 0 }}>Gráfico de Pressão</h3>
             {dadosGrafico.length > 0 && !loadingGrafico && (
-              <div style={{ display: 'flex', gap: '8px' }}>
+              <div style={{ display: 'flex', gap: '8px' }} className="export-buttons">
                 <button 
                   onClick={exportarParaCSV}
-                  className="btn btn-secondary"
+                  className="btn btn-secondary export-button"
                   style={{ fontSize: '14px', padding: '8px 16px' }}
                 >
                   📊 Exportar CSV
                 </button>
                 <button 
                   onClick={exportarParaXLS}
-                  className="btn btn-secondary"
+                  className="btn btn-secondary export-button"
                   style={{ fontSize: '14px', padding: '8px 16px' }}
                 >
                   📈 Exportar XLS
