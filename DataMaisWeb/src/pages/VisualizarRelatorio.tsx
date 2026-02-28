@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
+import * as XLSX from 'xlsx'
 import api from '../config/api'
 import './VisualizarRelatorio.css'
 
@@ -106,6 +107,73 @@ const VisualizarRelatorio = () => {
       setLoadingGrafico(false)
     }
   }, [id, relatorio])
+
+  // Função para exportar dados para CSV
+  const exportarParaCSV = () => {
+    if (dadosGrafico.length === 0) {
+      alert('Não há dados para exportar')
+      return
+    }
+
+    // Cabeçalho do CSV
+    const cabecalho = ['Tempo', 'Pressão (bar)']
+    
+    // Dados formatados
+    const linhas = dadosGrafico.map(ponto => [
+      ponto.time,
+      ponto.pressao.toFixed(2)
+    ])
+
+    // Combina cabeçalho e dados
+    const csvContent = [
+      cabecalho.join(','),
+      ...linhas.map(linha => linha.join(','))
+    ].join('\n')
+
+    // Adiciona BOM para UTF-8 (suporta caracteres especiais)
+    const BOM = '\uFEFF'
+    const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' })
+    
+    // Cria link de download
+    const link = document.createElement('a')
+    const url = URL.createObjectURL(blob)
+    link.setAttribute('href', url)
+    link.setAttribute('download', `relatorio_${relatorio?.numero || 'dados'}_pontos_coletados.csv`)
+    link.style.visibility = 'hidden'
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+  }
+
+  // Função para exportar dados para XLS
+  const exportarParaXLS = () => {
+    if (dadosGrafico.length === 0) {
+      alert('Não há dados para exportar')
+      return
+    }
+
+    // Prepara os dados para a planilha
+    const dadosPlanilha = dadosGrafico.map(ponto => ({
+      'Tempo': ponto.time,
+      'Pressão (bar)': ponto.pressao
+    }))
+
+    // Cria a workbook
+    const wb = XLSX.utils.book_new()
+    const ws = XLSX.utils.json_to_sheet(dadosPlanilha)
+
+    // Ajusta largura das colunas
+    ws['!cols'] = [
+      { wch: 15 }, // Coluna Tempo
+      { wch: 18 }  // Coluna Pressão
+    ]
+
+    // Adiciona a planilha ao workbook
+    XLSX.utils.book_append_sheet(wb, ws, 'Pontos Coletados')
+
+    // Gera o arquivo e faz o download
+    XLSX.writeFile(wb, `relatorio_${relatorio?.numero || 'dados'}_pontos_coletados.xlsx`)
+  }
 
   if (loading) {
     return (
@@ -232,7 +300,27 @@ const VisualizarRelatorio = () => {
         </div>
 
         <div className="relatorio-section">
-          <h3>Gráfico de Pressão</h3>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+            <h3 style={{ margin: 0 }}>Gráfico de Pressão</h3>
+            {dadosGrafico.length > 0 && !loadingGrafico && (
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button 
+                  onClick={exportarParaCSV}
+                  className="btn btn-secondary"
+                  style={{ fontSize: '14px', padding: '8px 16px' }}
+                >
+                  📊 Exportar CSV
+                </button>
+                <button 
+                  onClick={exportarParaXLS}
+                  className="btn btn-secondary"
+                  style={{ fontSize: '14px', padding: '8px 16px' }}
+                >
+                  📈 Exportar XLS
+                </button>
+              </div>
+            )}
+          </div>
           {loadingGrafico ? (
             <div className="grafico-placeholder">
               <p>Carregando dados do gráfico...</p>

@@ -6,9 +6,9 @@ import './Clientes.css'
 interface Cliente {
   id: number
   nome: string
-  cnpj: string
-  contato: string
-  email: string
+  cnpj: string | null
+  contato: string | null
+  email: string | null
 }
 
 const Clientes = () => {
