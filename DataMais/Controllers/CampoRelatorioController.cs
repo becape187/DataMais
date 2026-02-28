@@ -99,6 +99,14 @@ public class CampoRelatorioController : ControllerBase
     {
         try
         {
+            if (request == null)
+            {
+                _logger.LogWarning("Request nulo recebido");
+                return BadRequest(new { message = "Request inválido" });
+            }
+
+            _logger.LogInformation("Criando campo: Nome={Nome}, TipoResposta={TipoResposta}", request.Nome, request.TipoResposta);
+
             if (string.IsNullOrWhiteSpace(request.Nome))
             {
                 return BadRequest(new { message = "O nome do campo é obrigatório" });
@@ -142,8 +150,8 @@ public class CampoRelatorioController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Erro ao criar campo do relatório");
-            return StatusCode(500, new { message = "Erro ao criar campo do relatório", error = ex.Message });
+            _logger.LogError(ex, "Erro ao criar campo do relatório: {Error}", ex.ToString());
+            return StatusCode(500, new { message = "Erro ao criar campo do relatório", error = ex.Message, details = ex.ToString() });
         }
     }
 
@@ -279,17 +287,24 @@ public class CampoRelatorioController : ControllerBase
 // DTOs
 public class CreateCampoRelatorioRequest
 {
+    [System.Text.Json.Serialization.JsonPropertyName("nome")]
     public string Nome { get; set; } = string.Empty;
+    
+    [System.Text.Json.Serialization.JsonPropertyName("tipoResposta")]
     public string TipoResposta { get; set; } = string.Empty; // "SimOuNao", "TextoSimples", "MultiplasLinhas"
 }
 
 public class UpdateCampoRelatorioRequest
 {
+    [System.Text.Json.Serialization.JsonPropertyName("nome")]
     public string? Nome { get; set; }
+    
+    [System.Text.Json.Serialization.JsonPropertyName("tipoResposta")]
     public string? TipoResposta { get; set; }
 }
 
 public class ReordenarCamposRequest
 {
+    [System.Text.Json.Serialization.JsonPropertyName("camposIds")]
     public List<int> CamposIds { get; set; } = new();
 }
