@@ -127,12 +127,29 @@ public class RelatorioController : ControllerBase
             double? pressaoMin = null;
             double? pressaoMax = null;
             double? pressaoMedia = null;
+            string? resultado = null;
 
             if (ensaio != null)
             {
                 try
                 {
                     (pressaoMin, pressaoMax, pressaoMedia) = await CalcularEstatisticasPressaoAsync(ensaio);
+                    
+                    // Calcula o resultado: APROVADO se pressão mínima >= 95% do setpoint, senão REPROVADO
+                    if (ensaio.PressaoCargaConfigurada.HasValue && pressaoMin.HasValue)
+                    {
+                        var setpoint = (double)ensaio.PressaoCargaConfigurada.Value;
+                        var limiteMinimo = setpoint * 0.95; // 95% do setpoint (5% de tolerância)
+                        
+                        if (pressaoMin.Value >= limiteMinimo)
+                        {
+                            resultado = "Aprovado";
+                        }
+                        else
+                        {
+                            resultado = "Reprovado";
+                        }
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -159,7 +176,8 @@ public class RelatorioController : ControllerBase
                 tempoCargaConfigurado = ensaio?.TempoCargaConfigurado,
                 pressaoMinima = pressaoMin,
                 pressaoMaxima = pressaoMax,
-                pressaoMedia = pressaoMedia
+                pressaoMedia = pressaoMedia,
+                resultado = resultado
             };
 
             return Ok(result);
@@ -184,44 +202,80 @@ public class RelatorioController : ControllerBase
             return (null, null, null);
         }
 
+        // Verifica se há setpoint configurado
+        if (!ensaio.PressaoCargaConfigurada.HasValue || ensaio.PressaoCargaConfigurada.Value <= 0)
+        {
+            _logger.LogWarning("Ensaio {EnsaioId} não possui pressão de carga configurada. Não será possível calcular estatísticas.", ensaio.Id);
+            return (null, null, null);
+        }
+
+        var setpoint = (double)ensaio.PressaoCargaConfigurada.Value;
+
+        // Determina qual campo de pressão usar baseado na câmara testada
+        // Se câmara A, usa pressaoA; se câmara B, usa pressaoB; se não especificado, tenta ambos
+        string campoPressao = "pressaoA"; // padrão
+        if (!string.IsNullOrWhiteSpace(ensaio.CamaraTestada))
+        {
+            var camara = ensaio.CamaraTestada.Trim().ToUpperInvariant();
+            campoPressao = camara == "B" ? "pressaoB" : "pressaoA";
+        }
+
         var from = (ensaio.DataInicio ?? ensaio.DataCriacao).ToUniversalTime().AddMinutes(-1);
         var to = (ensaio.DataFim ?? DateTime.UtcNow).ToUniversalTime().AddMinutes(1);
 
-        var baseFlux = $@"from(bucket: ""{appConfig.Influx.Bucket}"")
+        // Busca todos os dados de pressão ordenados por tempo
+        var flux = $@"from(bucket: ""{appConfig.Influx.Bucket}"")
   |> range(start: {from:o}, stop: {to:o})
-  |> filter(fn: (r) => r._measurement == ""ensaio_pressao"" and r.ensaioId == ""{ensaio.Id}"" and r._field == ""pressao"")";
+  |> filter(fn: (r) => r._measurement == ""ensaio_pressao"" and r.ensaioId == ""{ensaio.Id}"" and r._field == ""{campoPressao}"")
+  |> sort(columns: [""_time""])
+  |> keep(columns: [""_time"", ""_value""])";
 
         using var influxClient = new InfluxDBClient(appConfig.Influx.Url, appConfig.Influx.Token);
         var queryApi = influxClient.GetQueryApi();
 
-        async Task<double?> ExecQueryAsync(string flux)
+        try
         {
             var tables = await queryApi.QueryAsync(flux, appConfig.Influx.Organization);
-            var record = tables.FirstOrDefault()?.Records.FirstOrDefault();
-            if (record == null)
-                return null;
+            var valoresFiltrados = new List<double>();
 
-            var value = record.GetValue();
-            if (value is IConvertible)
+            foreach (var table in tables)
             {
-                try
+                foreach (var record in table.Records)
                 {
-                    return Convert.ToDouble(value);
+                    var value = record.GetValue();
+                    if (value != null && value is IConvertible)
+                    {
+                        try
+                        {
+                            var pressao = Convert.ToDouble(value);
+                            // Adiciona apenas valores >= setpoint
+                            if (pressao >= setpoint)
+                            {
+                                valoresFiltrados.Add(pressao);
+                            }
+                        }
+                        catch { }
+                    }
                 }
-                catch { }
             }
-            return null;
+
+            if (valoresFiltrados.Count == 0)
+            {
+                _logger.LogWarning("Nenhum dado de pressão >= setpoint ({Setpoint}) encontrado para o ensaio {EnsaioId}.", setpoint, ensaio.Id);
+                return (null, null, null);
+            }
+
+            var min = valoresFiltrados.Min();
+            var max = valoresFiltrados.Max();
+            var avg = valoresFiltrados.Average();
+
+            return (min, max, avg);
         }
-
-        var minFlux = baseFlux + " |> group() |> min()";
-        var maxFlux = baseFlux + " |> group() |> max()";
-        var meanFlux = baseFlux + " |> group() |> mean()";
-
-        var min = await ExecQueryAsync(minFlux);
-        var max = await ExecQueryAsync(maxFlux);
-        var avg = await ExecQueryAsync(meanFlux);
-
-        return (min, max, avg);
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Erro ao calcular estatísticas de pressão para o ensaio {EnsaioId}", ensaio.Id);
+            return (null, null, null);
+        }
     }
 
     /// <summary>

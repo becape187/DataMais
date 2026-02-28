@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import * as XLSX from 'xlsx'
+import jsPDF from 'jspdf'
+import html2canvas from 'html2canvas'
 import api from '../config/api'
 import './VisualizarRelatorio.css'
 
@@ -20,6 +22,7 @@ interface RelatorioDetalhe {
   pressaoMaxima?: number | null
   pressaoMinima?: number | null
   pressaoMedia?: number | null
+  resultado?: string | null
 }
 
 interface DataPoint {
@@ -34,6 +37,7 @@ const VisualizarRelatorio = () => {
   const [loading, setLoading] = useState(true)
   const [dadosGrafico, setDadosGrafico] = useState<DataPoint[]>([])
   const [loadingGrafico, setLoadingGrafico] = useState(true)
+  const relatorioContainerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     const carregarRelatorio = async () => {
@@ -54,7 +58,11 @@ const VisualizarRelatorio = () => {
             const totalSec = Math.round(diffMs / 1000)
             const minutos = Math.floor(totalSec / 60)
             const segundos = totalSec % 60
-            duracao = `${minutos} min ${segundos.toString().padStart(2, '0')} s`
+            const minutosFormatado = minutos.toString().padStart(2, '0')
+            const segundosFormatado = segundos.toString().padStart(2, '0')
+            const minutoTexto = minutos === 1 ? 'minuto' : 'minutos'
+            const segundoTexto = segundos === 1 ? 'segundo' : 'segundos'
+            duracao = `${minutosFormatado}:${segundosFormatado} ${minutoTexto}, ${segundoTexto}`
           }
         }
 
@@ -73,6 +81,7 @@ const VisualizarRelatorio = () => {
           pressaoMaxima: r.pressaoMaxima ?? null,
           pressaoMinima: r.pressaoMinima ?? null,
           pressaoMedia: r.pressaoMedia ?? null,
+          resultado: r.resultado ?? null,
         })
       } catch (err) {
         console.error('Erro ao carregar relatório:', err)
@@ -179,6 +188,54 @@ const VisualizarRelatorio = () => {
     XLSX.writeFile(wb, `relatorio_${relatorio?.numero || 'dados'}_pontos_coletados.xlsx`)
   }
 
+  // Função para exportar relatório para PDF
+  const exportarParaPDF = async () => {
+    if (!relatorioContainerRef.current) {
+      alert('Erro ao gerar PDF: elemento não encontrado')
+      return
+    }
+
+    try {
+      // Captura o elemento como canvas
+      const canvas = await html2canvas(relatorioContainerRef.current, {
+        scale: 2, // Melhora a qualidade
+        useCORS: true,
+        logging: false,
+        backgroundColor: '#ffffff',
+        windowWidth: relatorioContainerRef.current.scrollWidth,
+        windowHeight: relatorioContainerRef.current.scrollHeight
+      })
+
+      // Calcula as dimensões do PDF
+      const imgWidth = 210 // A4 width in mm
+      const pageHeight = 297 // A4 height in mm
+      const imgHeight = (canvas.height * imgWidth) / canvas.width
+      let heightLeft = imgHeight
+
+      // Cria o PDF
+      const pdf = new jsPDF('p', 'mm', 'a4')
+      let position = 0
+
+      // Adiciona a primeira página
+      pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, position, imgWidth, imgHeight)
+      heightLeft -= pageHeight
+
+      // Adiciona páginas adicionais se necessário
+      while (heightLeft > 0) {
+        position = heightLeft - imgHeight
+        pdf.addPage()
+        pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, position, imgWidth, imgHeight)
+        heightLeft -= pageHeight
+      }
+
+      // Faz o download
+      pdf.save(`relatorio_${relatorio?.numero || 'relatorio'}.pdf`)
+    } catch (error) {
+      console.error('Erro ao gerar PDF:', error)
+      alert('Erro ao gerar PDF. Tente novamente.')
+    }
+  }
+
   if (loading) {
     return (
       <div className="visualizar-relatorio">
@@ -218,12 +275,12 @@ const VisualizarRelatorio = () => {
           </p>
         </div>
         <div className="header-actions">
-          <button className="btn btn-secondary">📥 Download PDF</button>
-          <button className="btn btn-secondary">🖨️ Imprimir</button>
+          <button className="btn btn-secondary" onClick={exportarParaPDF}>📥 Download PDF</button>
+          <button className="btn btn-secondary" onClick={() => window.print()}>🖨️ Imprimir</button>
         </div>
       </div>
 
-      <div className="relatorio-container">
+      <div className="relatorio-container" ref={relatorioContainerRef}>
         <div className="relatorio-header-card">
           <div className="relatorio-logo">
             <img src="/modec-logo.png" alt="MODEC Logo" />
@@ -272,8 +329,8 @@ const VisualizarRelatorio = () => {
             </div>
             <div className="info-card">
               <span className="info-label">Resultado</span>
-              <span className="info-value resultado aprovado">
-                Aprovado
+              <span className={`info-value resultado ${relatorio.resultado?.toLowerCase() === 'aprovado' ? 'aprovado' : 'reprovado'}`}>
+                {relatorio.resultado || '-'}
               </span>
             </div>
           </div>
@@ -282,22 +339,28 @@ const VisualizarRelatorio = () => {
         <div className="relatorio-section">
           <h3>Dados de Pressão</h3>
           <div className="pressao-grid">
-            <div className="pressao-card">
-              <span className="pressao-label">Pressão Máxima</span>
+            <div className="pressao-card pressao-card-setpoint">
+              <span className="pressao-label">Pressão Setpoint</span>
               <span className="pressao-value">
-                {relatorio.pressaoMaxima != null ? `${relatorio.pressaoMaxima.toFixed(2)} bar` : 'N/A'}
+                {relatorio.pressaoCargaConfigurada != null ? `${Math.round(relatorio.pressaoCargaConfigurada)} bar` : '-'}
               </span>
             </div>
             <div className="pressao-card">
-              <span className="pressao-label">Pressão Média</span>
+              <span className="pressao-label">Pressão Máxima</span>
               <span className="pressao-value">
-                {relatorio.pressaoMedia != null ? `${relatorio.pressaoMedia.toFixed(2)} bar` : 'N/A'}
+                {relatorio.pressaoMaxima != null ? `${Math.round(relatorio.pressaoMaxima)} bar` : '-'}
               </span>
             </div>
             <div className="pressao-card">
               <span className="pressao-label">Pressão Mínima</span>
               <span className="pressao-value">
-                {relatorio.pressaoMinima != null ? `${relatorio.pressaoMinima.toFixed(2)} bar` : 'N/A'}
+                {relatorio.pressaoMinima != null ? `${Math.round(relatorio.pressaoMinima)} bar` : '-'}
+              </span>
+            </div>
+            <div className="pressao-card">
+              <span className="pressao-label">Pressão Média</span>
+              <span className="pressao-value">
+                {relatorio.pressaoMedia != null ? `${Math.round(relatorio.pressaoMedia)} bar` : '-'}
               </span>
             </div>
           </div>

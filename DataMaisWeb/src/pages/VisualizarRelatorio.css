@@ -162,6 +162,10 @@
   gap: 8px;
 }
 
+.pressao-card-setpoint {
+  background: linear-gradient(135deg, #dc3545, #c82333) !important;
+}
+
 .pressao-label {
   font-size: 14px;
   opacity: 0.9;
