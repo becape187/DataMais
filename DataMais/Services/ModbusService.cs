@@ -140,36 +140,53 @@ public class ModbusService
         {
             var master = await ObterOuCriarConexaoAsync(registro.IpAddress, registro.Port);
 
-            switch (registro.FuncaoModbus)
+            // Executa operações Modbus síncronas em uma thread pool para evitar bloqueios
+            await Task.Run(() =>
             {
-                case "WriteSingleRegister":
-                    if (valor is ushort ushortValue)
+                try
+                {
+                    switch (registro.FuncaoModbus)
                     {
-                        master.WriteSingleRegister(registro.SlaveId, registro.EnderecoRegistro, ushortValue);
-                    }
-                    else
-                    {
-                        _logger.LogWarning("Valor inválido para WriteSingleRegister: esperado ushort, recebido {Tipo}", valor.GetType().Name);
-                        return false;
-                    }
-                    break;
+                        case "WriteSingleRegister":
+                            if (valor is ushort ushortValue)
+                            {
+                                master.WriteSingleRegister(registro.SlaveId, registro.EnderecoRegistro, ushortValue);
+                                _logger.LogDebug("WriteSingleRegister: SlaveId={SlaveId}, Address={Address}, Value={Value}", 
+                                    registro.SlaveId, registro.EnderecoRegistro, ushortValue);
+                            }
+                            else
+                            {
+                                _logger.LogWarning("Valor inválido para WriteSingleRegister: esperado ushort, recebido {Tipo}", valor.GetType().Name);
+                                throw new ArgumentException($"Valor inválido para WriteSingleRegister: esperado ushort, recebido {valor.GetType().Name}");
+                            }
+                            break;
 
-                case "WriteSingleCoil":
-                    if (valor is bool boolValue)
-                    {
-                        master.WriteSingleCoil(registro.SlaveId, registro.EnderecoRegistro, boolValue);
-                    }
-                    else
-                    {
-                        _logger.LogWarning("Valor inválido para WriteSingleCoil: esperado bool, recebido {Tipo}", valor.GetType().Name);
-                        return false;
-                    }
-                    break;
+                        case "WriteSingleCoil":
+                            if (valor is bool boolValue)
+                            {
+                                master.WriteSingleCoil(registro.SlaveId, registro.EnderecoRegistro, boolValue);
+                                _logger.LogDebug("WriteSingleCoil: SlaveId={SlaveId}, Address={Address}, Value={Value}", 
+                                    registro.SlaveId, registro.EnderecoRegistro, boolValue);
+                            }
+                            else
+                            {
+                                _logger.LogWarning("Valor inválido para WriteSingleCoil: esperado bool, recebido {Tipo}", valor.GetType().Name);
+                                throw new ArgumentException($"Valor inválido para WriteSingleCoil: esperado bool, recebido {valor.GetType().Name}");
+                            }
+                            break;
 
-                default:
-                    _logger.LogWarning("Função Modbus {Funcao} não suporta escrita", registro.FuncaoModbus);
-                    return false;
-            }
+                        default:
+                            _logger.LogWarning("Função Modbus {Funcao} não suporta escrita", registro.FuncaoModbus);
+                            throw new NotSupportedException($"Função Modbus {registro.FuncaoModbus} não suporta escrita");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Erro ao escrever registro Modbus: Função={Funcao}, SlaveId={SlaveId}, Address={Address}, Valor={Valor}", 
+                        registro.FuncaoModbus, registro.SlaveId, registro.EnderecoRegistro, valor);
+                    throw;
+                }
+            });
 
             return true;
         }, registro.IpAddress, registro.Port);
@@ -177,27 +194,50 @@ public class ModbusService
 
     private async Task<object> LerRegistroAsync(IModbusMaster master, ModbusConfig registro)
     {
-        switch (registro.FuncaoModbus)
+        // Executa operações Modbus síncronas em uma thread pool para evitar bloqueios
+        return await Task.Run(() =>
         {
-            case "ReadCoils":
-                var coils = master.ReadCoils(registro.SlaveId, registro.EnderecoRegistro, registro.QuantidadeRegistros);
-                return coils != null && coils.Length > 0 ? coils[0] : false;
+            try
+            {
+                switch (registro.FuncaoModbus)
+                {
+                    case "ReadCoils":
+                        var coils = master.ReadCoils(registro.SlaveId, registro.EnderecoRegistro, registro.QuantidadeRegistros);
+                        _logger.LogDebug("ReadCoils: SlaveId={SlaveId}, Address={Address}, Result={Result}", 
+                            registro.SlaveId, registro.EnderecoRegistro, coils != null && coils.Length > 0 ? coils[0].ToString() : "null");
+                        return coils != null && coils.Length > 0 ? coils[0] : false;
 
-            case "ReadInputs":
-                var inputs = master.ReadInputs(registro.SlaveId, registro.EnderecoRegistro, registro.QuantidadeRegistros);
-                return inputs != null && inputs.Length > 0 ? inputs[0] : false;
+                    case "ReadInputs":
+                        var inputs = master.ReadInputs(registro.SlaveId, registro.EnderecoRegistro, registro.QuantidadeRegistros);
+                        _logger.LogDebug("ReadInputs: SlaveId={SlaveId}, Address={Address}, Result={Result}", 
+                            registro.SlaveId, registro.EnderecoRegistro, inputs != null && inputs.Length > 0 ? inputs[0].ToString() : "null");
+                        return inputs != null && inputs.Length > 0 ? inputs[0] : false;
 
-            case "ReadHoldingRegisters":
-                var holdingRegisters = master.ReadHoldingRegisters(registro.SlaveId, registro.EnderecoRegistro, registro.QuantidadeRegistros);
-                return ConverterValor(holdingRegisters, registro);
+                    case "ReadHoldingRegisters":
+                        var holdingRegisters = master.ReadHoldingRegisters(registro.SlaveId, registro.EnderecoRegistro, registro.QuantidadeRegistros);
+                        var valorHolding = ConverterValor(holdingRegisters, registro);
+                        _logger.LogDebug("ReadHoldingRegisters: SlaveId={SlaveId}, Address={Address}, Result={Result}", 
+                            registro.SlaveId, registro.EnderecoRegistro, valorHolding);
+                        return valorHolding;
 
-            case "ReadInputRegisters":
-                var inputRegisters = master.ReadInputRegisters(registro.SlaveId, registro.EnderecoRegistro, registro.QuantidadeRegistros);
-                return ConverterValor(inputRegisters, registro);
+                    case "ReadInputRegisters":
+                        var inputRegisters = master.ReadInputRegisters(registro.SlaveId, registro.EnderecoRegistro, registro.QuantidadeRegistros);
+                        var valorInput = ConverterValor(inputRegisters, registro);
+                        _logger.LogDebug("ReadInputRegisters: SlaveId={SlaveId}, Address={Address}, Result={Result}", 
+                            registro.SlaveId, registro.EnderecoRegistro, valorInput);
+                        return valorInput;
 
-            default:
-                throw new NotSupportedException($"Função Modbus {registro.FuncaoModbus} não suportada");
-        }
+                    default:
+                        throw new NotSupportedException($"Função Modbus {registro.FuncaoModbus} não suportada");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Erro ao ler registro Modbus: Função={Funcao}, SlaveId={SlaveId}, Address={Address}", 
+                    registro.FuncaoModbus, registro.SlaveId, registro.EnderecoRegistro);
+                throw;
+            }
+        });
     }
 
     private object ConverterValor(ushort[] valores, ModbusConfig registro)
@@ -342,27 +382,48 @@ public class ModbusService
     private bool IsConexaoValida(string key)
     {
         if (!_tcpClients.TryGetValue(key, out var tcpClient))
+        {
+            _logger.LogDebug("Conexão não encontrada no dicionário: {Key}", key);
             return false;
+        }
 
         try
         {
             // Verifica se o socket está conectado e não foi fechado
-            if (tcpClient == null || !tcpClient.Connected)
+            if (tcpClient == null)
+            {
+                _logger.LogDebug("TcpClient é null para: {Key}", key);
                 return false;
+            }
+
+            if (!tcpClient.Connected)
+            {
+                _logger.LogDebug("TcpClient não está conectado: {Key}", key);
+                return false;
+            }
 
             // Verifica se o socket ainda está válido
             var socket = tcpClient.Client;
             if (socket == null)
+            {
+                _logger.LogDebug("Socket é null para: {Key}", key);
                 return false;
+            }
 
             // Testa se o socket está realmente conectado
             // Poll com timeout 0 verifica o estado sem bloquear
             bool isConnected = !(socket.Poll(0, SelectMode.SelectRead) && socket.Available == 0);
             
+            if (!isConnected)
+            {
+                _logger.LogDebug("Socket não está realmente conectado: {Key}", key);
+            }
+            
             return isConnected;
         }
-        catch
+        catch (Exception ex)
         {
+            _logger.LogWarning(ex, "Erro ao verificar conexão: {Key}", key);
             return false;
         }
     }

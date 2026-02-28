@@ -1085,12 +1085,12 @@ public class ModbusConfigController : ControllerBase
             }
 
             // 2. Aguarda um tempo inicial para o CLP processar o comando
-            await Task.Delay(300);
+            await Task.Delay(500);
 
             // 3. Verifica se o status mudou (aguarda confirmação via MOTOR_BOMBA)
             // O botão permanece ativado enquanto aguarda a confirmação
-            var timeout = TimeSpan.FromSeconds(2);
-            var intervalo = TimeSpan.FromMilliseconds(200);
+            var timeout = TimeSpan.FromSeconds(5); // Aumentado de 2 para 5 segundos
+            var intervalo = TimeSpan.FromMilliseconds(300); // Aumentado de 200 para 300ms
             var inicio = DateTime.UtcNow;
             bool statusAlterado = false;
             object? ultimoStatusLido = null;
@@ -1116,7 +1116,7 @@ public class ModbusConfigController : ControllerBase
 
                     bool novoStatusBool = novoStatus is bool boolVal2 ? boolVal2 : (novoStatus?.ToString() == "1" || novoStatus?.ToString() == "True");
 
-                    _logger.LogDebug("Tentativa {Tentativa}: Status lido = {StatusLido} (bool: {StatusBool}), Esperado: {StatusEsperado}", 
+                    _logger.LogInformation("Tentativa {Tentativa}: Status lido = {StatusLido} (bool: {StatusBool}), Esperado: {StatusEsperado}", 
                         tentativasLeitura, novoStatus, novoStatusBool, statusEsperado);
 
                     // MOTOR_BOMBA confirma que o comando foi executado
