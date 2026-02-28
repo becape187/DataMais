@@ -17,6 +17,8 @@ public class DataMaisDbContext : DbContext
     public DbSet<Ensaio> Ensaios { get; set; }
     public DbSet<Relatorio> Relatorios { get; set; }
     public DbSet<Usuario> Usuarios { get; set; }
+    public DbSet<CampoRelatorio> CamposRelatorio { get; set; }
+    public DbSet<RespostaCampoRelatorio> RespostasCampoRelatorio { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -105,6 +107,31 @@ public class DataMaisDbContext : DbContext
         modelBuilder.Entity<Usuario>(entity =>
         {
             entity.HasIndex(e => e.Email).IsUnique();
+        });
+
+        // Configuração de CampoRelatorio
+        modelBuilder.Entity<CampoRelatorio>(entity =>
+        {
+            entity.HasIndex(e => e.Ordem);
+            entity.HasIndex(e => e.DataExclusao);
+        });
+
+        // Configuração de RespostaCampoRelatorio
+        modelBuilder.Entity<RespostaCampoRelatorio>(entity =>
+        {
+            entity.HasIndex(e => e.RelatorioId);
+            entity.HasIndex(e => e.CampoRelatorioId);
+            entity.HasIndex(e => new { e.RelatorioId, e.CampoRelatorioId }).IsUnique();
+            
+            entity.HasOne(r => r.Relatorio)
+                .WithMany()
+                .HasForeignKey(r => r.RelatorioId)
+                .OnDelete(DeleteBehavior.Cascade);
+            
+            entity.HasOne(r => r.CampoRelatorio)
+                .WithMany(c => c.Respostas)
+                .HasForeignKey(r => r.CampoRelatorioId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
     }
 }

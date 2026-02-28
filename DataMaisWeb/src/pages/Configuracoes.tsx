@@ -23,6 +23,15 @@ interface AppConfig {
   }
 }
 
+interface CampoRelatorio {
+  id: number
+  nome: string
+  tipoResposta: 'SimOuNao' | 'TextoSimples' | 'MultiplasLinhas'
+  ordem: number
+  dataCriacao: string
+  dataExclusao?: string | null
+}
+
 interface ModbusRegistro {
   id: number
   nome: string
@@ -44,12 +53,16 @@ interface ModbusRegistro {
 
 const Configuracoes = () => {
   const [config, setConfig] = useState<AppConfig | null>(null)
+  const [camposRelatorio, setCamposRelatorio] = useState<CampoRelatorio[]>([])
   const [modbusRegistros, setModbusRegistros] = useState<ModbusRegistro[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
   const [importing, setImporting] = useState(false)
   const [showImportDialog, setShowImportDialog] = useState(false)
+  const [showCampoModal, setShowCampoModal] = useState(false)
+  const [campoEditando, setCampoEditando] = useState<CampoRelatorio | null>(null)
+  const [novoCampo, setNovoCampo] = useState({ nome: '', tipoResposta: 'SimOuNao' as CampoRelatorio['tipoResposta'] })
   const [importConfig, setImportConfig] = useState({
     ipAddress: 'modec.automais.cloud',
     port: 502,
@@ -64,11 +77,22 @@ const Configuracoes = () => {
   const loadAllData = async () => {
     setLoading(true)
     try {
-      await Promise.all([loadConfig(), loadModbusRegistros()])
+      await Promise.all([loadConfig(), loadCamposRelatorio(), loadModbusRegistros()])
     } catch (error) {
       console.error('Erro ao carregar dados:', error)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const loadCamposRelatorio = async () => {
+    try {
+      const response = await api.get('/CampoRelatorio')
+      const campos = response.data || []
+      setCamposRelatorio(campos)
+    } catch (error) {
+      console.error('Erro ao carregar campos do relatório:', error)
+      setMessage({ type: 'error', text: 'Erro ao carregar campos do relatório' })
     }
   }
 
@@ -326,6 +350,87 @@ const Configuracoes = () => {
     setShowImportDialog(true)
   }
 
+  const handleAddCampo = () => {
+    setCampoEditando(null)
+    setNovoCampo({ nome: '', tipoResposta: 'SimOuNao' })
+    setShowCampoModal(true)
+  }
+
+  const handleEditCampo = (campo: CampoRelatorio) => {
+    setCampoEditando(campo)
+    setNovoCampo({ nome: campo.nome, tipoResposta: campo.tipoResposta })
+    setShowCampoModal(true)
+  }
+
+  const handleSaveCampo = async () => {
+    if (!novoCampo.nome.trim()) {
+      setMessage({ type: 'error', text: 'O nome do campo é obrigatório' })
+      return
+    }
+
+    try {
+      if (campoEditando) {
+        // Atualizar campo existente
+        await api.put(`/CampoRelatorio/${campoEditando.id}`, {
+          nome: novoCampo.nome.trim(),
+          tipoResposta: novoCampo.tipoResposta
+        })
+        setMessage({ type: 'success', text: 'Campo atualizado com sucesso!' })
+      } else {
+        // Criar novo campo
+        await api.post('/CampoRelatorio', {
+          nome: novoCampo.nome.trim(),
+          tipoResposta: novoCampo.tipoResposta
+        })
+        setMessage({ type: 'success', text: 'Campo criado com sucesso!' })
+      }
+      setShowCampoModal(false)
+      await loadCamposRelatorio()
+    } catch (error: any) {
+      console.error('Erro ao salvar campo:', error)
+      const errorMessage = error.response?.data?.message || 'Erro ao salvar campo'
+      setMessage({ type: 'error', text: errorMessage })
+    }
+  }
+
+  const handleDeleteCampo = async (id: number) => {
+    if (!window.confirm('Tem certeza que deseja excluir este campo? Ele não aparecerá em novos relatórios, mas permanecerá nos relatórios antigos.')) {
+      return
+    }
+
+    try {
+      await api.delete(`/CampoRelatorio/${id}`)
+      setMessage({ type: 'success', text: 'Campo excluído com sucesso!' })
+      await loadCamposRelatorio()
+    } catch (error: any) {
+      console.error('Erro ao excluir campo:', error)
+      const errorMessage = error.response?.data?.message || 'Erro ao excluir campo'
+      setMessage({ type: 'error', text: errorMessage })
+    }
+  }
+
+  const handleMoveCampo = async (campoId: number, direction: 'up' | 'down') => {
+    const camposOrdenados = [...camposRelatorio].sort((a, b) => a.ordem - b.ordem)
+    const index = camposOrdenados.findIndex(c => c.id === campoId)
+    
+    if (index === -1) return
+    
+    if (direction === 'up' && index === 0) return
+    if (direction === 'down' && index === camposOrdenados.length - 1) return
+
+    const newIndex = direction === 'up' ? index - 1 : index + 1
+    const camposIds = camposOrdenados.map(c => c.id)
+    ;[camposIds[index], camposIds[newIndex]] = [camposIds[newIndex], camposIds[index]]
+
+    try {
+      await api.post('/CampoRelatorio/reordenar', { camposIds })
+      await loadCamposRelatorio()
+    } catch (error: any) {
+      console.error('Erro ao reordenar campos:', error)
+      setMessage({ type: 'error', text: 'Erro ao reordenar campos' })
+    }
+  }
+
   if (loading) {
     return <div className="configuracoes">Carregando...</div>
   }
@@ -431,6 +536,133 @@ const Configuracoes = () => {
                 onChange={(e) => handleConfigChange('influx', 'bucket', e.target.value)}
               />
             </div>
+          </div>
+        </section>
+
+        <section className="config-section">
+          <div className="section-header">
+            <h2>Campos do Relatório</h2>
+            <button className="btn btn-secondary" onClick={handleAddCampo}>
+              ➕ Adicionar Campo
+            </button>
+          </div>
+
+          {showCampoModal && (
+            <div className="import-dialog">
+              <div className="import-dialog-content">
+                <h3>{campoEditando ? 'Editar Campo' : 'Adicionar Campo'}</h3>
+                <div className="form-grid">
+                  <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+                    <label>Nome do Campo (Pergunta)</label>
+                    <input
+                      type="text"
+                      value={novoCampo.nome}
+                      onChange={(e) => setNovoCampo({ ...novoCampo, nome: e.target.value })}
+                      placeholder="Ex: Houve algum defeito na haste?"
+                    />
+                  </div>
+                  <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+                    <label>Tipo de Resposta</label>
+                    <select
+                      value={novoCampo.tipoResposta}
+                      onChange={(e) => setNovoCampo({ ...novoCampo, tipoResposta: e.target.value as CampoRelatorio['tipoResposta'] })}
+                    >
+                      <option value="SimOuNao">Sim ou Não</option>
+                      <option value="TextoSimples">Texto Simples</option>
+                      <option value="MultiplasLinhas">Múltiplas Linhas</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="import-dialog-actions">
+                  <button 
+                    className="btn btn-secondary" 
+                    onClick={() => setShowCampoModal(false)}
+                  >
+                    Cancelar
+                  </button>
+                  <button 
+                    className="btn btn-primary" 
+                    onClick={handleSaveCampo}
+                  >
+                    Salvar
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="table-container">
+            <table>
+              <thead>
+                <tr>
+                  <th style={{ width: '50px' }}>Ordem</th>
+                  <th>Nome do Campo</th>
+                  <th>Tipo de Resposta</th>
+                  <th>Ações</th>
+                </tr>
+              </thead>
+              <tbody>
+                {camposRelatorio
+                  .filter(c => !c.dataExclusao)
+                  .sort((a, b) => a.ordem - b.ordem)
+                  .map(campo => (
+                    <tr key={campo.id}>
+                      <td>
+                        <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                          <button
+                            className="btn-icon"
+                            onClick={() => handleMoveCampo(campo.id, 'up')}
+                            title="Mover para cima"
+                            style={{ padding: '4px', fontSize: '12px' }}
+                          >
+                            ⬆️
+                          </button>
+                          <span style={{ minWidth: '20px', textAlign: 'center' }}>{campo.ordem}</span>
+                          <button
+                            className="btn-icon"
+                            onClick={() => handleMoveCampo(campo.id, 'down')}
+                            title="Mover para baixo"
+                            style={{ padding: '4px', fontSize: '12px' }}
+                          >
+                            ⬇️
+                          </button>
+                        </div>
+                      </td>
+                      <td>{campo.nome}</td>
+                      <td>
+                        {campo.tipoResposta === 'SimOuNao' && 'Sim ou Não'}
+                        {campo.tipoResposta === 'TextoSimples' && 'Texto Simples'}
+                        {campo.tipoResposta === 'MultiplasLinhas' && 'Múltiplas Linhas'}
+                      </td>
+                      <td>
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                          <button
+                            className="btn-icon"
+                            onClick={() => handleEditCampo(campo)}
+                            title="Editar"
+                          >
+                            ✏️
+                          </button>
+                          <button
+                            className="btn-icon"
+                            onClick={() => handleDeleteCampo(campo.id)}
+                            title="Excluir"
+                          >
+                            🗑️
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                {camposRelatorio.filter(c => !c.dataExclusao).length === 0 && (
+                  <tr>
+                    <td colSpan={4} style={{ textAlign: 'center', padding: '20px' }}>
+                      Nenhum campo encontrado. Clique em "Adicionar Campo" para criar um novo.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </div>
         </section>
 

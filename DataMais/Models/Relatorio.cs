@@ -34,4 +34,7 @@ public class Relatorio
 
     public DateTime DataCriacao { get; set; } = DateTime.UtcNow;
     public DateTime? DataAtualizacao { get; set; }
+
+    // Relacionamento com respostas dos campos
+    public virtual ICollection<RespostaCampoRelatorio> RespostasCampos { get; set; } = new List<RespostaCampoRelatorio>();
 }

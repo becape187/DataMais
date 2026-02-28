@@ -7,6 +7,16 @@ import html2canvas from 'html2canvas'
 import api from '../config/api'
 import './VisualizarRelatorio.css'
 
+interface CampoRelatorio {
+  id: number
+  nome: string
+  tipoResposta: 'SimOuNao' | 'TextoSimples' | 'MultiplasLinhas'
+  ordem: number
+  respostaId?: number | null
+  valor?: string | null
+  excluido?: boolean
+}
+
 interface RelatorioDetalhe {
   id: number
   numero: string
@@ -23,6 +33,7 @@ interface RelatorioDetalhe {
   pressaoMinima?: number | null
   pressaoMedia?: number | null
   resultado?: string | null
+  campos?: CampoRelatorio[]
 }
 
 interface DataPoint {
@@ -37,6 +48,8 @@ const VisualizarRelatorio = () => {
   const [loading, setLoading] = useState(true)
   const [dadosGrafico, setDadosGrafico] = useState<DataPoint[]>([])
   const [loadingGrafico, setLoadingGrafico] = useState(true)
+  const [respostasCampos, setRespostasCampos] = useState<Record<number, string>>({})
+  const [salvandoRespostas, setSalvandoRespostas] = useState(false)
   const relatorioContainerRef = useRef<HTMLDivElement>(null)
 
   // Calcula as estatísticas de pressão a partir dos dados do gráfico
@@ -150,6 +163,17 @@ const VisualizarRelatorio = () => {
           }
         }
 
+        // Inicializa respostas dos campos
+        const respostas: Record<number, string> = {}
+        if (r.campos && Array.isArray(r.campos)) {
+          r.campos.forEach((campo: CampoRelatorio) => {
+            if (campo.valor != null) {
+              respostas[campo.id] = campo.valor
+            }
+          })
+        }
+        setRespostasCampos(respostas)
+
         setRelatorio({
           id: r.id,
           numero: r.numero,
@@ -166,6 +190,7 @@ const VisualizarRelatorio = () => {
           pressaoMinima: r.pressaoMinima ?? null,
           pressaoMedia: r.pressaoMedia ?? null,
           resultado: r.resultado ?? null,
+          campos: r.campos || [],
         })
       } catch (err) {
         console.error('Erro ao carregar relatório:', err)
@@ -201,6 +226,26 @@ const VisualizarRelatorio = () => {
       setLoadingGrafico(false)
     }
   }, [id, relatorio])
+
+  const salvarRespostas = async (campoId: number, valor: string) => {
+    if (!id || !relatorio) return
+
+    setSalvandoRespostas(true)
+    try {
+      await api.post(`/Relatorio/${id}/respostas-campos`, {
+        respostas: [
+          {
+            campoRelatorioId: campoId,
+            valor: valor || null
+          }
+        ]
+      })
+    } catch (error) {
+      console.error('Erro ao salvar resposta:', error)
+    } finally {
+      setSalvandoRespostas(false)
+    }
+  }
 
   // Função para exportar dados para CSV
   const exportarParaCSV = () => {
@@ -696,6 +741,112 @@ const VisualizarRelatorio = () => {
             <p>{relatorio.observacoes || 'Sem observações adicionais.'}</p>
           </div>
         </div>
+
+        {relatorio.campos && relatorio.campos.length > 0 && (
+          <>
+            {/* Campos Sim/Não e Texto Simples */}
+            {relatorio.campos
+              .filter(c => !c.excluido && (c.tipoResposta === 'SimOuNao' || c.tipoResposta === 'TextoSimples'))
+              .sort((a, b) => a.ordem - b.ordem)
+              .length > 0 && (
+              <div className="relatorio-section">
+                <h3>Perguntas Adicionais</h3>
+                <div className="campos-relatorio-container">
+                  {relatorio.campos
+                    .filter(c => !c.excluido && (c.tipoResposta === 'SimOuNao' || c.tipoResposta === 'TextoSimples'))
+                    .sort((a, b) => a.ordem - b.ordem)
+                    .map(campo => (
+                      <div key={campo.id} className="campo-relatorio-item">
+                        <label className="campo-relatorio-label">{campo.nome}</label>
+                        {campo.tipoResposta === 'SimOuNao' && (
+                          <div className="campo-relatorio-radio-group">
+                            <label>
+                              <input
+                                type="radio"
+                                name={`campo-${campo.id}`}
+                                value="Sim"
+                                checked={respostasCampos[campo.id] === 'Sim'}
+                                onChange={(e) => {
+                                  const novasRespostas = { ...respostasCampos, [campo.id]: e.target.value }
+                                  setRespostasCampos(novasRespostas)
+                                  salvarRespostas(campo.id, e.target.value)
+                                }}
+                              />
+                              Sim
+                            </label>
+                            <label>
+                              <input
+                                type="radio"
+                                name={`campo-${campo.id}`}
+                                value="Não"
+                                checked={respostasCampos[campo.id] === 'Não'}
+                                onChange={(e) => {
+                                  const novasRespostas = { ...respostasCampos, [campo.id]: e.target.value }
+                                  setRespostasCampos(novasRespostas)
+                                  salvarRespostas(campo.id, e.target.value)
+                                }}
+                              />
+                              Não
+                            </label>
+                          </div>
+                        )}
+                        {campo.tipoResposta === 'TextoSimples' && (
+                          <input
+                            type="text"
+                            className="campo-relatorio-input"
+                            value={respostasCampos[campo.id] || ''}
+                            onChange={(e) => {
+                              setRespostasCampos({ ...respostasCampos, [campo.id]: e.target.value })
+                            }}
+                            onBlur={() => salvarRespostas(campo.id, respostasCampos[campo.id] || '')}
+                            placeholder="Digite sua resposta..."
+                          />
+                        )}
+                      </div>
+                    ))}
+                </div>
+              </div>
+            )}
+
+            {/* Campos Múltiplas Linhas - apresentados como seções separadas */}
+            {relatorio.campos
+              .filter(c => !c.excluido && c.tipoResposta === 'MultiplasLinhas')
+              .sort((a, b) => a.ordem - b.ordem)
+              .map(campo => (
+                <div key={campo.id} className="relatorio-section">
+                  <h3>{campo.nome}</h3>
+                  <div className="observacoes-box">
+                    <textarea
+                      className="campo-relatorio-textarea-display"
+                      value={respostasCampos[campo.id] || ''}
+                      onChange={(e) => {
+                        setRespostasCampos({ ...respostasCampos, [campo.id]: e.target.value })
+                        // Ajusta altura automaticamente
+                        e.target.style.height = 'auto'
+                        e.target.style.height = `${Math.max(100, e.target.scrollHeight)}px`
+                      }}
+                      onBlur={() => salvarRespostas(campo.id, respostasCampos[campo.id] || '')}
+                      placeholder={respostasCampos[campo.id] ? '' : 'Digite sua resposta...'}
+                      rows={4}
+                      style={{ 
+                        minHeight: '100px',
+                        resize: 'none',
+                        overflow: 'hidden',
+                        width: '100%',
+                        border: 'none',
+                        background: 'transparent',
+                        padding: 0,
+                        fontFamily: 'inherit',
+                        fontSize: 'inherit',
+                        color: 'inherit',
+                        lineHeight: 'inherit'
+                      }}
+                    />
+                  </div>
+                </div>
+              ))}
+          </>
+        )}
 
         <div className="relatorio-footer">
           <div className="footer-signature">

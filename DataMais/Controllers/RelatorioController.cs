@@ -154,6 +154,8 @@ public class RelatorioController : ControllerBase
                 .Include(r => r.Cliente)
                 .Include(r => r.Cilindro)
                 .Include(r => r.Ensaio)
+                .Include(r => r.RespostasCampos)
+                    .ThenInclude(resp => resp.CampoRelatorio)
                 .FirstOrDefaultAsync(r => r.Id == id);
 
             if (relatorio == null)
@@ -162,6 +164,45 @@ public class RelatorioController : ControllerBase
             }
 
             var ensaio = relatorio.Ensaio;
+
+            // Busca campos ativos (não excluídos) para novos relatórios
+            // Para relatórios antigos, busca todos os campos (incluindo excluídos) que têm resposta
+            var camposAtivos = await _context.CamposRelatorio
+                .Where(c => c.DataExclusao == null)
+                .OrderBy(c => c.Ordem)
+                .ToListAsync();
+
+            // Busca campos excluídos que têm resposta neste relatório (para relatórios antigos)
+            var camposIdsComResposta = relatorio.RespostasCampos
+                .Select(r => r.CampoRelatorioId)
+                .Distinct()
+                .ToList();
+
+            var camposExcluidosComResposta = await _context.CamposRelatorio
+                .Where(c => c.DataExclusao != null && camposIdsComResposta.Contains(c.Id))
+                .OrderBy(c => c.Ordem)
+                .ToListAsync();
+
+            // Combina campos ativos e excluídos (se tiverem resposta)
+            var todosCampos = camposAtivos
+                .Concat(camposExcluidosComResposta)
+                .OrderBy(c => c.Ordem)
+                .ToList();
+
+            var camposComRespostas = todosCampos.Select(campo =>
+            {
+                var resposta = relatorio.RespostasCampos.FirstOrDefault(r => r.CampoRelatorioId == campo.Id);
+                return new
+                {
+                    id = campo.Id,
+                    nome = campo.Nome,
+                    tipoResposta = campo.TipoResposta,
+                    ordem = campo.Ordem,
+                    respostaId = resposta?.Id,
+                    valor = resposta?.Valor,
+                    excluido = campo.DataExclusao != null
+                };
+            }).ToList();
 
             double? pressaoMin = null;
             double? pressaoMax = null;
@@ -216,7 +257,8 @@ public class RelatorioController : ControllerBase
                 pressaoMinima = pressaoMin,
                 pressaoMaxima = pressaoMax,
                 pressaoMedia = pressaoMedia,
-                resultado = resultado
+                resultado = resultado,
+                campos = camposComRespostas
             };
 
             return Ok(result);
@@ -505,5 +547,97 @@ public class RelatorioController : ControllerBase
             return StatusCode(500, new { message = "Erro ao obter dados do gráfico", error = ex.Message });
         }
     }
+
+    /// <summary>
+    /// Salva ou atualiza as respostas dos campos do relatório.
+    /// </summary>
+    [HttpPost("{id:int}/respostas-campos")]
+    public async Task<IActionResult> SalvarRespostasCampos(int id, [FromBody] SalvarRespostasCamposRequest request)
+    {
+        try
+        {
+            var relatorio = await _context.Relatorios.FindAsync(id);
+
+            if (relatorio == null)
+            {
+                return NotFound(new { message = "Relatório não encontrado" });
+            }
+
+            if (request.Respostas == null || request.Respostas.Count == 0)
+            {
+                return BadRequest(new { message = "Lista de respostas é obrigatória" });
+            }
+
+            // Valida se todos os campos existem
+            var camposIds = request.Respostas.Select(r => r.CampoRelatorioId).Distinct().ToList();
+            var camposExistentes = await _context.CamposRelatorio
+                .Where(c => camposIds.Contains(c.Id))
+                .ToListAsync();
+
+            if (camposExistentes.Count != camposIds.Count)
+            {
+                return BadRequest(new { message = "Um ou mais campos não foram encontrados" });
+            }
+
+            foreach (var respostaRequest in request.Respostas)
+            {
+                var campo = camposExistentes.FirstOrDefault(c => c.Id == respostaRequest.CampoRelatorioId);
+                if (campo == null) continue;
+
+                // Valida o valor conforme o tipo
+                if (campo.TipoResposta == "SimOuNao")
+                {
+                    if (respostaRequest.Valor != "Sim" && respostaRequest.Valor != "Não" && !string.IsNullOrWhiteSpace(respostaRequest.Valor))
+                    {
+                        return BadRequest(new { message = $"Campo '{campo.Nome}' deve ter valor 'Sim' ou 'Não'" });
+                    }
+                }
+
+                // Busca resposta existente
+                var respostaExistente = await _context.RespostasCampoRelatorio
+                    .FirstOrDefaultAsync(r => r.RelatorioId == id && r.CampoRelatorioId == respostaRequest.CampoRelatorioId);
+
+                if (respostaExistente != null)
+                {
+                    // Atualiza resposta existente
+                    respostaExistente.Valor = string.IsNullOrWhiteSpace(respostaRequest.Valor) ? null : respostaRequest.Valor.Trim();
+                    respostaExistente.DataAtualizacao = DateTime.UtcNow;
+                }
+                else
+                {
+                    // Cria nova resposta
+                    var novaResposta = new RespostaCampoRelatorio
+                    {
+                        RelatorioId = id,
+                        CampoRelatorioId = respostaRequest.CampoRelatorioId,
+                        Valor = string.IsNullOrWhiteSpace(respostaRequest.Valor) ? null : respostaRequest.Valor.Trim(),
+                        DataCriacao = DateTime.UtcNow
+                    };
+                    _context.RespostasCampoRelatorio.Add(novaResposta);
+                }
+            }
+
+            await _context.SaveChangesAsync();
+
+            return Ok(new { message = "Respostas salvas com sucesso" });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Erro ao salvar respostas dos campos do relatório {RelatorioId}", id);
+            return StatusCode(500, new { message = "Erro ao salvar respostas", error = ex.Message });
+        }
+    }
+}
+
+// DTOs
+public class SalvarRespostasCamposRequest
+{
+    public List<RespostaCampoRequest> Respostas { get; set; } = new();
+}
+
+public class RespostaCampoRequest
+{
+    public int CampoRelatorioId { get; set; }
+    public string? Valor { get; set; }
 }
 
