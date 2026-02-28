@@ -229,10 +229,35 @@ public class CilindroController : ControllerBase
     }
 
     [HttpPut("{id}")]
-    public async Task<IActionResult> Update(int id, [FromBody] Cilindro cilindroAtualizado)
+    public async Task<IActionResult> Update(int id, [FromBody] CilindroUpdateDto dto)
     {
         try
         {
+            if (!ModelState.IsValid)
+            {
+                // Coletar todos os erros de validação
+                var errors = new Dictionary<string, string[]>();
+                foreach (var key in ModelState.Keys)
+                {
+                    var state = ModelState[key];
+                    if (state?.Errors != null && state.Errors.Count > 0)
+                    {
+                        errors[key] = state.Errors.Select(e => e.ErrorMessage).ToArray();
+                    }
+                }
+                
+                _logger.LogWarning($"Erros de validação: {string.Join(", ", errors.SelectMany(e => e.Value))}");
+                
+                return BadRequest(new 
+                { 
+                    type = "https://tools.ietf.org/html/rfc9110#section-15.5.1",
+                    title = "One or more validation errors occurred.",
+                    status = 400,
+                    errors = errors,
+                    traceId = System.Diagnostics.Activity.Current?.Id
+                });
+            }
+
             var cilindro = await _context.Cilindros.FindAsync(id);
             if (cilindro == null)
             {
@@ -240,10 +265,10 @@ public class CilindroController : ControllerBase
             }
 
             // Verificar se código interno já existe em outro cilindro
-            if (cilindroAtualizado.CodigoInterno != cilindro.CodigoInterno)
+            if (dto.CodigoInterno != cilindro.CodigoInterno)
             {
                 var codigoInternoExiste = await _context.Cilindros
-                    .AnyAsync(c => c.CodigoInterno == cilindroAtualizado.CodigoInterno && c.Id != id);
+                    .AnyAsync(c => c.CodigoInterno == dto.CodigoInterno && c.Id != id);
                 
                 if (codigoInternoExiste)
                 {
@@ -252,13 +277,13 @@ public class CilindroController : ControllerBase
             }
 
             // Verificar se código cliente já existe para o mesmo cliente em outro cilindro
-            var clienteId = cilindroAtualizado.ClienteId != 0 ? cilindroAtualizado.ClienteId : cilindro.ClienteId;
-            if (cilindroAtualizado.CodigoCliente != cilindro.CodigoCliente || 
+            var clienteId = dto.ClienteId != 0 ? dto.ClienteId : cilindro.ClienteId;
+            if (dto.CodigoCliente != cilindro.CodigoCliente || 
                 clienteId != cilindro.ClienteId)
             {
                 var codigoClienteExiste = await _context.Cilindros
                     .AnyAsync(c => c.ClienteId == clienteId && 
-                        c.CodigoCliente == cilindroAtualizado.CodigoCliente && 
+                        c.CodigoCliente == dto.CodigoCliente && 
                         c.Id != id);
                 
                 if (codigoClienteExiste)
@@ -268,10 +293,10 @@ public class CilindroController : ControllerBase
             }
 
             // Verificar se cliente existe (se foi alterado)
-            if (cilindroAtualizado.ClienteId != 0 && cilindroAtualizado.ClienteId != cilindro.ClienteId)
+            if (dto.ClienteId != 0 && dto.ClienteId != cilindro.ClienteId)
             {
                 var clienteExiste = await _context.Clientes
-                    .AnyAsync(c => c.Id == cilindroAtualizado.ClienteId);
+                    .AnyAsync(c => c.Id == dto.ClienteId);
                 
                 if (!clienteExiste)
                 {
@@ -280,42 +305,42 @@ public class CilindroController : ControllerBase
             }
 
             // Atualiza todas as propriedades
-            cilindro.Nome = cilindroAtualizado.Nome;
-            cilindro.Descricao = cilindroAtualizado.Descricao;
-            cilindro.CodigoCliente = cilindroAtualizado.CodigoCliente;
-            cilindro.CodigoInterno = cilindroAtualizado.CodigoInterno;
-            cilindro.Modelo = cilindroAtualizado.Modelo;
-            cilindro.Fabricante = cilindroAtualizado.Fabricante;
-            cilindro.DataFabricacao = cilindroAtualizado.DataFabricacao;
+            cilindro.Nome = dto.Nome;
+            cilindro.Descricao = dto.Descricao;
+            cilindro.CodigoCliente = dto.CodigoCliente;
+            cilindro.CodigoInterno = dto.CodigoInterno;
+            cilindro.Modelo = dto.Modelo;
+            cilindro.Fabricante = dto.Fabricante;
+            cilindro.DataFabricacao = dto.DataFabricacao;
             
             // Atualizar ClienteId se fornecido
-            if (cilindroAtualizado.ClienteId != 0 && cilindroAtualizado.ClienteId != cilindro.ClienteId)
+            if (dto.ClienteId != 0 && dto.ClienteId != cilindro.ClienteId)
             {
-                cilindro.ClienteId = cilindroAtualizado.ClienteId;
+                cilindro.ClienteId = dto.ClienteId;
             }
-            cilindro.DiametroInterno = cilindroAtualizado.DiametroInterno;
-            cilindro.ComprimentoHaste = cilindroAtualizado.ComprimentoHaste;
-            cilindro.DiametroHaste = cilindroAtualizado.DiametroHaste;
-            cilindro.MaximaPressaoSuportadaA = cilindroAtualizado.MaximaPressaoSuportadaA;
-            cilindro.MaximaPressaoSuportadaB = cilindroAtualizado.MaximaPressaoSuportadaB;
-            cilindro.MaximaPressaoSegurancaA = cilindroAtualizado.MaximaPressaoSegurancaA;
-            cilindro.MaximaPressaoSegurancaB = cilindroAtualizado.MaximaPressaoSegurancaB;
-            cilindro.PreCargaA = cilindroAtualizado.PreCargaA;
-            cilindro.CargaNominalA = cilindroAtualizado.CargaNominalA;
-            cilindro.TempoRampaSubidaA = cilindroAtualizado.TempoRampaSubidaA;
-            cilindro.TempoDuracaoCargaA = cilindroAtualizado.TempoDuracaoCargaA;
-            cilindro.TempoRampaDescidaA = cilindroAtualizado.TempoRampaDescidaA;
-            cilindro.PercentualVariacaoAlarmeA = cilindroAtualizado.PercentualVariacaoAlarmeA;
-            cilindro.HistereseAlarmeA = cilindroAtualizado.HistereseAlarmeA;
-            cilindro.PercentualVariacaoDesligaProcessoA = cilindroAtualizado.PercentualVariacaoDesligaProcessoA;
-            cilindro.PreCargaB = cilindroAtualizado.PreCargaB;
-            cilindro.CargaNominalB = cilindroAtualizado.CargaNominalB;
-            cilindro.TempoRampaSubidaB = cilindroAtualizado.TempoRampaSubidaB;
-            cilindro.TempoDuracaoCargaB = cilindroAtualizado.TempoDuracaoCargaB;
-            cilindro.TempoRampaDescidaB = cilindroAtualizado.TempoRampaDescidaB;
-            cilindro.PercentualVariacaoAlarmeB = cilindroAtualizado.PercentualVariacaoAlarmeB;
-            cilindro.HistereseAlarmeB = cilindroAtualizado.HistereseAlarmeB;
-            cilindro.PercentualVariacaoDesligaProcessoB = cilindroAtualizado.PercentualVariacaoDesligaProcessoB;
+            cilindro.DiametroInterno = dto.DiametroInterno;
+            cilindro.ComprimentoHaste = dto.ComprimentoHaste;
+            cilindro.DiametroHaste = dto.DiametroHaste;
+            cilindro.MaximaPressaoSuportadaA = dto.MaximaPressaoSuportadaA;
+            cilindro.MaximaPressaoSuportadaB = dto.MaximaPressaoSuportadaB;
+            cilindro.MaximaPressaoSegurancaA = dto.MaximaPressaoSegurancaA;
+            cilindro.MaximaPressaoSegurancaB = dto.MaximaPressaoSegurancaB;
+            cilindro.PreCargaA = dto.PreCargaA;
+            cilindro.CargaNominalA = dto.CargaNominalA;
+            cilindro.TempoRampaSubidaA = dto.TempoRampaSubidaA;
+            cilindro.TempoDuracaoCargaA = dto.TempoDuracaoCargaA;
+            cilindro.TempoRampaDescidaA = dto.TempoRampaDescidaA;
+            cilindro.PercentualVariacaoAlarmeA = dto.PercentualVariacaoAlarmeA;
+            cilindro.HistereseAlarmeA = dto.HistereseAlarmeA;
+            cilindro.PercentualVariacaoDesligaProcessoA = dto.PercentualVariacaoDesligaProcessoA;
+            cilindro.PreCargaB = dto.PreCargaB;
+            cilindro.CargaNominalB = dto.CargaNominalB;
+            cilindro.TempoRampaSubidaB = dto.TempoRampaSubidaB;
+            cilindro.TempoDuracaoCargaB = dto.TempoDuracaoCargaB;
+            cilindro.TempoRampaDescidaB = dto.TempoRampaDescidaB;
+            cilindro.PercentualVariacaoAlarmeB = dto.PercentualVariacaoAlarmeB;
+            cilindro.HistereseAlarmeB = dto.HistereseAlarmeB;
+            cilindro.PercentualVariacaoDesligaProcessoB = dto.PercentualVariacaoDesligaProcessoB;
             cilindro.DataAtualizacao = DateTime.UtcNow;
 
             await _context.SaveChangesAsync();
@@ -404,5 +429,58 @@ public class CilindroCreateDto
     public decimal? PercentualVariacaoDesligaProcessoB { get; set; }
 
     [Required]
+    public int ClienteId { get; set; }
+}
+
+// DTO para atualização de cilindro (sem propriedades de navegação)
+public class CilindroUpdateDto
+{
+    [Required]
+    [MaxLength(200)]
+    public string Nome { get; set; } = string.Empty;
+
+    [MaxLength(1000)]
+    public string? Descricao { get; set; }
+
+    [Required]
+    [MaxLength(50)]
+    public string CodigoCliente { get; set; } = string.Empty;
+
+    [Required]
+    [MaxLength(50)]
+    public string CodigoInterno { get; set; } = string.Empty;
+
+    [MaxLength(100)]
+    public string? Modelo { get; set; }
+
+    [MaxLength(100)]
+    public string? Fabricante { get; set; }
+
+    public DateTime? DataFabricacao { get; set; }
+
+    public decimal? DiametroInterno { get; set; }
+    public decimal? ComprimentoHaste { get; set; }
+    public decimal? DiametroHaste { get; set; }
+    public decimal? MaximaPressaoSuportadaA { get; set; }
+    public decimal? MaximaPressaoSuportadaB { get; set; }
+    public decimal? MaximaPressaoSegurancaA { get; set; }
+    public decimal? MaximaPressaoSegurancaB { get; set; }
+    public decimal? PreCargaA { get; set; }
+    public decimal? CargaNominalA { get; set; }
+    public decimal? TempoRampaSubidaA { get; set; }
+    public decimal? TempoDuracaoCargaA { get; set; }
+    public decimal? TempoRampaDescidaA { get; set; }
+    public decimal? PercentualVariacaoAlarmeA { get; set; }
+    public decimal? HistereseAlarmeA { get; set; }
+    public decimal? PercentualVariacaoDesligaProcessoA { get; set; }
+    public decimal? PreCargaB { get; set; }
+    public decimal? CargaNominalB { get; set; }
+    public decimal? TempoRampaSubidaB { get; set; }
+    public decimal? TempoDuracaoCargaB { get; set; }
+    public decimal? TempoRampaDescidaB { get; set; }
+    public decimal? PercentualVariacaoAlarmeB { get; set; }
+    public decimal? HistereseAlarmeB { get; set; }
+    public decimal? PercentualVariacaoDesligaProcessoB { get; set; }
+
     public int ClienteId { get; set; }
 }

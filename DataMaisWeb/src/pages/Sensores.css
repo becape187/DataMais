@@ -100,8 +100,19 @@
 
 .btn-small {
   flex: 1;
-  padding: 10px 16px;
-  font-size: 14px;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.sensor-actions .btn-primary {
+  background: var(--modec-navy);
+  color: var(--white);
+  border: none;
+}
+
+.sensor-actions .btn-primary:hover {
+  background: var(--modec-navy-light);
 }
 
 .btn-danger {

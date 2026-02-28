@@ -19,24 +19,6 @@ interface Cilindro {
   maximaPressaoSuportadaB: number
   maximaPressaoSegurancaA: number
   maximaPressaoSegurancaB: number
-  // Parâmetros Câmara A
-  preCargaA: number
-  cargaNominalA: number
-  tempoRampaSubidaA: number
-  tempoDuracaoCargaA: number
-  tempoRampaDescidaA: number
-  percentualVariacaoAlarmeA: number
-  histereseAlarmeA: number
-  percentualVariacaoDesligaProcessoA: number
-  // Parâmetros Câmara B
-  preCargaB: number
-  cargaNominalB: number
-  tempoRampaSubidaB: number
-  tempoDuracaoCargaB: number
-  tempoRampaDescidaB: number
-  percentualVariacaoAlarmeB: number
-  histereseAlarmeB: number
-  percentualVariacaoDesligaProcessoB: number
 }
 
 interface Relatorio {
@@ -68,22 +50,6 @@ const ConfiguracaoCilindro = () => {
     maximaPressaoSuportadaB: 0,
     maximaPressaoSegurancaA: 0,
     maximaPressaoSegurancaB: 0,
-    preCargaA: 0,
-    cargaNominalA: 0,
-    tempoRampaSubidaA: 0,
-    tempoDuracaoCargaA: 0,
-    tempoRampaDescidaA: 0,
-    percentualVariacaoAlarmeA: 0,
-    histereseAlarmeA: 0,
-    percentualVariacaoDesligaProcessoA: 0,
-    preCargaB: 0,
-    cargaNominalB: 0,
-    tempoRampaSubidaB: 0,
-    tempoDuracaoCargaB: 0,
-    tempoRampaDescidaB: 0,
-    percentualVariacaoAlarmeB: 0,
-    histereseAlarmeB: 0,
-    percentualVariacaoDesligaProcessoB: 0,
   })
 
   useEffect(() => {
@@ -113,22 +79,6 @@ const ConfiguracaoCilindro = () => {
         maximaPressaoSuportadaB: Number(data.maximaPressaoSuportadaB) || 0,
         maximaPressaoSegurancaA: Number(data.maximaPressaoSegurancaA) || 0,
         maximaPressaoSegurancaB: Number(data.maximaPressaoSegurancaB) || 0,
-        preCargaA: Number(data.preCargaA) || 0,
-        cargaNominalA: Number(data.cargaNominalA) || 0,
-        tempoRampaSubidaA: Number(data.tempoRampaSubidaA) || 0,
-        tempoDuracaoCargaA: Number(data.tempoDuracaoCargaA) || 0,
-        tempoRampaDescidaA: Number(data.tempoRampaDescidaA) || 0,
-        percentualVariacaoAlarmeA: Number(data.percentualVariacaoAlarmeA) || 0,
-        histereseAlarmeA: Number(data.histereseAlarmeA) || 0,
-        percentualVariacaoDesligaProcessoA: Number(data.percentualVariacaoDesligaProcessoA) || 0,
-        preCargaB: Number(data.preCargaB) || 0,
-        cargaNominalB: Number(data.cargaNominalB) || 0,
-        tempoRampaSubidaB: Number(data.tempoRampaSubidaB) || 0,
-        tempoDuracaoCargaB: Number(data.tempoDuracaoCargaB) || 0,
-        tempoRampaDescidaB: Number(data.tempoRampaDescidaB) || 0,
-        percentualVariacaoAlarmeB: Number(data.percentualVariacaoAlarmeB) || 0,
-        histereseAlarmeB: Number(data.histereseAlarmeB) || 0,
-        percentualVariacaoDesligaProcessoB: Number(data.percentualVariacaoDesligaProcessoB) || 0,
       })
       
       setRelatorios(data.relatorios || [])
@@ -207,22 +157,6 @@ const ConfiguracaoCilindro = () => {
       addNumericField('maximaPressaoSuportadaB', formData.maximaPressaoSuportadaB)
       addNumericField('maximaPressaoSegurancaA', formData.maximaPressaoSegurancaA)
       addNumericField('maximaPressaoSegurancaB', formData.maximaPressaoSegurancaB)
-      addNumericField('preCargaA', formData.preCargaA)
-      addNumericField('cargaNominalA', formData.cargaNominalA)
-      addNumericField('tempoRampaSubidaA', formData.tempoRampaSubidaA)
-      addNumericField('tempoDuracaoCargaA', formData.tempoDuracaoCargaA)
-      addNumericField('tempoRampaDescidaA', formData.tempoRampaDescidaA)
-      addNumericField('percentualVariacaoAlarmeA', formData.percentualVariacaoAlarmeA)
-      addNumericField('histereseAlarmeA', formData.histereseAlarmeA)
-      addNumericField('percentualVariacaoDesligaProcessoA', formData.percentualVariacaoDesligaProcessoA)
-      addNumericField('preCargaB', formData.preCargaB)
-      addNumericField('cargaNominalB', formData.cargaNominalB)
-      addNumericField('tempoRampaSubidaB', formData.tempoRampaSubidaB)
-      addNumericField('tempoDuracaoCargaB', formData.tempoDuracaoCargaB)
-      addNumericField('tempoRampaDescidaB', formData.tempoRampaDescidaB)
-      addNumericField('percentualVariacaoAlarmeB', formData.percentualVariacaoAlarmeB)
-      addNumericField('histereseAlarmeB', formData.histereseAlarmeB)
-      addNumericField('percentualVariacaoDesligaProcessoB', formData.percentualVariacaoDesligaProcessoB)
       
       if (isNew) {
         await api.post('/cilindro', cilindroData)
@@ -452,178 +386,6 @@ const ConfiguracaoCilindro = () => {
                   step="0.01"
                   value={formData.maximaPressaoSegurancaB || ''}
                   onChange={(e) => handleInputChange('maximaPressaoSegurancaB', parseFloat(e.target.value) || 0)}
-                  disabled={!isEditing}
-                />
-              </div>
-            </div>
-          </div>
-
-          <div className="form-section-card">
-            <h2 className="section-title">Parâmetros de Ensaio - Câmara A</h2>
-            <div className="form-grid">
-              <div className="form-group">
-                <label>Pré-Carga (bar)</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={formData.preCargaA || ''}
-                  onChange={(e) => handleInputChange('preCargaA', parseFloat(e.target.value) || 0)}
-                  disabled={!isEditing}
-                />
-              </div>
-              <div className="form-group">
-                <label>Carga Nominal (bar)</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={formData.cargaNominalA || ''}
-                  onChange={(e) => handleInputChange('cargaNominalA', parseFloat(e.target.value) || 0)}
-                  disabled={!isEditing}
-                />
-              </div>
-              <div className="form-group">
-                <label>Tempo Rampa Subida (s)</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={formData.tempoRampaSubidaA || ''}
-                  onChange={(e) => handleInputChange('tempoRampaSubidaA', parseFloat(e.target.value) || 0)}
-                  disabled={!isEditing}
-                />
-              </div>
-              <div className="form-group">
-                <label>Tempo Duração Carga (s)</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={formData.tempoDuracaoCargaA || ''}
-                  onChange={(e) => handleInputChange('tempoDuracaoCargaA', parseFloat(e.target.value) || 0)}
-                  disabled={!isEditing}
-                />
-              </div>
-              <div className="form-group">
-                <label>Tempo Rampa Descida (s)</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={formData.tempoRampaDescidaA || ''}
-                  onChange={(e) => handleInputChange('tempoRampaDescidaA', parseFloat(e.target.value) || 0)}
-                  disabled={!isEditing}
-                />
-              </div>
-              <div className="form-group">
-                <label>Percentual de Variação Alarme (%)</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={formData.percentualVariacaoAlarmeA || ''}
-                  onChange={(e) => handleInputChange('percentualVariacaoAlarmeA', parseFloat(e.target.value) || 0)}
-                  disabled={!isEditing}
-                />
-              </div>
-              <div className="form-group">
-                <label>Histerese do Alarme (%)</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={formData.histereseAlarmeA || ''}
-                  onChange={(e) => handleInputChange('histereseAlarmeA', parseFloat(e.target.value) || 0)}
-                  disabled={!isEditing}
-                />
-              </div>
-              <div className="form-group">
-                <label>Percentual de Variação Desliga Processo (%)</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={formData.percentualVariacaoDesligaProcessoA || ''}
-                  onChange={(e) => handleInputChange('percentualVariacaoDesligaProcessoA', parseFloat(e.target.value) || 0)}
-                  disabled={!isEditing}
-                />
-              </div>
-            </div>
-          </div>
-
-          <div className="form-section-card">
-            <h2 className="section-title">Parâmetros de Ensaio - Câmara B</h2>
-            <div className="form-grid">
-              <div className="form-group">
-                <label>Pré-Carga (bar)</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={formData.preCargaB || ''}
-                  onChange={(e) => handleInputChange('preCargaB', parseFloat(e.target.value) || 0)}
-                  disabled={!isEditing}
-                />
-              </div>
-              <div className="form-group">
-                <label>Carga Nominal (bar)</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={formData.cargaNominalB || ''}
-                  onChange={(e) => handleInputChange('cargaNominalB', parseFloat(e.target.value) || 0)}
-                  disabled={!isEditing}
-                />
-              </div>
-              <div className="form-group">
-                <label>Tempo Rampa Subida (s)</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={formData.tempoRampaSubidaB || ''}
-                  onChange={(e) => handleInputChange('tempoRampaSubidaB', parseFloat(e.target.value) || 0)}
-                  disabled={!isEditing}
-                />
-              </div>
-              <div className="form-group">
-                <label>Tempo Duração Carga (s)</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={formData.tempoDuracaoCargaB || ''}
-                  onChange={(e) => handleInputChange('tempoDuracaoCargaB', parseFloat(e.target.value) || 0)}
-                  disabled={!isEditing}
-                />
-              </div>
-              <div className="form-group">
-                <label>Tempo Rampa Descida (s)</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={formData.tempoRampaDescidaB || ''}
-                  onChange={(e) => handleInputChange('tempoRampaDescidaB', parseFloat(e.target.value) || 0)}
-                  disabled={!isEditing}
-                />
-              </div>
-              <div className="form-group">
-                <label>Percentual de Variação Alarme (%)</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={formData.percentualVariacaoAlarmeB || ''}
-                  onChange={(e) => handleInputChange('percentualVariacaoAlarmeB', parseFloat(e.target.value) || 0)}
-                  disabled={!isEditing}
-                />
-              </div>
-              <div className="form-group">
-                <label>Histerese do Alarme (%)</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={formData.histereseAlarmeB || ''}
-                  onChange={(e) => handleInputChange('histereseAlarmeB', parseFloat(e.target.value) || 0)}
-                  disabled={!isEditing}
-                />
-              </div>
-              <div className="form-group">
-                <label>Percentual de Variação Desliga Processo (%)</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={formData.percentualVariacaoDesligaProcessoB || ''}
-                  onChange={(e) => handleInputChange('percentualVariacaoDesligaProcessoB', parseFloat(e.target.value) || 0)}
                   disabled={!isEditing}
                 />
               </div>
