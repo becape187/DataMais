@@ -74,10 +74,8 @@ public class CilindroController : ControllerBase
                 diametroInterno = cilindro.DiametroInterno,
                 comprimentoHaste = cilindro.ComprimentoHaste,
                 diametroHaste = cilindro.DiametroHaste,
-                maximaPressaoSuportadaA = cilindro.MaximaPressaoSuportadaA,
-                maximaPressaoSuportadaB = cilindro.MaximaPressaoSuportadaB,
-                maximaPressaoSegurancaA = cilindro.MaximaPressaoSegurancaA,
-                maximaPressaoSegurancaB = cilindro.MaximaPressaoSegurancaB,
+                maximaPressaoA = cilindro.MaximaPressaoA,
+                maximaPressaoB = cilindro.MaximaPressaoB,
                 preCargaA = cilindro.PreCargaA,
                 cargaNominalA = cilindro.CargaNominalA,
                 tempoRampaSubidaA = cilindro.TempoRampaSubidaA,
@@ -192,10 +190,8 @@ public class CilindroController : ControllerBase
                 DiametroInterno = dto.DiametroInterno,
                 ComprimentoHaste = dto.ComprimentoHaste,
                 DiametroHaste = dto.DiametroHaste,
-                MaximaPressaoSuportadaA = dto.MaximaPressaoSuportadaA,
-                MaximaPressaoSuportadaB = dto.MaximaPressaoSuportadaB,
-                MaximaPressaoSegurancaA = dto.MaximaPressaoSegurancaA,
-                MaximaPressaoSegurancaB = dto.MaximaPressaoSegurancaB,
+                MaximaPressaoA = dto.MaximaPressaoA,
+                MaximaPressaoB = dto.MaximaPressaoB,
                 PreCargaA = dto.PreCargaA,
                 CargaNominalA = dto.CargaNominalA,
                 TempoRampaSubidaA = dto.TempoRampaSubidaA,
@@ -321,10 +317,8 @@ public class CilindroController : ControllerBase
             cilindro.DiametroInterno = dto.DiametroInterno;
             cilindro.ComprimentoHaste = dto.ComprimentoHaste;
             cilindro.DiametroHaste = dto.DiametroHaste;
-            cilindro.MaximaPressaoSuportadaA = dto.MaximaPressaoSuportadaA;
-            cilindro.MaximaPressaoSuportadaB = dto.MaximaPressaoSuportadaB;
-            cilindro.MaximaPressaoSegurancaA = dto.MaximaPressaoSegurancaA;
-            cilindro.MaximaPressaoSegurancaB = dto.MaximaPressaoSegurancaB;
+            cilindro.MaximaPressaoA = dto.MaximaPressaoA;
+            cilindro.MaximaPressaoB = dto.MaximaPressaoB;
             cilindro.PreCargaA = dto.PreCargaA;
             cilindro.CargaNominalA = dto.CargaNominalA;
             cilindro.TempoRampaSubidaA = dto.TempoRampaSubidaA;
@@ -407,10 +401,12 @@ public class CilindroCreateDto
     public decimal? DiametroInterno { get; set; }
     public decimal? ComprimentoHaste { get; set; }
     public decimal? DiametroHaste { get; set; }
-    public decimal? MaximaPressaoSuportadaA { get; set; }
-    public decimal? MaximaPressaoSuportadaB { get; set; }
-    public decimal? MaximaPressaoSegurancaA { get; set; }
-    public decimal? MaximaPressaoSegurancaB { get; set; }
+    
+    [Required]
+    public decimal MaximaPressaoA { get; set; }
+    
+    [Required]
+    public decimal MaximaPressaoB { get; set; }
     public decimal? PreCargaA { get; set; }
     public decimal? CargaNominalA { get; set; }
     public decimal? TempoRampaSubidaA { get; set; }
@@ -461,10 +457,12 @@ public class CilindroUpdateDto
     public decimal? DiametroInterno { get; set; }
     public decimal? ComprimentoHaste { get; set; }
     public decimal? DiametroHaste { get; set; }
-    public decimal? MaximaPressaoSuportadaA { get; set; }
-    public decimal? MaximaPressaoSuportadaB { get; set; }
-    public decimal? MaximaPressaoSegurancaA { get; set; }
-    public decimal? MaximaPressaoSegurancaB { get; set; }
+    
+    [Required]
+    public decimal MaximaPressaoA { get; set; }
+    
+    [Required]
+    public decimal MaximaPressaoB { get; set; }
     public decimal? PreCargaA { get; set; }
     public decimal? CargaNominalA { get; set; }
     public decimal? TempoRampaSubidaA { get; set; }

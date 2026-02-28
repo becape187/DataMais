@@ -15,10 +15,8 @@ interface Cilindro {
   diametroInterno: number
   comprimentoHaste: number
   diametroHaste: number
-  maximaPressaoSuportadaA: number
-  maximaPressaoSuportadaB: number
-  maximaPressaoSegurancaA: number
-  maximaPressaoSegurancaB: number
+  maximaPressaoA: number
+  maximaPressaoB: number
 }
 
 interface Relatorio {
@@ -46,10 +44,8 @@ const ConfiguracaoCilindro = () => {
     diametroInterno: 0,
     comprimentoHaste: 0,
     diametroHaste: 0,
-    maximaPressaoSuportadaA: 0,
-    maximaPressaoSuportadaB: 0,
-    maximaPressaoSegurancaA: 0,
-    maximaPressaoSegurancaB: 0,
+    maximaPressaoA: 0,
+    maximaPressaoB: 0,
   })
 
   useEffect(() => {
@@ -75,10 +71,8 @@ const ConfiguracaoCilindro = () => {
         diametroInterno: Number(data.diametroInterno) || 0,
         comprimentoHaste: Number(data.comprimentoHaste) || 0,
         diametroHaste: Number(data.diametroHaste) || 0,
-        maximaPressaoSuportadaA: Number(data.maximaPressaoSuportadaA) || 0,
-        maximaPressaoSuportadaB: Number(data.maximaPressaoSuportadaB) || 0,
-        maximaPressaoSegurancaA: Number(data.maximaPressaoSegurancaA) || 0,
-        maximaPressaoSegurancaB: Number(data.maximaPressaoSegurancaB) || 0,
+        maximaPressaoA: Number(data.maximaPressaoA) || 0,
+        maximaPressaoB: Number(data.maximaPressaoB) || 0,
       })
       
       setRelatorios(data.relatorios || [])
@@ -105,6 +99,14 @@ const ConfiguracaoCilindro = () => {
       }
       if (!formData.codigoInterno || !formData.codigoInterno.trim()) {
         alert('O campo Código Interno é obrigatório')
+        return
+      }
+      if (!formData.maximaPressaoA || formData.maximaPressaoA <= 0) {
+        alert('O campo Pressão Máxima A é obrigatório e deve ser maior que zero')
+        return
+      }
+      if (!formData.maximaPressaoB || formData.maximaPressaoB <= 0) {
+        alert('O campo Pressão Máxima B é obrigatório e deve ser maior que zero')
         return
       }
       if (!clienteId) {
@@ -143,7 +145,11 @@ const ConfiguracaoCilindro = () => {
         cilindroData.dataFabricacao = formData.dataFabricacao
       }
 
-      // Adicionar campos numéricos apenas se tiverem valor diferente de 0 ou null
+      // Campos obrigatórios de pressão
+      cilindroData.maximaPressaoA = formData.maximaPressaoA
+      cilindroData.maximaPressaoB = formData.maximaPressaoB
+
+      // Adicionar campos numéricos opcionais apenas se tiverem valor diferente de 0 ou null
       const addNumericField = (field: string, value: number) => {
         if (value !== null && value !== undefined && value !== 0) {
           cilindroData[field] = value
@@ -153,10 +159,6 @@ const ConfiguracaoCilindro = () => {
       addNumericField('diametroInterno', formData.diametroInterno)
       addNumericField('comprimentoHaste', formData.comprimentoHaste)
       addNumericField('diametroHaste', formData.diametroHaste)
-      addNumericField('maximaPressaoSuportadaA', formData.maximaPressaoSuportadaA)
-      addNumericField('maximaPressaoSuportadaB', formData.maximaPressaoSuportadaB)
-      addNumericField('maximaPressaoSegurancaA', formData.maximaPressaoSegurancaA)
-      addNumericField('maximaPressaoSegurancaB', formData.maximaPressaoSegurancaB)
       
       if (isNew) {
         await api.post('/cilindro', cilindroData)
@@ -350,42 +352,26 @@ const ConfiguracaoCilindro = () => {
             <h2 className="section-title">Pressões Máximas</h2>
             <div className="form-grid">
               <div className="form-group">
-                <label>Máxima Pressão Suportada A - Maior Área (bar)</label>
+                <label>Pressão Máxima A (bar) *</label>
                 <input
                   type="number"
                   step="0.01"
-                  value={formData.maximaPressaoSuportadaA || ''}
-                  onChange={(e) => handleInputChange('maximaPressaoSuportadaA', parseFloat(e.target.value) || 0)}
+                  min="0.01"
+                  required
+                  value={formData.maximaPressaoA || ''}
+                  onChange={(e) => handleInputChange('maximaPressaoA', parseFloat(e.target.value) || 0)}
                   disabled={!isEditing}
                 />
               </div>
               <div className="form-group">
-                <label>Máxima Pressão Suportada B (bar)</label>
+                <label>Pressão Máxima B (bar) *</label>
                 <input
                   type="number"
                   step="0.01"
-                  value={formData.maximaPressaoSuportadaB || ''}
-                  onChange={(e) => handleInputChange('maximaPressaoSuportadaB', parseFloat(e.target.value) || 0)}
-                  disabled={!isEditing}
-                />
-              </div>
-              <div className="form-group">
-                <label>Máxima Pressão Segurança A (bar)</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={formData.maximaPressaoSegurancaA || ''}
-                  onChange={(e) => handleInputChange('maximaPressaoSegurancaA', parseFloat(e.target.value) || 0)}
-                  disabled={!isEditing}
-                />
-              </div>
-              <div className="form-group">
-                <label>Máxima Pressão Segurança B - Menor Área (bar)</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={formData.maximaPressaoSegurancaB || ''}
-                  onChange={(e) => handleInputChange('maximaPressaoSegurancaB', parseFloat(e.target.value) || 0)}
+                  min="0.01"
+                  required
+                  value={formData.maximaPressaoB || ''}
+                  onChange={(e) => handleInputChange('maximaPressaoB', parseFloat(e.target.value) || 0)}
                   disabled={!isEditing}
                 />
               </div>

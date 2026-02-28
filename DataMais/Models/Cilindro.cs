@@ -42,17 +42,13 @@ public class Cilindro
     public decimal? DiametroHaste { get; set; }
 
     // Pressões Máximas (em bar)
+    [Required]
     [Column(TypeName = "decimal(10,2)")]
-    public decimal? MaximaPressaoSuportadaA { get; set; }
+    public decimal MaximaPressaoA { get; set; }
 
+    [Required]
     [Column(TypeName = "decimal(10,2)")]
-    public decimal? MaximaPressaoSuportadaB { get; set; }
-
-    [Column(TypeName = "decimal(10,2)")]
-    public decimal? MaximaPressaoSegurancaA { get; set; }
-
-    [Column(TypeName = "decimal(10,2)")]
-    public decimal? MaximaPressaoSegurancaB { get; set; }
+    public decimal MaximaPressaoB { get; set; }
 
     // Parâmetros de Ensaio - Câmara A
     [Column(TypeName = "decimal(10,2)")]

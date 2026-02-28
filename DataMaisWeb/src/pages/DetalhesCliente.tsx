@@ -31,10 +31,8 @@ interface Cilindro {
   diametroInterno: number
   comprimentoHaste: number
   diametroHaste: number
-  maximaPressaoSuportadaA: number
-  maximaPressaoSuportadaB: number
-  maximaPressaoSegurancaA: number
-  maximaPressaoSegurancaB: number
+  maximaPressaoA: number
+  maximaPressaoB: number
   preCarga: number
   cargaNominal: number
   tempoRampaSubida: number

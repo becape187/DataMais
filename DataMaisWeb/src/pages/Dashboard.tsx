@@ -44,6 +44,8 @@ interface Cilindro {
   nome: string
   codigoCliente: string
   codigoInterno: string
+  maximaPressaoA?: number
+  maximaPressaoB?: number
 }
 
 
@@ -73,6 +75,8 @@ const Dashboard = () => {
     pressaoAConv?: ModbusRegistro
     pressaoBConv?: ModbusRegistro
     pressaoGeralConv?: ModbusRegistro
+    limiteA?: ModbusRegistro
+    limiteB?: ModbusRegistro
   }>({})
 
   // Estados dos sensores
@@ -98,7 +102,15 @@ const Dashboard = () => {
             if (config.sistema.cilindroId) {
               try {
                 const cilindroResponse = await api.get(`/cilindro/${config.sistema.cilindroId}`)
-                setCilindroSelecionado(cilindroResponse.data)
+                const cilindroData = cilindroResponse.data
+                setCilindroSelecionado({
+                  id: cilindroData.id,
+                  nome: cilindroData.nome,
+                  codigoCliente: cilindroData.codigoCliente,
+                  codigoInterno: cilindroData.codigoInterno,
+                  maximaPressaoA: cilindroData.maximaPressaoA,
+                  maximaPressaoB: cilindroData.maximaPressaoB
+                })
               } catch (err) {
                 console.warn('Erro ao buscar cilindro selecionado:', err)
               }
@@ -170,6 +182,12 @@ const Dashboard = () => {
               break
             case 'PRESSAO_GERAL_CONV':
               registrosEncontrados.pressaoGeralConv = reg
+              break
+            case 'LIMITE_A':
+              registrosEncontrados.limiteA = reg
+              break
+            case 'LIMITE_B':
+              registrosEncontrados.limiteB = reg
               break
           }
         })
@@ -384,6 +402,45 @@ const Dashboard = () => {
     }
   }
 
+  const enviarLimitesPressaoViaModbus = async (cilindro: Cilindro | null) => {
+    try {
+      // Verifica se há cilindro selecionado com valores de pressão máxima
+      if (!cilindro || !registros.limiteA || !registros.limiteB) {
+        console.warn('Cilindro ou registros LIMITE_A/LIMITE_B não encontrados')
+        return
+      }
+
+      // Verifica se os valores de pressão máxima estão definidos
+      if (cilindro.maximaPressaoA === undefined || cilindro.maximaPressaoA === null ||
+          cilindro.maximaPressaoB === undefined || cilindro.maximaPressaoB === null) {
+        console.warn('Valores de pressão máxima não definidos para o cilindro')
+        return
+      }
+
+      console.log('Enviando limites de pressão via Modbus:', {
+        limiteA: cilindro.maximaPressaoA,
+        limiteB: cilindro.maximaPressaoB,
+        registroLimiteA: registros.limiteA.id,
+        registroLimiteB: registros.limiteB.id
+      })
+
+      // Envia pressão máxima A para LIMITE_A
+      await api.post(`/ModbusConfig/${registros.limiteA.id}/write`, { 
+        valor: cilindro.maximaPressaoA 
+      })
+
+      // Envia pressão máxima B para LIMITE_B
+      await api.post(`/ModbusConfig/${registros.limiteB.id}/write`, { 
+        valor: cilindro.maximaPressaoB 
+      })
+
+      console.log('Limites de pressão enviados com sucesso via Modbus')
+    } catch (err: any) {
+      console.error('Erro ao enviar limites de pressão via Modbus:', err)
+      throw err // Propaga o erro para ser tratado no handleSalvarConfiguracao
+    }
+  }
+
   const enviarCalibracaoViaModbus = async () => {
     try {
       // Busca sensores configurados
@@ -519,6 +576,31 @@ const Dashboard = () => {
     try {
       setSavingConfig(true)
       
+      // Busca dados completos do cilindro se foi selecionado
+      let cilindroCompleto = cilindroSelecionado
+      if (cilindroSelecionado?.id) {
+        try {
+          const cilindroResponse = await api.get(`/cilindro/${cilindroSelecionado.id}`)
+          const cilindroData = cilindroResponse.data
+          cilindroCompleto = {
+            id: cilindroData.id,
+            nome: cilindroData.nome,
+            codigoCliente: cilindroData.codigoCliente,
+            codigoInterno: cilindroData.codigoInterno,
+            maximaPressaoA: cilindroData.maximaPressaoA,
+            maximaPressaoB: cilindroData.maximaPressaoB
+          }
+          setCilindroSelecionado(cilindroCompleto)
+        } catch (err) {
+          console.warn('Erro ao buscar dados completos do cilindro:', err)
+        }
+      }
+      
+      // Envia limites de pressão para MODBUS LIMITE_A e LIMITE_B
+      if (cilindroCompleto) {
+        await enviarLimitesPressaoViaModbus(cilindroCompleto)
+      }
+      
       // Envia calibrações dos sensores via Modbus
       await enviarCalibracaoViaModbus()
       
@@ -631,9 +713,30 @@ const Dashboard = () => {
                 <label>Cilindro Instalado</label>
                 <select
                   value={cilindroSelecionado?.id || ''}
-                  onChange={(e) => {
-                    const cilindro = cilindros.find(c => c.id === Number(e.target.value))
-                    setCilindroSelecionado(cilindro || null)
+                  onChange={async (e) => {
+                    const cilindroId = Number(e.target.value)
+                    const cilindro = cilindros.find(c => c.id === cilindroId)
+                    
+                    if (cilindro) {
+                      // Busca dados completos do cilindro para obter pressões máximas
+                      try {
+                        const cilindroResponse = await api.get(`/cilindro/${cilindroId}`)
+                        const cilindroData = cilindroResponse.data
+                        setCilindroSelecionado({
+                          id: cilindroData.id,
+                          nome: cilindroData.nome,
+                          codigoCliente: cilindroData.codigoCliente,
+                          codigoInterno: cilindroData.codigoInterno,
+                          maximaPressaoA: cilindroData.maximaPressaoA,
+                          maximaPressaoB: cilindroData.maximaPressaoB
+                        })
+                      } catch (err) {
+                        console.warn('Erro ao buscar dados completos do cilindro:', err)
+                        setCilindroSelecionado(cilindro)
+                      }
+                    } else {
+                      setCilindroSelecionado(null)
+                    }
                   }}
                   disabled={!clienteSelecionado}
                 >
