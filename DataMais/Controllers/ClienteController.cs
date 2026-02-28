@@ -157,6 +157,11 @@ public class ClienteController : ControllerBase
     {
         try
         {
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+
             var cliente = await _context.Clientes.FindAsync(id);
             if (cliente == null)
             {

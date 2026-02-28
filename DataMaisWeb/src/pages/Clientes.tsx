@@ -42,10 +42,19 @@ const Clientes = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     try {
+      // Preparar dados para envio - converter strings vazias em null para campos opcionais
+      // Não incluir o id no payload
+      const dataToSend: Omit<Cliente, 'id'> = {
+        nome: formData.nome?.trim() || '',
+        cnpj: formData.cnpj?.trim() || null,
+        contato: formData.contato?.trim() || null,
+        email: formData.email?.trim() || null
+      }
+
       if (editingId === null) {
-        await api.post('/cliente', formData)
+        await api.post('/cliente', dataToSend)
       } else {
-        await api.put(`/cliente/${editingId}`, formData)
+        await api.put(`/cliente/${editingId}`, dataToSend)
       }
       await loadClientes()
       setShowModal(false)
@@ -53,8 +62,26 @@ const Clientes = () => {
       setFormData({})
     } catch (error: any) {
       console.error('Erro ao salvar cliente:', error)
-      const message = error.response?.data?.message || 'Erro ao salvar cliente'
-      alert(message)
+      console.error('Erro da API:', error.response?.data)
+      
+      // Tratar erros de validação
+      if (error.response?.status === 400) {
+        const errors = error.response.data?.errors
+        if (errors) {
+          const errorMessages = Object.entries(errors)
+            .map(([field, messages]: [string, any]) => {
+              const fieldName = field.charAt(0).toUpperCase() + field.slice(1)
+              return `${fieldName}: ${Array.isArray(messages) ? messages.join(', ') : messages}`
+            })
+            .join('\n')
+          alert(`Erros de validação:\n${errorMessages}`)
+        } else {
+          alert(error.response.data?.message || 'Erro ao salvar cliente')
+        }
+      } else {
+        const message = error.response?.data?.message || 'Erro ao salvar cliente'
+        alert(message)
+      }
     }
   }
 
@@ -210,7 +237,6 @@ const Clientes = () => {
                 <label>CNPJ</label>
                 <input 
                   type="text" 
-                  required
                   value={formData.cnpj || ''}
                   onChange={(e) => setFormData({...formData, cnpj: e.target.value})}
                 />
@@ -219,7 +245,6 @@ const Clientes = () => {
                 <label>Contato</label>
                 <input 
                   type="text" 
-                  required
                   value={formData.contato || ''}
                   onChange={(e) => setFormData({...formData, contato: e.target.value})}
                 />
@@ -228,7 +253,6 @@ const Clientes = () => {
                 <label>Email</label>
                 <input 
                   type="email" 
-                  required
                   value={formData.email || ''}
                   onChange={(e) => setFormData({...formData, email: e.target.value})}
                 />
