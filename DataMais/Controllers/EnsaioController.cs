@@ -604,8 +604,8 @@ namespace DataMais.Controllers;
             return Ok(new
             {
                 time = timeLabel,
-                pressaoA: pressaoA,
-                pressaoB: pressaoB
+                pressaoA = pressaoA,
+                pressaoB = pressaoB
             });
         }
         catch (Exception ex)
