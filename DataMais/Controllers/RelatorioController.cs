@@ -29,15 +29,47 @@ public class RelatorioController : ControllerBase
     /// Usado pela tela principal de Relatórios.
     /// </summary>
     [HttpGet]
-    public async Task<IActionResult> GetAll()
+    public async Task<IActionResult> GetAll([FromQuery] int? clienteId = null, [FromQuery] int? cilindroId = null, [FromQuery] DateTime? dataInicio = null, [FromQuery] DateTime? dataFim = null, [FromQuery] int page = 1, [FromQuery] int pageSize = 5)
     {
         try
         {
-            var relatorios = await _context.Relatorios
+            var query = _context.Relatorios
                 .Include(r => r.Cliente)
                 .Include(r => r.Cilindro)
                 .Include(r => r.Ensaio)
-                .OrderByDescending(r => r.Data)
+                .AsQueryable();
+
+            // Aplica filtros
+            if (clienteId.HasValue)
+            {
+                query = query.Where(r => r.ClienteId == clienteId.Value);
+            }
+
+            if (cilindroId.HasValue)
+            {
+                query = query.Where(r => r.CilindroId == cilindroId.Value);
+            }
+
+            if (dataInicio.HasValue)
+            {
+                query = query.Where(r => r.Data >= dataInicio.Value);
+            }
+
+            if (dataFim.HasValue)
+            {
+                query = query.Where(r => r.Data <= dataFim.Value);
+            }
+
+            // Ordena por data
+            query = query.OrderByDescending(r => r.Data);
+
+            // Conta total antes da paginação
+            var total = await query.CountAsync();
+
+            // Aplica paginação
+            var relatorios = await query
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
                 .ToListAsync();
 
             var result = relatorios.Select(r => new
@@ -53,7 +85,14 @@ public class RelatorioController : ControllerBase
                 ensaioNumero = r.Ensaio != null ? r.Ensaio.Numero : null
             });
 
-            return Ok(result);
+            return Ok(new
+            {
+                dados = result,
+                total,
+                page,
+                pageSize,
+                totalPages = (int)Math.Ceiling(total / (double)pageSize)
+            });
         }
         catch (Exception ex)
         {

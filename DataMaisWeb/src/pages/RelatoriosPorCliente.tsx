@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useParams, useNavigate } from 'react-router-dom'
 import api from '../config/api'
 import './Relatorios.css'
 
@@ -33,15 +33,15 @@ interface Paginacao {
   totalPages: number
 }
 
-const Relatorios = () => {
+const RelatoriosPorCliente = () => {
+  const { clienteId } = useParams<{ clienteId: string }>()
   const navigate = useNavigate()
   const [relatorios, setRelatorios] = useState<Relatorio[]>([])
+  const [cliente, setCliente] = useState<Cliente | null>(null)
   const [loading, setLoading] = useState(true)
-  const [clientes, setClientes] = useState<Cliente[]>([])
   const [cilindros, setCilindros] = useState<Cilindro[]>([])
   
   // Filtros
-  const [filtroCliente, setFiltroCliente] = useState<number | null>(null)
   const [filtroCilindro, setFiltroCilindro] = useState<number | null>(null)
   const [filtroDataInicio, setFiltroDataInicio] = useState<string>('')
   const [filtroDataFim, setFiltroDataFim] = useState<string>('')
@@ -55,39 +55,40 @@ const Relatorios = () => {
     totalPages: 0
   })
 
-  // Carrega clientes e cilindros para os filtros
+  // Carrega cliente e cilindros
   useEffect(() => {
-    const carregarFiltros = async () => {
+    const carregarDados = async () => {
+      if (!clienteId) return
+      
       try {
-        const clientesResponse = await api.get('/Cliente')
-        setClientes(clientesResponse.data || [])
+        const clienteResponse = await api.get(`/Cliente/${clienteId}`)
+        setCliente({
+          id: clienteResponse.data.id,
+          nome: clienteResponse.data.nome
+        })
         
-        if (filtroCliente) {
-          const cilindrosResponse = await api.get(`/Cilindro/cliente/${filtroCliente}`)
-          setCilindros(cilindrosResponse.data || [])
-        } else {
-          setCilindros([])
-        }
+        const cilindrosResponse = await api.get(`/Cilindro/cliente/${clienteId}`)
+        setCilindros(cilindrosResponse.data || [])
       } catch (err) {
-        console.error('Erro ao carregar filtros:', err)
+        console.error('Erro ao carregar dados:', err)
       }
     }
     
-    carregarFiltros()
-  }, [filtroCliente])
+    carregarDados()
+  }, [clienteId])
 
   // Carrega relatórios com filtros e paginação
   useEffect(() => {
     const carregarRelatorios = async () => {
+      if (!clienteId) return
+      
       try {
         setLoading(true)
         const params = new URLSearchParams()
         params.append('page', paginaAtual.toString())
         params.append('pageSize', '5')
+        params.append('clienteId', clienteId)
         
-        if (filtroCliente) {
-          params.append('clienteId', filtroCliente.toString())
-        }
         if (filtroCilindro) {
           params.append('cilindroId', filtroCilindro.toString())
         }
@@ -102,7 +103,6 @@ const Relatorios = () => {
         const dados = response.data
 
         if (dados.dados) {
-          // Nova estrutura com paginação
           const mapeados: Relatorio[] = dados.dados.map((r: any) => ({
             id: r.id,
             numero: r.numero,
@@ -122,21 +122,6 @@ const Relatorios = () => {
             pageSize: dados.pageSize,
             totalPages: dados.totalPages
           })
-        } else {
-          // Estrutura antiga (fallback)
-          const mapeados: Relatorio[] = dados.map((r: any) => ({
-            id: r.id,
-            numero: r.numero,
-            cliente: r.clienteNome || 'N/A',
-            clienteId: r.clienteId,
-            data: new Date(r.data).toLocaleString('pt-BR'),
-            ensaioId: r.ensaioId ?? null,
-            ensaioNumero: r.ensaioNumero ?? null,
-            cilindroId: r.cilindroId,
-            cilindroNome: r.cilindroNome || '',
-            status: 'gerado',
-          }))
-          setRelatorios(mapeados.slice(0, 5))
         }
       } catch (err) {
         console.error('Erro ao carregar relatórios:', err)
@@ -146,79 +131,30 @@ const Relatorios = () => {
     }
 
     carregarRelatorios()
-  }, [paginaAtual, filtroCliente, filtroCilindro, filtroDataInicio, filtroDataFim])
-
-  // Busca todos os relatórios para agrupar por cliente (sem filtros)
-  const [todosRelatorios, setTodosRelatorios] = useState<Relatorio[]>([])
-
-  useEffect(() => {
-    const carregarTodosRelatorios = async () => {
-      try {
-        const response = await api.get('/Relatorio?page=1&pageSize=1000')
-        const dados = response.data
-
-        if (dados.dados) {
-          const mapeados: Relatorio[] = dados.dados.map((r: any) => ({
-            id: r.id,
-            numero: r.numero,
-            cliente: r.clienteNome || 'N/A',
-            clienteId: r.clienteId,
-            data: new Date(r.data).toLocaleString('pt-BR'),
-            ensaioId: r.ensaioId ?? null,
-            ensaioNumero: r.ensaioNumero ?? null,
-            cilindroId: r.cilindroId,
-            cilindroNome: r.cilindroNome || '',
-            status: 'gerado',
-          }))
-          setTodosRelatorios(mapeados)
-        } else {
-          const mapeados: Relatorio[] = dados.map((r: any) => ({
-            id: r.id,
-            numero: r.numero,
-            cliente: r.clienteNome || 'N/A',
-            clienteId: r.clienteId,
-            data: new Date(r.data).toLocaleString('pt-BR'),
-            ensaioId: r.ensaioId ?? null,
-            ensaioNumero: r.ensaioNumero ?? null,
-            cilindroId: r.cilindroId,
-            cilindroNome: r.cilindroNome || '',
-            status: 'gerado',
-          }))
-          setTodosRelatorios(mapeados)
-        }
-      } catch (err) {
-        console.error('Erro ao carregar todos os relatórios:', err)
-      }
-    }
-
-    carregarTodosRelatorios()
-  }, [])
-
-  // Agrupa relatórios por cliente e pega apenas os 5 primeiros clientes
-  const relatoriosPorCliente = todosRelatorios.reduce((acc, rel) => {
-    if (!acc[rel.cliente]) {
-      acc[rel.cliente] = []
-    }
-    acc[rel.cliente].push(rel)
-    return acc
-  }, {} as Record<string, Relatorio[]>)
-
-  const clientesUnicos = Object.keys(relatoriosPorCliente).slice(0, 5)
+  }, [clienteId, paginaAtual, filtroCilindro, filtroDataInicio, filtroDataFim])
 
   const limparFiltros = () => {
-    setFiltroCliente(null)
     setFiltroCilindro(null)
     setFiltroDataInicio('')
     setFiltroDataFim('')
     setPaginaAtual(1)
   }
 
+  if (!cliente) {
+    return (
+      <div className="relatorios">
+        <p>Carregando...</p>
+      </div>
+    )
+  }
+
   return (
     <div className="relatorios">
       <div className="page-header">
         <div>
-          <h1>Repositório de Relatórios</h1>
-          <p className="page-subtitle">Acesse e visualize os relatórios de ensaios por cliente</p>
+          <Link to="/relatorios" className="back-link">← Voltar para Relatórios</Link>
+          <h1>Relatórios - {cliente.nome}</h1>
+          <p className="page-subtitle">Visualize todos os relatórios deste cliente</p>
         </div>
       </div>
 
@@ -227,23 +163,6 @@ const Relatorios = () => {
         <h3 style={{ marginTop: 0, marginBottom: '16px' }}>Filtros</h3>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
           <div>
-            <label style={{ display: 'block', marginBottom: '4px', fontSize: '14px', fontWeight: 500 }}>Cliente</label>
-            <select
-              value={filtroCliente || ''}
-              onChange={(e) => {
-                setFiltroCliente(e.target.value ? parseInt(e.target.value) : null)
-                setFiltroCilindro(null)
-                setPaginaAtual(1)
-              }}
-              style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ddd' }}
-            >
-              <option value="">Todos</option>
-              {clientes.map(cliente => (
-                <option key={cliente.id} value={cliente.id}>{cliente.nome}</option>
-              ))}
-            </select>
-          </div>
-          <div>
             <label style={{ display: 'block', marginBottom: '4px', fontSize: '14px', fontWeight: 500 }}>Cilindro</label>
             <select
               value={filtroCilindro || ''}
@@ -251,7 +170,6 @@ const Relatorios = () => {
                 setFiltroCilindro(e.target.value ? parseInt(e.target.value) : null)
                 setPaginaAtual(1)
               }}
-              disabled={!filtroCliente}
               style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ddd' }}
             >
               <option value="">Todos</option>
@@ -298,13 +216,13 @@ const Relatorios = () => {
 
       <div className="relatorios-content">
         <div className="relatorios-recentes">
-          <h2>Últimos Relatórios</h2>
+          <h2>Relatórios do Cliente</h2>
           <div className="relatorios-table-container">
             <table className="relatorios-table">
               <thead>
                 <tr>
                   <th>Número</th>
-                  <th>Cliente</th>
+                  <th>Cilindro</th>
                   <th>Ensaio</th>
                   <th>Data</th>
                   <th>Status</th>
@@ -330,7 +248,7 @@ const Relatorios = () => {
                       <td>
                         <strong>{relatorio.numero}</strong>
                       </td>
-                      <td>{relatorio.cliente}</td>
+                      <td>{relatorio.cilindroNome || '-'}</td>
                       <td>
                         <span className="ensaio-badge">
                           {relatorio.ensaioNumero || (relatorio.ensaioId ? `#${relatorio.ensaioId}` : '-')}
@@ -380,56 +298,9 @@ const Relatorios = () => {
             </div>
           )}
         </div>
-
-        <div className="relatorios-por-cliente">
-          <h2>Relatórios por Cliente</h2>
-          <div className="clientes-grid">
-            {clientesUnicos.map((cliente) => {
-              const rels = relatoriosPorCliente[cliente]
-              const clienteId = rels[0]?.clienteId
-              return (
-                <div 
-                  key={cliente} 
-                  className="cliente-card"
-                  style={{ cursor: 'pointer' }}
-                  onClick={() => navigate(`/relatorios/cliente/${clienteId}`)}
-                >
-                  <div className="cliente-header">
-                    <h3>{cliente}</h3>
-                    <span className="rel-count">{rels.length} relatório{rels.length > 1 ? 's' : ''}</span>
-                  </div>
-                  <div className="cliente-relatorios">
-                    {rels.slice(0, 5).map(rel => (
-                      <div key={rel.id} className="rel-item">
-                        <div className="rel-info">
-                          <span className="rel-numero">{rel.numero}</span>
-                          <span className="rel-data">{rel.data}</span>
-                        </div>
-                        <Link 
-                          to={`/relatorios/${rel.id}`}
-                          className="btn-link-small"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          Visualizar →
-                        </Link>
-                      </div>
-                    ))}
-                  </div>
-                  {rels.length > 5 && (
-                    <div style={{ padding: '12px', textAlign: 'center', borderTop: '1px solid #eee' }}>
-                      <span style={{ fontSize: '14px', color: '#666' }}>
-                        +{rels.length - 5} relatório{rels.length - 5 > 1 ? 's' : ''} mais
-                      </span>
-                    </div>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-        </div>
       </div>
     </div>
   )
 }
 
-export default Relatorios
+export default RelatoriosPorCliente

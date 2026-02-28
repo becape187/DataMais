@@ -8,6 +8,7 @@ import ConfiguracaoCilindro from './pages/ConfiguracaoCilindro'
 import Sensores from './pages/Sensores'
 import ConfiguracaoSensor from './pages/ConfiguracaoSensor'
 import Relatorios from './pages/Relatorios'
+import RelatoriosPorCliente from './pages/RelatoriosPorCliente'
 import VisualizarRelatorio from './pages/VisualizarRelatorio'
 import ComentariosDesvio from './pages/ComentariosDesvio'
 import GestaoUsuarios from './pages/GestaoUsuarios'
@@ -27,6 +28,7 @@ function App() {
           <Route path="/sensores" element={<Sensores />} />
           <Route path="/sensores/:id/configuracao" element={<ConfiguracaoSensor />} />
           <Route path="/relatorios" element={<Relatorios />} />
+          <Route path="/relatorios/cliente/:clienteId" element={<RelatoriosPorCliente />} />
           <Route path="/relatorios/:id" element={<VisualizarRelatorio />} />
           <Route path="/ensaio/comentarios/:eventoId" element={<ComentariosDesvio />} />
           <Route path="/usuarios" element={<GestaoUsuarios />} />
