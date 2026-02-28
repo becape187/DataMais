@@ -286,15 +286,15 @@ const VisualizarRelatorio = () => {
       const margin = 10 // Margem em mm
       const contentWidth = pdfWidth - (margin * 2) // Largura útil: 190mm
       
-      // Largura fixa para renderização: 1080px
-      const renderWidthPx = 1080
+      // Largura fixa para renderização: 1200px
+      const renderWidthPx = 1200
       
       const originalElement = relatorioContainerRef.current
       
       // Cria um clone do elemento para renderização
       const clone = originalElement.cloneNode(true) as HTMLElement
       
-      // Posiciona o clone fora da tela com largura fixa de 1080px
+      // Posiciona o clone fora da tela com largura fixa de 1200px
       clone.style.position = 'absolute'
       clone.style.left = '-9999px'
       clone.style.top = '0'
@@ -360,6 +360,105 @@ const VisualizarRelatorio = () => {
     }
   }
 
+  // Função para imprimir relatório (usa o mesmo processo do PDF)
+  const imprimirRelatorio = async () => {
+    if (!relatorioContainerRef.current) {
+      alert('Erro ao preparar impressão: elemento não encontrado')
+      return
+    }
+
+    try {
+      // Dimensões do PDF A4
+      const pdfWidth = 210 // A4 width in mm
+      const pdfHeight = 297 // A4 height in mm
+      const margin = 10 // Margem em mm
+      const contentWidth = pdfWidth - (margin * 2) // Largura útil: 190mm
+      
+      // Largura fixa para renderização: 1200px
+      const renderWidthPx = 1200
+      
+      const originalElement = relatorioContainerRef.current
+      
+      // Cria um clone do elemento para renderização
+      const clone = originalElement.cloneNode(true) as HTMLElement
+      
+      // Posiciona o clone fora da tela com largura fixa de 1200px
+      clone.style.position = 'absolute'
+      clone.style.left = '-9999px'
+      clone.style.top = '0'
+      clone.style.width = `${renderWidthPx}px`
+      clone.style.maxWidth = `${renderWidthPx}px`
+      clone.style.transform = 'none'
+      clone.style.transformOrigin = 'top left'
+      
+      // Adiciona o clone ao body temporariamente
+      document.body.appendChild(clone)
+      
+      // Aguarda um frame para garantir que o layout seja aplicado
+      await new Promise(resolve => requestAnimationFrame(resolve))
+      
+      // Captura o clone como canvas com largura fixa de 1200px
+      const canvas = await html2canvas(clone, {
+        scale: 2, // Qualidade alta
+        useCORS: true,
+        logging: false,
+        backgroundColor: '#ffffff',
+        width: renderWidthPx,
+        windowWidth: renderWidthPx
+      })
+
+      // Remove o clone do DOM
+      document.body.removeChild(clone)
+
+      // Calcula as dimensões da imagem no PDF mantendo proporção
+      // A largura será ajustada à largura útil do PDF (190mm)
+      // A altura será calculada proporcionalmente
+      const imgWidth = contentWidth // 190mm (largura útil do PDF)
+      const imgHeight = (canvas.height * contentWidth) / canvas.width // Altura proporcional
+      
+      // Cria o PDF
+      const pdf = new jsPDF('p', 'mm', 'a4')
+      const pageContentHeight = pdfHeight - (margin * 2) // Altura útil: 277mm
+      let heightLeft = imgHeight
+      let position = margin
+
+      // Adiciona a primeira página
+      const firstPageHeight = Math.min(imgHeight, pageContentHeight)
+      pdf.addImage(canvas.toDataURL('image/png', 1.0), 'PNG', margin, position, imgWidth, firstPageHeight)
+      heightLeft -= firstPageHeight
+
+      // Adiciona páginas adicionais se necessário
+      while (heightLeft > 0) {
+        pdf.addPage()
+        position = margin
+        const pageImgHeight = Math.min(heightLeft, pageContentHeight)
+        pdf.addImage(canvas.toDataURL('image/png', 1.0), 'PNG', margin, position, imgWidth, pageImgHeight)
+        heightLeft -= pageImgHeight
+      }
+
+      // Abre a janela de impressão do PDF
+      const pdfBlob = pdf.output('blob')
+      const pdfUrl = URL.createObjectURL(pdfBlob)
+      const printWindow = window.open(pdfUrl, '_blank')
+      
+      if (printWindow) {
+        printWindow.onload = () => {
+          printWindow.print()
+        }
+      } else {
+        // Fallback: se não conseguir abrir nova janela, faz download
+        pdf.save(`relatorio_${relatorio?.numero || 'relatorio'}.pdf`)
+      }
+    } catch (error) {
+      console.error('Erro ao preparar impressão:', error)
+      alert('Erro ao preparar impressão. Tente novamente.')
+      
+      // Garante que o clone seja removido mesmo em caso de erro
+      const clones = document.querySelectorAll('[style*="left: -9999px"]')
+      clones.forEach(clone => clone.remove())
+    }
+  }
+
   if (loading) {
     return (
       <div className="visualizar-relatorio">
@@ -400,7 +499,7 @@ const VisualizarRelatorio = () => {
         </div>
         <div className="header-actions">
           <button className="btn btn-secondary" onClick={exportarParaPDF}>📥 Download PDF</button>
-          <button className="btn btn-secondary" onClick={() => window.print()}>🖨️ Imprimir</button>
+          <button className="btn btn-secondary" onClick={imprimirRelatorio}>🖨️ Imprimir</button>
         </div>
       </div>
 
@@ -555,27 +654,24 @@ const VisualizarRelatorio = () => {
                     }}
                   />
                   <Legend />
-                  {relatorio.camaraTestada?.trim().toUpperCase() === 'B' ? (
-                    <Line 
-                      type="monotone" 
-                      dataKey="pressaoB" 
-                      stroke="#007bff" 
-                      strokeWidth={2}
-                      dot={false}
-                      name="Pressão B (bar)"
-                      animationDuration={300}
-                    />
-                  ) : (
-                    <Line 
-                      type="monotone" 
-                      dataKey="pressaoA" 
-                      stroke="#dc3545" 
-                      strokeWidth={2}
-                      dot={false}
-                      name="Pressão A (bar)"
-                      animationDuration={300}
-                    />
-                  )}
+                  <Line 
+                    type="monotone" 
+                    dataKey="pressaoA" 
+                    stroke="#dc3545" 
+                    strokeWidth={2}
+                    dot={false}
+                    name="Pressão A (bar)"
+                    animationDuration={300}
+                  />
+                  <Line 
+                    type="monotone" 
+                    dataKey="pressaoB" 
+                    stroke="#007bff" 
+                    strokeWidth={2}
+                    dot={false}
+                    name="Pressão B (bar)"
+                    animationDuration={300}
+                  />
                 </LineChart>
               </ResponsiveContainer>
             </div>
