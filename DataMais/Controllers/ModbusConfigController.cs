@@ -697,7 +697,7 @@ public class ModbusConfigController : ControllerBase
                 Ativo = botaoRegistro.Ativo
             };
 
-            // 1. Ativa o botão
+            // 1. Ativa o botão (mantém ativado até receber confirmação)
             _logger.LogInformation("Ativando botão {Acao} motor (registro {RegistroId})", acao, botaoRegistro.Id);
             var ativado = await _modbusService.EscreverRegistroAsync(configTemp, true);
             if (!ativado)
@@ -705,21 +705,11 @@ public class ModbusConfigController : ControllerBase
                 return StatusCode(500, new { message = $"Erro ao ativar botão {acao} motor" });
             }
 
-            // 2. Aguarda processamento do CLP
-            await Task.Delay(100);
-
-            // 3. Desativa o botão
-            _logger.LogInformation("Desativando botão {Acao} motor (registro {RegistroId})", acao, botaoRegistro.Id);
-            var desativado = await _modbusService.EscreverRegistroAsync(configTemp, false);
-            if (!desativado)
-            {
-                _logger.LogWarning("Aviso: Não foi possível desativar botão {Acao} motor, mas continuando verificação", acao);
-            }
-
-            // 4. Aguarda um tempo inicial para o CLP processar o comando
+            // 2. Aguarda um tempo inicial para o CLP processar o comando
             await Task.Delay(300);
 
-            // 5. Verifica se o status mudou (timeout de 2 segundos, verifica a cada 200ms)
+            // 3. Verifica se o status mudou (aguarda confirmação via MOTOR_BOMBA)
+            // O botão permanece ativado enquanto aguarda a confirmação
             var timeout = TimeSpan.FromSeconds(2);
             var intervalo = TimeSpan.FromMilliseconds(200);
             var inicio = DateTime.UtcNow;
@@ -727,7 +717,7 @@ public class ModbusConfigController : ControllerBase
             object? ultimoStatusLido = null;
             int tentativasLeitura = 0;
 
-            _logger.LogInformation("Iniciando verificação de status do motor após comando {Acao}. Status esperado: {StatusEsperado}", acao, statusEsperado);
+            _logger.LogInformation("Aguardando confirmação do comando {Acao} via MOTOR_BOMBA. Status esperado: {StatusEsperado}", acao, statusEsperado);
 
             while (DateTime.UtcNow - inicio < timeout)
             {
@@ -750,10 +740,11 @@ public class ModbusConfigController : ControllerBase
                     _logger.LogDebug("Tentativa {Tentativa}: Status lido = {StatusLido} (bool: {StatusBool}), Esperado: {StatusEsperado}", 
                         tentativasLeitura, novoStatus, novoStatusBool, statusEsperado);
 
+                    // MOTOR_BOMBA confirma que o comando foi executado
                     if (novoStatusBool == statusEsperado)
                     {
                         statusAlterado = true;
-                        _logger.LogInformation("Status do motor alterado com sucesso após {Tentativas} tentativas e {TempoTotal}ms", 
+                        _logger.LogInformation("Comando confirmado via MOTOR_BOMBA após {Tentativas} tentativas e {TempoTotal}ms", 
                             tentativasLeitura, (DateTime.UtcNow - inicio).TotalMilliseconds);
                         break;
                     }
@@ -765,6 +756,15 @@ public class ModbusConfigController : ControllerBase
                 }
             }
 
+            // 4. Desativa o botão após receber confirmação ou timeout
+            _logger.LogInformation("Desativando botão {Acao} motor (registro {RegistroId})", acao, botaoRegistro.Id);
+            var desativado = await _modbusService.EscreverRegistroAsync(configTemp, false);
+            if (!desativado)
+            {
+                _logger.LogWarning("Aviso: Não foi possível desativar botão {Acao} motor", acao);
+            }
+
+            // 5. Retorna resultado baseado na confirmação do MOTOR_BOMBA
             if (statusAlterado)
             {
                 _logger.LogInformation("Motor {Acao} com sucesso", acao == "ligar" ? "ligado" : "desligado");
