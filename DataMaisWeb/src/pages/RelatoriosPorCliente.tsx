@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, useParams, useNavigate } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import api from '../config/api'
 import './Relatorios.css'
 
@@ -35,7 +35,6 @@ interface Paginacao {
 
 const RelatoriosPorCliente = () => {
   const { clienteId } = useParams<{ clienteId: string }>()
-  const navigate = useNavigate()
   const [relatorios, setRelatorios] = useState<Relatorio[]>([])
   const [cliente, setCliente] = useState<Cliente | null>(null)
   const [loading, setLoading] = useState(true)
