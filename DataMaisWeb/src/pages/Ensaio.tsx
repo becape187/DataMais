@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import api from '../config/api'
@@ -51,11 +51,95 @@ const Ensaio = () => {
 
     verificarRegistroRodando()
     
-    // Verifica periodicamente a cada 5 segundos
-    const interval = setInterval(verificarRegistroRodando, 5000)
+    // Verifica periodicamente a cada 5 segundos (quando não há ensaio ativo)
+    if (!ensaioAtivo) {
+      const interval = setInterval(verificarRegistroRodando, 5000)
+      return () => clearInterval(interval)
+    }
+  }, [ensaioAtivo])
+
+  // Refs para rastrear estado sem causar re-renders
+  const registroAnteriorRef = useRef<boolean | null>(null)
+  const dialogAbertoRef = useRef(false)
+
+  // Verifica periodicamente REGISTRO_RODANDO quando ensaio está ativo
+  // Detecta se o CLP encerrou o ensaio
+  useEffect(() => {
+    if (!ensaioAtivo || !ensaioId) {
+      registroAnteriorRef.current = null
+      dialogAbertoRef.current = false
+      return
+    }
+
+    const verificarRegistroRodando = async () => {
+      try {
+        const response = await api.get('/ModbusConfig/registro/rodando')
+        const rodandoAtual = response.data.rodando
+        
+        // Inicializa o estado anterior na primeira verificação
+        if (registroAnteriorRef.current === null) {
+          registroAnteriorRef.current = rodandoAtual
+          setRegistroRodando(rodandoAtual)
+          return
+        }
+        
+        // Detecta se o registro parou de rodar (CLP encerrou o ensaio)
+        if (registroAnteriorRef.current === true && rodandoAtual === false && !dialogAbertoRef.current) {
+          dialogAbertoRef.current = true
+          
+          const evento: LogEvento = {
+            id: Date.now(),
+            texto: `[${new Date().toLocaleTimeString('pt-BR')}] CLP encerrou o ensaio`,
+            tipo: 'normal',
+            comentarios: 0,
+          }
+          setLogEventos(prev => [evento, ...prev])
+
+          // Pergunta ao usuário se quer salvar
+          const salvar = window.confirm('O CLP encerrou o ensaio. Deseja salvar este ensaio?')
+          
+          try {
+            if (salvar) {
+              await api.post(`/ensaio/interromper/${ensaioId}`)
+              const eventoSalvo: LogEvento = {
+                id: Date.now(),
+                texto: `[${new Date().toLocaleTimeString('pt-BR')}] Ensaio salvo`,
+                tipo: 'normal',
+                comentarios: 0,
+              }
+              setLogEventos(prev => [eventoSalvo, ...prev])
+            } else {
+              await api.post(`/ensaio/cancelar/${ensaioId}`)
+              const eventoCancelado: LogEvento = {
+                id: Date.now(),
+                texto: `[${new Date().toLocaleTimeString('pt-BR')}] Ensaio descartado (não salvo)`,
+                tipo: 'normal',
+                comentarios: 0,
+              }
+              setLogEventos(prev => [eventoCancelado, ...prev])
+            }
+          } catch (err) {
+            console.error('Erro ao salvar/cancelar ensaio:', err)
+          } finally {
+            setEnsaioAtivo(false)
+            setRegistroRodando(rodandoAtual)
+            registroAnteriorRef.current = rodandoAtual
+            dialogAbertoRef.current = false
+          }
+        } else {
+          setRegistroRodando(rodandoAtual)
+          registroAnteriorRef.current = rodandoAtual
+        }
+      } catch (err: any) {
+        console.error('Erro ao verificar REGISTRO_RODANDO:', err)
+      }
+    }
+
+    // Verifica a cada 2 segundos quando o ensaio está ativo
+    const interval = setInterval(verificarRegistroRodando, 2000)
     
     return () => clearInterval(interval)
-  }, [])
+  }, [ensaioAtivo, ensaioId])
 
   useEffect(() => {
     if (!ensaioAtivo || !ensaioId) return
