@@ -286,21 +286,20 @@ const VisualizarRelatorio = () => {
       const margin = 10 // Margem em mm
       const contentWidth = pdfWidth - (margin * 2) // Largura útil: 190mm
       
-      // Largura desejada em pixels para renderização (baseada na largura do PDF)
-      // 190mm = 7.48 inches = ~718 pixels a 96 DPI
-      const targetWidthPx = 718
+      // Largura fixa para renderização: 1080px
+      const renderWidthPx = 1080
       
       const originalElement = relatorioContainerRef.current
       
       // Cria um clone do elemento para renderização
       const clone = originalElement.cloneNode(true) as HTMLElement
       
-      // Posiciona o clone fora da tela com a largura desejada
+      // Posiciona o clone fora da tela com largura fixa de 1080px
       clone.style.position = 'absolute'
       clone.style.left = '-9999px'
       clone.style.top = '0'
-      clone.style.width = `${targetWidthPx}px`
-      clone.style.maxWidth = `${targetWidthPx}px`
+      clone.style.width = `${renderWidthPx}px`
+      clone.style.maxWidth = `${renderWidthPx}px`
       clone.style.transform = 'none'
       clone.style.transformOrigin = 'top left'
       
@@ -310,22 +309,24 @@ const VisualizarRelatorio = () => {
       // Aguarda um frame para garantir que o layout seja aplicado
       await new Promise(resolve => requestAnimationFrame(resolve))
       
-      // Captura o clone como canvas
+      // Captura o clone como canvas com largura fixa de 1080px
       const canvas = await html2canvas(clone, {
         scale: 2, // Qualidade alta
         useCORS: true,
         logging: false,
         backgroundColor: '#ffffff',
-        width: targetWidthPx,
-        windowWidth: targetWidthPx
+        width: renderWidthPx,
+        windowWidth: renderWidthPx
       })
 
       // Remove o clone do DOM
       document.body.removeChild(clone)
 
-      // Calcula as dimensões da imagem no PDF mantendo proporções
-      const imgWidth = contentWidth
-      const imgHeight = (canvas.height * contentWidth) / canvas.width
+      // Calcula as dimensões da imagem no PDF mantendo proporção
+      // A largura será ajustada à largura útil do PDF (190mm)
+      // A altura será calculada proporcionalmente
+      const imgWidth = contentWidth // 190mm (largura útil do PDF)
+      const imgHeight = (canvas.height * contentWidth) / canvas.width // Altura proporcional
       
       // Cria o PDF
       const pdf = new jsPDF('p', 'mm', 'a4')
