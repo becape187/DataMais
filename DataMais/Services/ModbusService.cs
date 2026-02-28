@@ -5,12 +5,13 @@ using DataMais.Data;
 using DataMais.Models;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace DataMais.Services;
 
 public class ModbusService
 {
-    private readonly DataMaisDbContext _context;
+    private readonly IServiceScopeFactory _serviceScopeFactory;
     private readonly ILogger<ModbusService> _logger;
     private readonly Dictionary<string, IModbusMaster> _connections = new();
     private readonly Dictionary<string, TcpClient> _tcpClients = new();
@@ -18,15 +19,17 @@ public class ModbusService
     private readonly object _lockObject = new();
     private readonly TimeSpan _connectionTimeout = TimeSpan.FromSeconds(5);
     private readonly TimeSpan _operationTimeout = TimeSpan.FromSeconds(10);
-    private readonly TimeSpan _maxIdleTime = TimeSpan.FromMinutes(5);
+    // Desabilitado: conexões são mantidas abertas permanentemente para evitar múltiplas conexões no CLP
+    // private readonly TimeSpan _maxIdleTime = TimeSpan.FromMinutes(5);
 
-    public ModbusService(DataMaisDbContext context, ILogger<ModbusService> logger)
+    public ModbusService(IServiceScopeFactory serviceScopeFactory, ILogger<ModbusService> logger)
     {
-        _context = context;
+        _serviceScopeFactory = serviceScopeFactory;
         _logger = logger;
         
-        // Inicia limpeza periódica de conexões inativas
-        _ = Task.Run(async () => await LimparConexoesInativasAsync());
+        // Limpeza periódica apenas de conexões inválidas (não por tempo de inatividade)
+        // Conexões válidas são mantidas abertas permanentemente para evitar múltiplas conexões no CLP
+        _ = Task.Run(async () => await LimparConexoesInvalidasAsync());
     }
 
     /// <summary>
@@ -36,8 +39,11 @@ public class ModbusService
     {
         var resultados = new Dictionary<int, object>();
 
+        using var scope = _serviceScopeFactory.CreateScope();
+        var context = scope.ServiceProvider.GetRequiredService<DataMaisDbContext>();
+
         // Busca todos os registros ativos ordenados por IP e ordem de leitura
-        var registros = await _context.ModbusConfigs
+        var registros = await context.ModbusConfigs
             .Where(r => r.Ativo)
             .OrderBy(r => r.IpAddress)
             .ThenBy(r => r.OrdemLeitura)
@@ -93,7 +99,10 @@ public class ModbusService
     /// </summary>
     public async Task<object?> LerRegistroAsync(int registroId)
     {
-        var registro = await _context.ModbusConfigs.FindAsync(registroId);
+        using var scope = _serviceScopeFactory.CreateScope();
+        var context = scope.ServiceProvider.GetRequiredService<DataMaisDbContext>();
+
+        var registro = await context.ModbusConfigs.FindAsync(registroId);
         if (registro == null || !registro.Ativo)
             return null;
 
@@ -109,7 +118,10 @@ public class ModbusService
     /// </summary>
     public async Task<bool> EscreverRegistroAsync(int registroId, object valor)
     {
-        var registro = await _context.ModbusConfigs.FindAsync(registroId);
+        using var scope = _serviceScopeFactory.CreateScope();
+        var context = scope.ServiceProvider.GetRequiredService<DataMaisDbContext>();
+
+        var registro = await context.ModbusConfigs.FindAsync(registroId);
         if (registro == null || !registro.Ativo)
             return false;
 
@@ -428,13 +440,17 @@ public class ModbusService
         throw lastException!;
     }
 
-    private async Task LimparConexoesInativasAsync()
+    /// <summary>
+    /// Limpa apenas conexões inválidas (fechadas ou com erro).
+    /// Conexões válidas são mantidas abertas permanentemente para evitar múltiplas conexões no CLP.
+    /// </summary>
+    private async Task LimparConexoesInvalidasAsync()
     {
         while (true)
         {
             try
             {
-                await Task.Delay(TimeSpan.FromMinutes(1)); // Verifica a cada minuto
+                await Task.Delay(TimeSpan.FromMinutes(5)); // Verifica a cada 5 minutos
 
                 lock (_lockObject)
                 {
@@ -443,32 +459,25 @@ public class ModbusService
                     foreach (var kvp in _lastUsed.ToList())
                     {
                         var key = kvp.Key;
-                        var lastUsed = kvp.Value;
 
-                        // Remove conexões inativas por muito tempo
-                        if (DateTime.UtcNow - lastUsed > _maxIdleTime)
-                        {
-                            keysToRemove.Add(key);
-                            continue;
-                        }
-
-                        // Remove conexões inválidas
+                        // Remove apenas conexões inválidas (fechadas ou com erro)
+                        // NÃO remove por tempo de inatividade - conexões válidas são mantidas abertas
                         if (!IsConexaoValida(key))
                         {
                             keysToRemove.Add(key);
+                            _logger.LogInformation("Removendo conexão inválida: {Key}", key);
                         }
                     }
 
                     foreach (var key in keysToRemove)
                     {
-                        _logger.LogInformation("Removendo conexão inativa: {Key}", key);
                         RemoverConexaoInterna(key);
                     }
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Erro ao limpar conexões inativas");
+                _logger.LogError(ex, "Erro ao limpar conexões inválidas");
             }
         }
     }
