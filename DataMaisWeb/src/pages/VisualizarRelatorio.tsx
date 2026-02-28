@@ -49,7 +49,6 @@ const VisualizarRelatorio = () => {
   const [dadosGrafico, setDadosGrafico] = useState<DataPoint[]>([])
   const [loadingGrafico, setLoadingGrafico] = useState(true)
   const [respostasCampos, setRespostasCampos] = useState<Record<number, string>>({})
-  const [salvandoRespostas, setSalvandoRespostas] = useState(false)
   const relatorioContainerRef = useRef<HTMLDivElement>(null)
 
   // Calcula as estatísticas de pressão a partir dos dados do gráfico
@@ -230,7 +229,6 @@ const VisualizarRelatorio = () => {
   const salvarRespostas = async (campoId: number, valor: string) => {
     if (!id || !relatorio) return
 
-    setSalvandoRespostas(true)
     try {
       await api.post(`/Relatorio/${id}/respostas-campos`, {
         respostas: [
@@ -242,8 +240,6 @@ const VisualizarRelatorio = () => {
       })
     } catch (error) {
       console.error('Erro ao salvar resposta:', error)
-    } finally {
-      setSalvandoRespostas(false)
     }
   }
 
