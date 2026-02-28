@@ -21,12 +21,15 @@ const Ensaio = () => {
   const navigate = useNavigate()
   const [ensaioAtivo, setEnsaioAtivo] = useState(false)
   const [ensaioId, setEnsaioId] = useState<number | null>(null)
+  const [ensaioDataInicio, setEnsaioDataInicio] = useState<Date | null>(null)
   const [dados, setDados] = useState<DataPoint[]>([])
   const [logEventos, setLogEventos] = useState<LogEvento[]>([])
   const [camara, setCamara] = useState<'A' | 'B' | ''>('')
   const [pressaoCarga, setPressaoCarga] = useState<string>('')
   const [tempoCarga, setTempoCarga] = useState<string>('')
   const [registroRodando, setRegistroRodando] = useState<boolean | null>(null)
+  const [totalPontosColetados, setTotalPontosColetados] = useState(0)
+  const [tempoAtual, setTempoAtual] = useState(Date.now())
 
   // Verifica REGISTRO_RODANDO ao carregar a página
   useEffect(() => {
@@ -123,6 +126,7 @@ const Ensaio = () => {
             console.error('Erro ao salvar/cancelar ensaio:', err)
           } finally {
             setEnsaioAtivo(false)
+            setEnsaioDataInicio(null)
             setRegistroRodando(rodandoAtual)
             registroAnteriorRef.current = rodandoAtual
             dialogAbertoRef.current = false
@@ -141,6 +145,17 @@ const Ensaio = () => {
     
     return () => clearInterval(interval)
   }, [ensaioAtivo, ensaioId])
+
+  // Atualiza o tempo decorrido a cada segundo quando o ensaio está ativo
+  useEffect(() => {
+    if (!ensaioAtivo || !ensaioDataInicio) return
+
+    const interval = setInterval(() => {
+      setTempoAtual(Date.now()) // Força re-render para atualizar o tempo decorrido
+    }, 1000)
+
+    return () => clearInterval(interval)
+  }, [ensaioAtivo, ensaioDataInicio])
 
   useEffect(() => {
     if (!ensaioAtivo || !ensaioId) return
@@ -170,8 +185,12 @@ const Ensaio = () => {
 
           setDados(prev => {
             const novos = [...prev, ponto]
-            return novos.slice(-100) // Mantém apenas os últimos 100 pontos
+            // Mantém apenas os últimos 100 pontos para o gráfico (performance)
+            return novos.slice(-100)
           })
+          
+          // Incrementa contador total de pontos (sem limite)
+          setTotalPontosColetados(prev => prev + 1)
         }
       } catch (err: any) {
         if (err.name !== 'CanceledError' && err.code !== 'ERR_CANCELED' && isMounted) {
@@ -215,10 +234,16 @@ const Ensaio = () => {
         tempoCarga: tempoVal,
       })
       const id = response.data.id as number
+      const dataInicio = response.data.dataInicio 
+        ? new Date(response.data.dataInicio) 
+        : new Date()
 
       setEnsaioId(id)
       setEnsaioAtivo(true)
+      setEnsaioDataInicio(dataInicio)
+      setTempoAtual(Date.now())
       setDados([])
+      setTotalPontosColetados(0)
       setLogEventos([])
 
       // Verifica avisos Modbus se houver
@@ -263,6 +288,7 @@ const Ensaio = () => {
       console.error('Erro ao interromper/cancelar ensaio:', err)
     } finally {
       setEnsaioAtivo(false)
+      setEnsaioDataInicio(null)
       const evento: LogEvento = {
         id: Date.now(),
         texto: `[${new Date().toLocaleTimeString('pt-BR')}] Ensaio ${salvar ? 'salvo' : 'descartado (não salvo)'}`,
@@ -333,25 +359,29 @@ const Ensaio = () => {
           <span className="stat-mini-label">Pressão A</span>
           <span className="stat-mini-value">
             {dados.length > 0 && dados[dados.length - 1].pressaoA != null 
-              ? dados[dados.length - 1].pressaoA!.toFixed(2) 
-              : 'N/A'} bar
+              ? Math.round(dados[dados.length - 1].pressaoA!)
+              : 0} bar
           </span>
         </div>
         <div className="stat-mini">
           <span className="stat-mini-label">Pressão B</span>
           <span className="stat-mini-value">
             {dados.length > 0 && dados[dados.length - 1].pressaoB != null 
-              ? dados[dados.length - 1].pressaoB!.toFixed(2) 
-              : 'N/A'} bar
+              ? Math.round(dados[dados.length - 1].pressaoB!)
+              : 0} bar
           </span>
         </div>
         <div className="stat-mini">
           <span className="stat-mini-label">Tempo Decorrido</span>
-          <span className="stat-mini-value">{Math.floor(dados.length * 0.5)}s</span>
+          <span className="stat-mini-value">
+            {ensaioDataInicio 
+              ? Math.floor((tempoAtual - ensaioDataInicio.getTime()) / 1000)
+              : 0}s
+          </span>
         </div>
         <div className="stat-mini">
           <span className="stat-mini-label">Pontos Coletados</span>
-          <span className="stat-mini-value">{dados.length}</span>
+          <span className="stat-mini-value">{totalPontosColetados}</span>
         </div>
         <div className="stat-mini">
           <span className="stat-mini-label">Status</span>
