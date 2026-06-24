@@ -31,6 +31,48 @@ namespace DataMais.Controllers;
         _logger = logger;
     }
 
+    /// <summary>
+    /// Retorna o ensaio atualmente em execução (se houver), para a tela retomar o registro
+    /// ao reentrar — o backend é a fonte da verdade do que está rodando.
+    /// </summary>
+    [HttpGet("ativo")]
+    public async Task<IActionResult> GetEnsaioAtivo()
+    {
+        try
+        {
+            var ensaio = await _context.Ensaios
+                .Include(e => e.Cliente)
+                .Include(e => e.Cilindro)
+                .Where(e => e.Status == "EmExecucao")
+                .OrderByDescending(e => e.DataInicio)
+                .FirstOrDefaultAsync();
+
+            if (ensaio == null)
+            {
+                return Ok(new { ativo = false });
+            }
+
+            return Ok(new
+            {
+                ativo = true,
+                id = ensaio.Id,
+                numero = ensaio.Numero,
+                status = ensaio.Status,
+                dataInicio = ensaio.DataInicio,
+                camara = ensaio.CamaraTestada,
+                pressaoCarga = ensaio.PressaoCargaConfigurada,
+                tempoCarga = ensaio.TempoCargaConfigurado,
+                clienteNome = ensaio.Cliente != null ? ensaio.Cliente.Nome : null,
+                cilindroNome = ensaio.Cilindro != null ? ensaio.Cilindro.Nome : null
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Erro ao obter ensaio ativo");
+            return StatusCode(500, new { message = "Erro ao obter ensaio ativo", error = ex.Message });
+        }
+    }
+
     [HttpPost("iniciar")]
     public async Task<IActionResult> IniciarEnsaio([FromBody] IniciarEnsaioRequest request)
     {
@@ -39,6 +81,26 @@ namespace DataMais.Controllers;
             if (!ModelState.IsValid)
             {
                 return BadRequest(ModelState);
+            }
+
+            // Idempotência: se já existe um ensaio em execução, retorna ele em vez de criar
+            // outro (e sem reenviar os comandos Modbus de início).
+            var ensaioEmExecucao = await _context.Ensaios
+                .Where(e => e.Status == "EmExecucao")
+                .OrderByDescending(e => e.DataInicio)
+                .FirstOrDefaultAsync();
+
+            if (ensaioEmExecucao != null)
+            {
+                _logger.LogInformation("Iniciar ensaio idempotente: já há ensaio {EnsaioId} em execução", ensaioEmExecucao.Id);
+                return Ok(new
+                {
+                    id = ensaioEmExecucao.Id,
+                    numero = ensaioEmExecucao.Numero,
+                    status = ensaioEmExecucao.Status,
+                    dataInicio = ensaioEmExecucao.DataInicio,
+                    jaExistia = true
+                });
             }
 
             var camara = request.Camara?.Trim().ToUpperInvariant();
@@ -616,6 +678,82 @@ namespace DataMais.Controllers;
     }
 
     /// <summary>
+    /// Retorna o histórico de pressões (A e B) do ensaio a partir do InfluxDB,
+    /// para RECONSTRUIR o gráfico ao reentrar na tela (sair e voltar não perde os dados).
+    /// </summary>
+    [HttpGet("{id:int}/historico")]
+    public async Task<IActionResult> GetHistoricoPressao(int id)
+    {
+        try
+        {
+            var ensaio = await _context.Ensaios.FindAsync(id);
+            if (ensaio == null)
+            {
+                return NotFound(new { message = "Ensaio não encontrado" });
+            }
+
+            var appConfig = _configService.GetConfig();
+
+            if (string.IsNullOrWhiteSpace(appConfig.Influx.Url) ||
+                string.IsNullOrWhiteSpace(appConfig.Influx.Token) ||
+                string.IsNullOrWhiteSpace(appConfig.Influx.Organization) ||
+                string.IsNullOrWhiteSpace(appConfig.Influx.Bucket))
+            {
+                _logger.LogWarning("Configuração do InfluxDB incompleta. Não será possível reconstruir o histórico do ensaio {EnsaioId}.", id);
+                return Ok(new { dados = Array.Empty<object>(), totalPontos = 0 });
+            }
+
+            var from = (ensaio.DataInicio ?? ensaio.DataCriacao).ToUniversalTime().AddMinutes(-1);
+            var to = (ensaio.DataFim ?? DateTime.UtcNow).ToUniversalTime().AddMinutes(1);
+
+            var flux = $@"from(bucket: ""{appConfig.Influx.Bucket}"")
+  |> range(start: {from:o}, stop: {to:o})
+  |> filter(fn: (r) => r._measurement == ""ensaio_pressao"" and r.ensaioId == ""{ensaio.Id}"" and (r._field == ""pressaoA"" or r._field == ""pressaoB""))
+  |> sort(columns: [""_time""])
+  |> keep(columns: [""_time"", ""_value"", ""_field""])";
+
+            using var influxClient = new InfluxDBClient(appConfig.Influx.Url, appConfig.Influx.Token);
+            var queryApi = influxClient.GetQueryApi();
+            var tables = await queryApi.QueryAsync(flux, appConfig.Influx.Organization);
+
+            // Agrupa por timestamp (preserva cada leitura), combinando A e B do mesmo instante
+            var pontos = new SortedDictionary<DateTime, Dictionary<string, double>>();
+            foreach (var table in tables)
+            {
+                foreach (var record in table.Records)
+                {
+                    var time = record.GetTime();
+                    var field = record.GetField();
+                    var value = record.GetValue();
+                    if (time == null || field == null || !(value is IConvertible)) continue;
+
+                    try
+                    {
+                        var dt = time.Value.ToDateTimeUtc();
+                        if (!pontos.ContainsKey(dt)) pontos[dt] = new Dictionary<string, double>();
+                        pontos[dt][field] = Convert.ToDouble(value);
+                    }
+                    catch { }
+                }
+            }
+
+            var dados = pontos.Select(kv => new
+            {
+                time = kv.Key.ToLocalTime().ToString("HH:mm:ss"),
+                pressaoA = kv.Value.ContainsKey("pressaoA") ? (double?)Math.Round(kv.Value["pressaoA"], 2) : null,
+                pressaoB = kv.Value.ContainsKey("pressaoB") ? (double?)Math.Round(kv.Value["pressaoB"], 2) : null
+            }).ToList();
+
+            return Ok(new { dados, totalPontos = dados.Count });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Erro ao reconstruir histórico do ensaio {EnsaioId}", id);
+            return StatusCode(500, new { message = "Erro ao reconstruir histórico do ensaio", error = ex.Message });
+        }
+    }
+
+    /// <summary>
     /// Remove do InfluxDB todas as leituras de pressão associadas a um ensaio cancelado.
     /// </summary>
     private async Task RemoverLeiturasInfluxAsync(Ensaio ensaio)
@@ -661,7 +799,7 @@ public class IniciarEnsaioRequest
     public decimal PressaoCarga { get; set; }
 
     /// <summary>
-    /// Tempo de carga configurado para o ensaio (segundos)
+    /// Tempo de carga configurado para o ensaio (minutos)
     /// </summary>
     [Range(0.01, double.MaxValue, ErrorMessage = "Tempo de carga deve ser maior que zero.")]
     public decimal TempoCarga { get; set; }

@@ -31,6 +31,51 @@ const Ensaio = () => {
   const [totalPontosColetados, setTotalPontosColetados] = useState(0)
   const [tempoAtual, setTempoAtual] = useState(Date.now())
 
+  // Ao abrir a tela, retoma o ensaio em execução (backend é a fonte da verdade).
+  // Idempotente: reentrar não cria outro ensaio, apenas reidrata o que está rodando,
+  // recuperando o cronômetro, os dados e o botão de Encerrar.
+  useEffect(() => {
+    const retomarEnsaioAtivo = async () => {
+      try {
+        const { data } = await api.get('/ensaio/ativo')
+        if (data && data.ativo) {
+          setEnsaioId(data.id)
+          setEnsaioAtivo(true)
+          setEnsaioDataInicio(data.dataInicio ? new Date(data.dataInicio) : new Date())
+          setTempoAtual(Date.now())
+          if (data.camara) setCamara(data.camara)
+          if (data.pressaoCarga != null) setPressaoCarga(String(data.pressaoCarga))
+          if (data.tempoCarga != null) setTempoCarga(String(data.tempoCarga))
+          setLogEventos([{
+            id: Date.now(),
+            texto: `[${new Date().toLocaleTimeString('pt-BR')}] Registro em andamento retomado (ID ${data.id})`,
+            tipo: 'normal',
+            comentarios: 0,
+          }])
+
+          // Reconstrói o gráfico com o histórico já coletado (InfluxDB), para sair/voltar não perder a curva
+          try {
+            const hist = await api.get(`/ensaio/${data.id}/historico`)
+            const pontos: DataPoint[] = (hist.data?.dados ?? []).map((p: any) => ({
+              time: p.time,
+              pressaoA: p.pressaoA,
+              pressaoB: p.pressaoB,
+            }))
+            setTotalPontosColetados(pontos.length)
+            // Mantém só os últimos 100 no gráfico (mesma regra da coleta em tempo real)
+            setDados(pontos.slice(-100))
+          } catch (errHist) {
+            console.error('Erro ao reconstruir histórico do ensaio:', errHist)
+          }
+        }
+      } catch (err) {
+        console.error('Erro ao retomar ensaio ativo:', err)
+      }
+    }
+
+    retomarEnsaioAtivo()
+  }, [])
+
   // Verifica REGISTRO_RODANDO ao carregar a página
   useEffect(() => {
     const verificarRegistroRodando = async () => {
@@ -259,7 +304,7 @@ const Ensaio = () => {
 
       const evento: LogEvento = {
         id: Date.now(),
-        texto: `[${new Date().toLocaleTimeString('pt-BR')}] Ensaio iniciado (ID ${id}) - Câmara ${camara}, Pressão de Carga ${pressaoVal} bar, Tempo de Carga ${tempoVal} s`,
+        texto: `[${new Date().toLocaleTimeString('pt-BR')}] Ensaio iniciado (ID ${id}) - Câmara ${camara}, Pressão de Carga ${pressaoVal} bar, Tempo de Carga ${tempoVal} min`,
         tipo: 'normal',
         comentarios: 0,
       }
@@ -335,7 +380,7 @@ const Ensaio = () => {
               />
             </div>
             <div className="config-field">
-              <label>Tempo de Carga (s)</label>
+              <label>Tempo de Carga (min)</label>
               <input
                 type="number"
                 step="0.01"
