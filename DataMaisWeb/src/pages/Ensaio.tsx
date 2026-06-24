@@ -132,50 +132,25 @@ const Ensaio = () => {
           return
         }
         
-        // Detecta se o registro parou de rodar (CLP encerrou o ensaio)
+        // Detecta se o registro parou de rodar (CLP concluiu o ensaio).
+        // A conclusão e a geração do relatório são feitas AUTOMATICAMENTE pelo backend
+        // (monitor de REGISTRO_RODANDO); aqui apenas refletimos na tela.
         if (registroAnteriorRef.current === true && rodandoAtual === false && !dialogAbertoRef.current) {
           dialogAbertoRef.current = true
-          
+
           const evento: LogEvento = {
             id: Date.now(),
-            texto: `[${new Date().toLocaleTimeString('pt-BR')}] CLP encerrou o ensaio`,
+            texto: `[${new Date().toLocaleTimeString('pt-BR')}] CLP concluiu o ensaio — relatório gerado automaticamente`,
             tipo: 'normal',
             comentarios: 0,
           }
           setLogEventos(prev => [evento, ...prev])
 
-          // Pergunta ao usuário se quer salvar
-          const salvar = window.confirm('O CLP encerrou o ensaio. Deseja salvar este ensaio?')
-          
-          try {
-            if (salvar) {
-              await api.post(`/ensaio/interromper/${ensaioId}`)
-              const eventoSalvo: LogEvento = {
-                id: Date.now(),
-                texto: `[${new Date().toLocaleTimeString('pt-BR')}] Ensaio salvo`,
-                tipo: 'normal',
-                comentarios: 0,
-              }
-              setLogEventos(prev => [eventoSalvo, ...prev])
-            } else {
-              await api.post(`/ensaio/cancelar/${ensaioId}`)
-              const eventoCancelado: LogEvento = {
-                id: Date.now(),
-                texto: `[${new Date().toLocaleTimeString('pt-BR')}] Ensaio descartado (não salvo)`,
-                tipo: 'normal',
-                comentarios: 0,
-              }
-              setLogEventos(prev => [eventoCancelado, ...prev])
-            }
-          } catch (err) {
-            console.error('Erro ao salvar/cancelar ensaio:', err)
-          } finally {
-            setEnsaioAtivo(false)
-            setEnsaioDataInicio(null)
-            setRegistroRodando(rodandoAtual)
-            registroAnteriorRef.current = rodandoAtual
-            dialogAbertoRef.current = false
-          }
+          setEnsaioAtivo(false)
+          setEnsaioDataInicio(null)
+          setRegistroRodando(rodandoAtual)
+          registroAnteriorRef.current = rodandoAtual
+          dialogAbertoRef.current = false
         } else {
           setRegistroRodando(rodandoAtual)
           registroAnteriorRef.current = rodandoAtual

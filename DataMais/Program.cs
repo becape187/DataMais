@@ -75,6 +75,10 @@ builder.Services.AddSingleton<ConfigService>(configService);
 // Registra o ModbusService como singleton para manter uma única conexão Modbus
 builder.Services.AddSingleton<DataMais.Services.ModbusService>();
 
+// Monitora REGISTRO_RODANDO em background: quando o CLP conclui o ensaio,
+// finaliza e gera o relatório automaticamente (mesmo sem ninguém na tela).
+builder.Services.AddHostedService<DataMais.Services.RegistroConclusaoMonitor>();
+
 // CORS para permitir requisições do frontend
 builder.Services.AddCors(options =>
 {
