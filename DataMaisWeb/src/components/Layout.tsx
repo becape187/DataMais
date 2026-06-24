@@ -23,6 +23,9 @@ const Layout = ({ children }: LayoutProps) => {
   const [processando, setProcessando] = useState(false)
   const [avancaPressionado, setAvancaPressionado] = useState(false)
   const [recuaPressionado, setRecuaPressionado] = useState(false)
+  // Estado REAL lido do CLP (AUX_AVANCA/AUX_RECUA) — reflete acionamento por fora da app também
+  const [avancaAtivo, setAvancaAtivo] = useState(false)
+  const [recuaAtivo, setRecuaAtivo] = useState(false)
   const [pressaoA, setPressaoA] = useState<number | null>(null)
   const [pressaoB, setPressaoB] = useState<number | null>(null)
   const [registros, setRegistros] = useState<{
@@ -30,6 +33,8 @@ const Layout = ({ children }: LayoutProps) => {
     recua?: ModbusRegistro
     pressaoA?: ModbusRegistro
     pressaoB?: ModbusRegistro
+    auxAvanca?: ModbusRegistro
+    auxRecua?: ModbusRegistro
   }>({})
 
   const isActive = (path: string) => location.pathname === path
@@ -46,19 +51,26 @@ const Layout = ({ children }: LayoutProps) => {
         // Usa sempre as pressões já convertidas pelo dispositivo
         const pressaoAReg = todosRegistros.find((r: any) => r.nome === 'PRESSAO_A_CONV' && r.ativo)
         const pressaoBReg = todosRegistros.find((r: any) => r.nome === 'PRESSAO_B_CONV' && r.ativo)
-        
+        // Estado real de avanço/recuo (discrete inputs - ReadInputs), reflete acionamento externo
+        const auxAvancaReg = todosRegistros.find((r: any) => r.nome === 'AUX_AVANCA' && r.ativo)
+        const auxRecuaReg = todosRegistros.find((r: any) => r.nome === 'AUX_RECUA' && r.ativo)
+
         setRegistros({
           avanca: avancaReg,
           recua: recuaReg,
           pressaoA: pressaoAReg,
-          pressaoB: pressaoBReg
+          pressaoB: pressaoBReg,
+          auxAvanca: auxAvancaReg,
+          auxRecua: auxRecuaReg
         })
-        
-        console.log('Registros Modbus encontrados na sidebar:', { 
-          avanca: avancaReg, 
+
+        console.log('Registros Modbus encontrados na sidebar:', {
+          avanca: avancaReg,
           recua: recuaReg,
           pressaoA: pressaoAReg,
-          pressaoB: pressaoBReg
+          pressaoB: pressaoBReg,
+          auxAvanca: auxAvancaReg,
+          auxRecua: auxRecuaReg
         })
       } catch (err) {
         console.error('Erro ao buscar registros Modbus:', err)
@@ -201,13 +213,68 @@ const Layout = ({ children }: LayoutProps) => {
     // Atualiza imediatamente e depois a cada 1 segundo
     atualizarPressoes()
     const interval = setInterval(atualizarPressoes, 1000)
-    
+
     return () => {
       isMounted = false
       abortController.abort()
       clearInterval(interval)
     }
   }, [registros.pressaoA?.id, registros.pressaoB?.id])
+
+  // Lê o estado REAL de avanço/recuo (AUX_AVANCA/AUX_RECUA) a cada 1s.
+  // Reflete o estado mesmo quando acionado por fora da aplicação (IHM, campo, etc.).
+  useEffect(() => {
+    if (!registros.auxAvanca && !registros.auxRecua) return
+
+    const abortController = new AbortController()
+    let isMounted = true
+    let requestInProgress = false
+
+    const ehAtivo = (valor: any) => valor === true || valor === 1 || valor === '1'
+
+    const atualizarAux = async () => {
+      if (requestInProgress) return
+      requestInProgress = true
+      try {
+        if (registros.auxAvanca && isMounted) {
+          try {
+            const response = await api.get(`/ModbusConfig/${registros.auxAvanca.id}/read`, {
+              signal: abortController.signal
+            })
+            if (isMounted) setAvancaAtivo(ehAtivo(response.data.valor))
+          } catch (err: any) {
+            if (err.name !== 'CanceledError' && err.code !== 'ERR_CANCELED' && isMounted) {
+              setAvancaAtivo(false)
+            }
+          }
+        }
+
+        if (registros.auxRecua && isMounted) {
+          try {
+            const response = await api.get(`/ModbusConfig/${registros.auxRecua.id}/read`, {
+              signal: abortController.signal
+            })
+            if (isMounted) setRecuaAtivo(ehAtivo(response.data.valor))
+          } catch (err: any) {
+            if (err.name !== 'CanceledError' && err.code !== 'ERR_CANCELED' && isMounted) {
+              setRecuaAtivo(false)
+            }
+          }
+        }
+      } finally {
+        requestInProgress = false
+      }
+    }
+
+    atualizarAux()
+    const interval = setInterval(atualizarAux, 1000)
+
+    return () => {
+      isMounted = false
+      abortController.abort()
+      clearInterval(interval)
+    }
+  }, [registros.auxAvanca?.id, registros.auxRecua?.id])
 
   const handleLigaDesliga = async () => {
     console.log('🔵 Botão Liga/Desliga da sidebar CLICADO!', { isLigado, processando })
@@ -437,8 +504,8 @@ const Layout = ({ children }: LayoutProps) => {
           </div>
           <div className="hidraulica-buttons">
             <div className="movimento-buttons">
-              <button 
-                className="btn-hidraulica btn-avanca" 
+              <button
+                className={`btn-hidraulica btn-avanca ${avancaAtivo ? 'ativo' : ''}`}
                 onMouseDown={(e) => {
                   e.preventDefault()
                   e.stopPropagation()
@@ -457,15 +524,17 @@ const Layout = ({ children }: LayoutProps) => {
                   }
                 }}
                 disabled={!registros.avanca}
-                style={{ 
+                title={avancaAtivo ? 'Avanço ATIVADO' : 'Avanço desativado'}
+                style={{
                   cursor: !registros.avanca ? 'not-allowed' : 'pointer',
                   opacity: !registros.avanca ? 0.6 : (avancaPressionado ? 0.8 : 1)
                 }}
               >
-                {avancaPressionado ? '⏳ Avança' : 'Avança'}
+                <span className={`led-status ${avancaAtivo ? 'on' : 'off'}`}></span>
+                Avança
               </button>
-              <button 
-                className="btn-hidraulica btn-recua" 
+              <button
+                className={`btn-hidraulica btn-recua ${recuaAtivo ? 'ativo' : ''}`}
                 onMouseDown={(e) => {
                   e.preventDefault()
                   e.stopPropagation()
@@ -484,12 +553,14 @@ const Layout = ({ children }: LayoutProps) => {
                   }
                 }}
                 disabled={!registros.recua}
-                style={{ 
+                title={recuaAtivo ? 'Recuo ATIVADO' : 'Recuo desativado'}
+                style={{
                   cursor: !registros.recua ? 'not-allowed' : 'pointer',
                   opacity: !registros.recua ? 0.6 : (recuaPressionado ? 0.8 : 1)
                 }}
               >
-                {recuaPressionado ? '⏳ Recua' : 'Recua'}
+                <span className={`led-status ${recuaAtivo ? 'on' : 'off'}`}></span>
+                Recua
               </button>
             </div>
             <button 
