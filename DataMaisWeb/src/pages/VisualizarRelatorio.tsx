@@ -32,6 +32,8 @@ interface RelatorioDetalhe {
   pressaoMaxima?: number | null
   pressaoMinima?: number | null
   pressaoMedia?: number | null
+  pressaoMaximaCamaraOposta?: number | null
+  limitePassagem?: number | null
   resultado?: string | null
   campos?: CampoRelatorio[]
 }
@@ -107,30 +109,55 @@ const VisualizarRelatorio = () => {
 
   const estatisticasPressao = calcularEstatisticasPressao()
 
-  // Calcula o resultado baseado na pressão mínima calculada dos dados do gráfico
-  // Regra: Aprovado se pressão mínima >= 95% do setpoint (desvio máximo de 5%)
-  // Reprovado se pressão mínima < 95% do setpoint (desvio > 5%)
+  // Calcula o resultado pela PASSAGEM entre câmaras.
+  // Regra: a partir do momento em que a câmara TESTADA atinge o setpoint, pega-se o PICO
+  // (máximo) da câmara OPOSTA. Se esse pico ultrapassar o limite configurado no cilindro
+  // (default 1 bar), o cilindro está dando passagem → Reprovado. Senão → Aprovado.
   const calcularResultado = (): string | null => {
-    // Verifica se temos os dados necessários
-    if (!relatorio || !relatorio.pressaoCargaConfigurada || estatisticasPressao.min == null) {
-      return null
+    if (!relatorio || !relatorio.pressaoCargaConfigurada || dadosGrafico.length === 0) {
+      // Sem dados do gráfico para recalcular: usa o resultado já avaliado pelo backend.
+      return relatorio?.resultado ?? null
     }
 
     const setpoint = relatorio.pressaoCargaConfigurada
-    // Calcula o limite mínimo: 95% do setpoint (permite desvio máximo de 5%)
-    // Exemplo: setpoint 320 bar → limite mínimo = 304 bar (320 * 0.95)
-    const limiteMinimo = setpoint * 0.95
+    const camaraTestada = relatorio.camaraTestada?.trim().toUpperCase()
+    const campoTestada = camaraTestada === 'B' ? 'pressaoB' : 'pressaoA'
+    const campoOposta = camaraTestada === 'B' ? 'pressaoA' : 'pressaoB'
 
-    // Usa a pressão mínima calculada dos dados do gráfico (após filtrar >= setpoint)
-    const pressaoMinima = estatisticasPressao.min
-
-    // Aprovado: pressão mínima >= 95% do setpoint (desvio <= 5%)
-    // Reprovado: pressão mínima < 95% do setpoint (desvio > 5%)
-    if (pressaoMinima >= limiteMinimo) {
-      return 'Aprovado'
-    } else {
-      return 'Reprovado'
+    // Encontra o primeiro ponto em que a câmara testada atinge o setpoint
+    let inicioAnalise = -1
+    for (let i = 0; i < dadosGrafico.length; i++) {
+      const valor = campoTestada === 'pressaoA' ? dadosGrafico[i].pressaoA : dadosGrafico[i].pressaoB
+      if (valor != null && valor >= setpoint) {
+        inicioAnalise = i
+        break
+      }
     }
+
+    // Se nunca atingiu o setpoint, não há como avaliar
+    if (inicioAnalise === -1) {
+      return null
+    }
+
+    // Pico da câmara oposta a partir do início da análise
+    let maxOposta: number | null = null
+    for (let i = inicioAnalise; i < dadosGrafico.length; i++) {
+      const valor = campoOposta === 'pressaoA' ? dadosGrafico[i].pressaoA : dadosGrafico[i].pressaoB
+      if (valor != null && (maxOposta === null || valor > maxOposta)) {
+        maxOposta = valor
+      }
+    }
+
+    if (maxOposta === null) {
+      return null
+    }
+
+    // Limite vem do cilindro (já resolvido pelo backend); default 1 bar se ausente
+    const limite = relatorio.limitePassagem != null && relatorio.limitePassagem > 0
+      ? relatorio.limitePassagem
+      : 1
+
+    return maxOposta > limite ? 'Reprovado' : 'Aprovado'
   }
 
   const resultadoCalculado = calcularResultado()
@@ -188,6 +215,8 @@ const VisualizarRelatorio = () => {
           pressaoMaxima: r.pressaoMaxima ?? null,
           pressaoMinima: r.pressaoMinima ?? null,
           pressaoMedia: r.pressaoMedia ?? null,
+          pressaoMaximaCamaraOposta: r.pressaoMaximaCamaraOposta ?? null,
+          limitePassagem: r.limitePassagem ?? null,
           resultado: r.resultado ?? null,
           campos: r.campos || [],
         })
@@ -637,6 +666,18 @@ const VisualizarRelatorio = () => {
               <span className="pressao-label">Pressão Média</span>
               <span className="pressao-value">
                 {estatisticasPressao.avg != null ? `${Math.round(estatisticasPressao.avg)} bar` : '-'}
+              </span>
+            </div>
+            <div className="pressao-card">
+              <span className="pressao-label">Pico Câmara Oposta</span>
+              <span className="pressao-value">
+                {relatorio.pressaoMaximaCamaraOposta != null ? `${relatorio.pressaoMaximaCamaraOposta.toFixed(2)} bar` : '-'}
+              </span>
+            </div>
+            <div className="pressao-card">
+              <span className="pressao-label">Limite de Passagem</span>
+              <span className="pressao-value">
+                {`${(relatorio.limitePassagem != null && relatorio.limitePassagem > 0 ? relatorio.limitePassagem : 1).toFixed(2)} bar`}
               </span>
             </div>
           </div>

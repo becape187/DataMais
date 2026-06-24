@@ -17,6 +17,8 @@ interface Cilindro {
   diametroHaste: number
   maximaPressaoA: number
   maximaPressaoB: number
+  limitePassagemCamaraA: number
+  limitePassagemCamaraB: number
 }
 
 interface Relatorio {
@@ -46,6 +48,8 @@ const ConfiguracaoCilindro = () => {
     diametroHaste: 0,
     maximaPressaoA: 0,
     maximaPressaoB: 0,
+    limitePassagemCamaraA: 0,
+    limitePassagemCamaraB: 0,
   })
 
   useEffect(() => {
@@ -73,8 +77,10 @@ const ConfiguracaoCilindro = () => {
         diametroHaste: Number(data.diametroHaste) || 0,
         maximaPressaoA: Number(data.maximaPressaoA) || 0,
         maximaPressaoB: Number(data.maximaPressaoB) || 0,
+        limitePassagemCamaraA: Number(data.limitePassagemCamaraA) || 0,
+        limitePassagemCamaraB: Number(data.limitePassagemCamaraB) || 0,
       })
-      
+
       setRelatorios(data.relatorios || [])
     } catch (error) {
       console.error('Erro ao carregar cilindro:', error)
@@ -159,6 +165,8 @@ const ConfiguracaoCilindro = () => {
       addNumericField('diametroInterno', formData.diametroInterno)
       addNumericField('comprimentoHaste', formData.comprimentoHaste)
       addNumericField('diametroHaste', formData.diametroHaste)
+      addNumericField('limitePassagemCamaraA', formData.limitePassagemCamaraA)
+      addNumericField('limitePassagemCamaraB', formData.limitePassagemCamaraB)
       
       if (isNew) {
         await api.post('/cilindro', cilindroData)
@@ -372,6 +380,39 @@ const ConfiguracaoCilindro = () => {
                   required
                   value={formData.maximaPressaoB || ''}
                   onChange={(e) => handleInputChange('maximaPressaoB', parseFloat(e.target.value) || 0)}
+                  disabled={!isEditing}
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="form-section-card">
+            <h2 className="section-title">Critério de Aprovação — Passagem entre Câmaras</h2>
+            <p className="section-hint">
+              Durante o ensaio de uma câmara, a câmara oposta não pode passar do limite abaixo.
+              Se ultrapassar, o cilindro está dando passagem e o ensaio é reprovado.
+              Se deixado em branco/zero, assume 1 bar.
+            </p>
+            <div className="form-grid">
+              <div className="form-group">
+                <label>Limite ao testar Câmara A — pressão máx. na câmara oposta B (bar)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={formData.limitePassagemCamaraA || ''}
+                  onChange={(e) => handleInputChange('limitePassagemCamaraA', parseFloat(e.target.value) || 0)}
+                  disabled={!isEditing}
+                />
+              </div>
+              <div className="form-group">
+                <label>Limite ao testar Câmara B — pressão máx. na câmara oposta A (bar)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={formData.limitePassagemCamaraB || ''}
+                  onChange={(e) => handleInputChange('limitePassagemCamaraB', parseFloat(e.target.value) || 0)}
                   disabled={!isEditing}
                 />
               </div>

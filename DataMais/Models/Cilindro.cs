@@ -75,6 +75,14 @@ public class Cilindro
     [Column(TypeName = "decimal(10,2)")]
     public decimal? PercentualVariacaoDesligaProcessoA { get; set; }
 
+    /// <summary>
+    /// Ao testar a câmara A, limite de pressão (bar) admitido na câmara OPOSTA (B).
+    /// Se a câmara oposta ultrapassar este valor durante o ensaio, o cilindro está
+    /// dando passagem entre câmaras → Reprovado. Se não configurado, assume 1 bar.
+    /// </summary>
+    [Column(TypeName = "decimal(10,2)")]
+    public decimal? LimitePassagemCamaraA { get; set; }
+
     // Parâmetros de Ensaio - Câmara B
     [Column(TypeName = "decimal(10,2)")]
     public decimal? PreCargaB { get; set; }
@@ -99,6 +107,14 @@ public class Cilindro
 
     [Column(TypeName = "decimal(10,2)")]
     public decimal? PercentualVariacaoDesligaProcessoB { get; set; }
+
+    /// <summary>
+    /// Ao testar a câmara B, limite de pressão (bar) admitido na câmara OPOSTA (A).
+    /// Se a câmara oposta ultrapassar este valor durante o ensaio, o cilindro está
+    /// dando passagem entre câmaras → Reprovado. Se não configurado, assume 1 bar.
+    /// </summary>
+    [Column(TypeName = "decimal(10,2)")]
+    public decimal? LimitePassagemCamaraB { get; set; }
 
     // Relacionamentos
     [Required]

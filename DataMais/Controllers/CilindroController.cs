@@ -84,6 +84,7 @@ public class CilindroController : ControllerBase
                 percentualVariacaoAlarmeA = cilindro.PercentualVariacaoAlarmeA,
                 histereseAlarmeA = cilindro.HistereseAlarmeA,
                 percentualVariacaoDesligaProcessoA = cilindro.PercentualVariacaoDesligaProcessoA,
+                limitePassagemCamaraA = cilindro.LimitePassagemCamaraA,
                 preCargaB = cilindro.PreCargaB,
                 cargaNominalB = cilindro.CargaNominalB,
                 tempoRampaSubidaB = cilindro.TempoRampaSubidaB,
@@ -92,6 +93,7 @@ public class CilindroController : ControllerBase
                 percentualVariacaoAlarmeB = cilindro.PercentualVariacaoAlarmeB,
                 histereseAlarmeB = cilindro.HistereseAlarmeB,
                 percentualVariacaoDesligaProcessoB = cilindro.PercentualVariacaoDesligaProcessoB,
+                limitePassagemCamaraB = cilindro.LimitePassagemCamaraB,
                 relatorios = cilindro.Relatorios.Select(r => new
                 {
                     r.Id,
@@ -200,6 +202,7 @@ public class CilindroController : ControllerBase
                 PercentualVariacaoAlarmeA = dto.PercentualVariacaoAlarmeA,
                 HistereseAlarmeA = dto.HistereseAlarmeA,
                 PercentualVariacaoDesligaProcessoA = dto.PercentualVariacaoDesligaProcessoA,
+                LimitePassagemCamaraA = dto.LimitePassagemCamaraA,
                 PreCargaB = dto.PreCargaB,
                 CargaNominalB = dto.CargaNominalB,
                 TempoRampaSubidaB = dto.TempoRampaSubidaB,
@@ -208,6 +211,7 @@ public class CilindroController : ControllerBase
                 PercentualVariacaoAlarmeB = dto.PercentualVariacaoAlarmeB,
                 HistereseAlarmeB = dto.HistereseAlarmeB,
                 PercentualVariacaoDesligaProcessoB = dto.PercentualVariacaoDesligaProcessoB,
+                LimitePassagemCamaraB = dto.LimitePassagemCamaraB,
                 ClienteId = dto.ClienteId,
                 DataCriacao = DateTime.UtcNow
             };
@@ -327,6 +331,7 @@ public class CilindroController : ControllerBase
             cilindro.PercentualVariacaoAlarmeA = dto.PercentualVariacaoAlarmeA;
             cilindro.HistereseAlarmeA = dto.HistereseAlarmeA;
             cilindro.PercentualVariacaoDesligaProcessoA = dto.PercentualVariacaoDesligaProcessoA;
+            cilindro.LimitePassagemCamaraA = dto.LimitePassagemCamaraA;
             cilindro.PreCargaB = dto.PreCargaB;
             cilindro.CargaNominalB = dto.CargaNominalB;
             cilindro.TempoRampaSubidaB = dto.TempoRampaSubidaB;
@@ -335,6 +340,7 @@ public class CilindroController : ControllerBase
             cilindro.PercentualVariacaoAlarmeB = dto.PercentualVariacaoAlarmeB;
             cilindro.HistereseAlarmeB = dto.HistereseAlarmeB;
             cilindro.PercentualVariacaoDesligaProcessoB = dto.PercentualVariacaoDesligaProcessoB;
+            cilindro.LimitePassagemCamaraB = dto.LimitePassagemCamaraB;
             cilindro.DataAtualizacao = DateTime.UtcNow;
 
             await _context.SaveChangesAsync();
@@ -415,6 +421,7 @@ public class CilindroCreateDto
     public decimal? PercentualVariacaoAlarmeA { get; set; }
     public decimal? HistereseAlarmeA { get; set; }
     public decimal? PercentualVariacaoDesligaProcessoA { get; set; }
+    public decimal? LimitePassagemCamaraA { get; set; }
     public decimal? PreCargaB { get; set; }
     public decimal? CargaNominalB { get; set; }
     public decimal? TempoRampaSubidaB { get; set; }
@@ -423,6 +430,7 @@ public class CilindroCreateDto
     public decimal? PercentualVariacaoAlarmeB { get; set; }
     public decimal? HistereseAlarmeB { get; set; }
     public decimal? PercentualVariacaoDesligaProcessoB { get; set; }
+    public decimal? LimitePassagemCamaraB { get; set; }
 
     [Required]
     public int ClienteId { get; set; }
@@ -471,6 +479,7 @@ public class CilindroUpdateDto
     public decimal? PercentualVariacaoAlarmeA { get; set; }
     public decimal? HistereseAlarmeA { get; set; }
     public decimal? PercentualVariacaoDesligaProcessoA { get; set; }
+    public decimal? LimitePassagemCamaraA { get; set; }
     public decimal? PreCargaB { get; set; }
     public decimal? CargaNominalB { get; set; }
     public decimal? TempoRampaSubidaB { get; set; }
@@ -479,6 +488,7 @@ public class CilindroUpdateDto
     public decimal? PercentualVariacaoAlarmeB { get; set; }
     public decimal? HistereseAlarmeB { get; set; }
     public decimal? PercentualVariacaoDesligaProcessoB { get; set; }
+    public decimal? LimitePassagemCamaraB { get; set; }
 
     public int ClienteId { get; set; }
 }

@@ -3,6 +3,13 @@
   margin: 0 auto;
 }
 
+.section-hint {
+  margin: -8px 0 16px;
+  font-size: 13px;
+  color: var(--text-secondary, #666666);
+  line-height: 1.4;
+}
+
 .page-header {
   display: flex;
   justify-content: space-between;
