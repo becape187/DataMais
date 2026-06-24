@@ -361,9 +361,8 @@ namespace DataMais.Controllers;
                             }
                         }
 
-                        // 4. Desativa o botão após receber confirmação ou timeout
-                        await _modbusService.EscreverRegistroAsync(configTemp, false);
-
+                        // INICIA_REGISTRO agora é um coil de NÍVEL (não pulso): permanece LIGADO
+                        // durante todo o registro. Só será desligado ao interromper/cancelar o ensaio.
                         if (!rodando)
                         {
                             errosModbus.Add("Registro não iniciou após 2 segundos. Verifique REGISTRO_RODANDO.");
@@ -430,6 +429,13 @@ namespace DataMais.Controllers;
                 });
             }
 
+            // Desliga INICIA_REGISTRO no CLP — esse coil define "parar" na unidade hidráulica.
+            var desligou = await SetIniciaRegistroAsync(false);
+            if (!desligou)
+            {
+                _logger.LogWarning("Não foi possível desligar INICIA_REGISTRO ao interromper o ensaio {EnsaioId}", id);
+            }
+
             // Finaliza ensaio
             ensaio.Status = "Concluido";
             ensaio.DataFim = DateTime.UtcNow;
@@ -487,6 +493,13 @@ namespace DataMais.Controllers;
             if (ensaio == null)
             {
                 return NotFound(new { message = "Ensaio não encontrado" });
+            }
+
+            // Desliga INICIA_REGISTRO no CLP — parar o registro na unidade hidráulica.
+            var desligou = await SetIniciaRegistroAsync(false);
+            if (!desligou)
+            {
+                _logger.LogWarning("Não foi possível desligar INICIA_REGISTRO ao cancelar o ensaio {EnsaioId}", id);
             }
 
             // Marca como cancelado (não salvo pelo usuário)
@@ -751,6 +764,46 @@ namespace DataMais.Controllers;
             _logger.LogError(ex, "Erro ao reconstruir histórico do ensaio {EnsaioId}", id);
             return StatusCode(500, new { message = "Erro ao reconstruir histórico do ensaio", error = ex.Message });
         }
+    }
+
+    /// <summary>
+    /// Liga/desliga o coil INICIA_REGISTRO no CLP. Esse coil é de NÍVEL e define
+    /// "começar" (true) e "parar" (false) o registro na unidade hidráulica.
+    /// </summary>
+    private async Task<bool> SetIniciaRegistroAsync(bool valor)
+    {
+        var iniciaRegistro = await _context.ModbusConfigs
+            .FirstOrDefaultAsync(m => m.Nome == "INICIA_REGISTRO" && m.Ativo);
+
+        if (iniciaRegistro == null)
+        {
+            _logger.LogWarning("Registro 'INICIA_REGISTRO' não encontrado ao tentar definir {Valor}", valor);
+            return false;
+        }
+
+        string funcaoEscrita = iniciaRegistro.TipoDado == "Boolean" || iniciaRegistro.FuncaoModbus == "ReadCoils"
+            ? "WriteSingleCoil"
+            : "WriteSingleRegister";
+
+        var configTemp = new ModbusConfig
+        {
+            Id = iniciaRegistro.Id,
+            Nome = iniciaRegistro.Nome,
+            IpAddress = iniciaRegistro.IpAddress,
+            Port = iniciaRegistro.Port,
+            SlaveId = iniciaRegistro.SlaveId,
+            FuncaoModbus = funcaoEscrita,
+            EnderecoRegistro = iniciaRegistro.EnderecoRegistro,
+            QuantidadeRegistros = iniciaRegistro.QuantidadeRegistros,
+            TipoDado = iniciaRegistro.TipoDado,
+            Ativo = iniciaRegistro.Ativo
+        };
+
+        object v = funcaoEscrita == "WriteSingleCoil"
+            ? (object)valor
+            : (object)(ushort)(valor ? 1 : 0);
+
+        return await _modbusService.EscreverRegistroAsync(configTemp, v);
     }
 
     /// <summary>
