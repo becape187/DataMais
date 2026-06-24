@@ -112,21 +112,20 @@ app.UseCors("AllowFrontend");
 app.UseAuthorization();
 app.MapControllers();
 
-// Aplica migrations automaticamente (apenas em desenvolvimento)
-if (app.Environment.IsDevelopment())
+// Aplica migrations automaticamente em qualquer ambiente.
+// O deploy reinicia o serviço, então novas migrations são aplicadas no startup
+// (em produção também), sem necessidade de rodar `dotnet ef database update` na VM.
+using (var scope = app.Services.CreateScope())
 {
-    using (var scope = app.Services.CreateScope())
+    var dbContext = scope.ServiceProvider.GetRequiredService<DataMaisDbContext>();
+    try
     {
-        var dbContext = scope.ServiceProvider.GetRequiredService<DataMaisDbContext>();
-        try
-        {
-            dbContext.Database.Migrate();
-        }
-        catch (Exception ex)
-        {
-            // Log error - migrations will be applied manually in production
-            Console.WriteLine($"Migration error: {ex.Message}");
-        }
+        dbContext.Database.Migrate();
+    }
+    catch (Exception ex)
+    {
+        // Não derruba o serviço se a migration falhar (ex.: banco indisponível no boot).
+        Console.WriteLine($"Migration error: {ex.Message}");
     }
 }
 
