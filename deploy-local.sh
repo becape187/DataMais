@@ -21,12 +21,27 @@
 # USO:
 #   cd <pasta-do-repo-pullado>
 #   chmod +x deploy-local.sh
-#   ./deploy-local.sh
+#   ./deploy-local.sh                 # deploy normal
+#   ./deploy-local.sh --reset-admin   # deploy + FORÇA admin/admin no banco (reseta a senha)
 #
-# Requisitos na VM: dotnet SDK 8.0, Node 20 (npm), sudo, systemd.
+# --reset-admin: faz um upsert do usuário admin (email 'admin', senha 'admin', perfil Admin)
+#   direto no Postgres. Use quando não conseguir logar. Sem a flag, o deploy NÃO mexe na senha.
+#   Requer o cliente psql na VM.
+#
+# Requisitos na VM: dotnet SDK 8.0, Node 20 (npm), sudo, systemd (e psql p/ --reset-admin).
 # Se der erro de "\r": rode  sed -i 's/\r$//' deploy-local.sh
 
 set -euo pipefail
+
+# ── Flags ───────────────────────────────────────────────────────────────────
+RESET_ADMIN=0
+for arg in "$@"; do
+  case "$arg" in
+    --reset-admin) RESET_ADMIN=1 ;;
+    -h|--help) echo "Uso: ./deploy-local.sh [--reset-admin]"; exit 0 ;;
+    *) echo "Argumento desconhecido: $arg"; echo "Uso: ./deploy-local.sh [--reset-admin]"; exit 1 ;;
+  esac
+done
 
 # ── Config (ajuste aqui se os caminhos do servidor mudarem) ─────────────────
 API_DIR="/home/becape/datamais.api"
@@ -114,6 +129,39 @@ fi
 echo "==> Log recente (confira migrations/seed):"
 sudo journalctl -u "$SERVICE" -n 40 --no-pager | grep -Ei "migrat|seed|admin|usuário|role|✓|error|erro|exception" || \
   sudo journalctl -u "$SERVICE" -n 20 --no-pager
+
+# ── (--reset-admin) Força admin/admin no banco ──────────────────────────────
+if [ "$RESET_ADMIN" = "1" ]; then
+  echo "==> --reset-admin: garantindo admin/admin no banco..."
+  if ! command -v psql >/dev/null 2>&1; then
+    echo "⚠️  psql não encontrado na VM — não deu para resetar o admin automaticamente."
+    echo "    Instale o cliente psql ou rode o SQL de db/migrations.sql/manual à mão."
+  else
+    # Lê só as credenciais do Postgres do env (via sudo, pois o arquivo é protegido).
+    TMPENV="$(mktemp)"
+    sudo grep -E '^(POSTGRES_HOST|POSTGRES_PORT|POSTGRES_USER|POSTGRES_DATABASE|POSTGRES_PASSWORD)=' "$ENV_FILE" > "$TMPENV" 2>/dev/null || true
+    set -a; . "$TMPENV"; set +a
+    rm -f "$TMPENV"
+
+    # Hash BCrypt válido para a senha "admin" (verificado com BCrypt.Net-Next).
+    ADMIN_HASH='$2b$12$vppjdQS7bYEZRCa70f4x/.AakEg5Ax0IH9mWWp3TeM4YWKS2IS78a'
+
+    if PGPASSWORD="${POSTGRES_PASSWORD:-}" psql \
+         -h "${POSTGRES_HOST:-localhost}" -p "${POSTGRES_PORT:-5432}" \
+         -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DATABASE:-datamais}" \
+         -v ON_ERROR_STOP=1 -v adminhash="$ADMIN_HASH" <<'SQL'
+INSERT INTO "Usuarios" ("Nome","Email","SenhaHash","Role","Ativo","DataCriacao")
+VALUES ('Administrador','admin', :'adminhash', 'Admin', true, now())
+ON CONFLICT ("Email") DO UPDATE
+  SET "SenhaHash" = EXCLUDED."SenhaHash", "Role" = 'Admin', "Ativo" = true;
+SQL
+    then
+      echo "✓ admin/admin garantido (usuário: admin / senha: admin). TROQUE A SENHA depois."
+    else
+      echo "⚠️  Falha ao resetar admin via psql — cheque as credenciais em $ENV_FILE."
+    fi
+  fi
+fi
 
 echo ""
 echo "✅ Deploy concluído."
