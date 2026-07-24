@@ -19,6 +19,7 @@ public class DataMaisDbContext : DbContext
     public DbSet<Usuario> Usuarios { get; set; }
     public DbSet<CampoRelatorio> CamposRelatorio { get; set; }
     public DbSet<RespostaCampoRelatorio> RespostasCampoRelatorio { get; set; }
+    public DbSet<RelatorioVersao> RelatorioVersoes { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -86,6 +87,7 @@ public class DataMaisDbContext : DbContext
         {
             entity.HasIndex(e => e.Numero).IsUnique();
             entity.HasIndex(e => e.Data);
+            entity.Property(e => e.Situacao).HasDefaultValue("Rascunho");
             
             entity.HasOne(r => r.Cliente)
                 .WithMany()
@@ -114,6 +116,17 @@ public class DataMaisDbContext : DbContext
         {
             entity.HasIndex(e => e.Ordem);
             entity.HasIndex(e => e.DataExclusao);
+        });
+
+        // Configuração de RelatorioVersao
+        modelBuilder.Entity<RelatorioVersao>(entity =>
+        {
+            entity.HasIndex(e => e.RelatorioId);
+
+            entity.HasOne(v => v.Relatorio)
+                .WithMany(r => r.Versoes)
+                .HasForeignKey(v => v.RelatorioId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         // Configuração de RespostaCampoRelatorio

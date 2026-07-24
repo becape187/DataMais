@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -277,6 +278,10 @@ public class RelatorioController : ControllerBase
                 pressaoMaximaCamaraOposta = pressaoMaximaOposta,
                 limitePassagem = limitePassagem,
                 resultado = resultado,
+                situacao = relatorio.Situacao,
+                versao = relatorio.Versao,
+                concluidoPorNome = relatorio.ConcluidoPorNome,
+                dataConclusao = relatorio.DataConclusao,
                 campos = camposComRespostas
             };
 
@@ -764,15 +769,190 @@ public class RelatorioController : ControllerBase
                 }
             }
 
+            // Editar um relatório JÁ CONCLUÍDO invalida a conclusão: reabre como Rascunho
+            // e registra a reabertura no histórico (com o usuário logado). O PDF volta a ficar
+            // bloqueado até nova conclusão.
+            if (relatorio.Situacao == "Concluido")
+            {
+                var (uid, unome) = UsuarioAtual();
+                relatorio.Situacao = "Rascunho";
+                relatorio.DataAtualizacao = DateTime.UtcNow;
+                _context.RelatorioVersoes.Add(new RelatorioVersao
+                {
+                    RelatorioId = relatorio.Id,
+                    NumeroVersao = relatorio.Versao,
+                    Acao = "Reaberto",
+                    UsuarioId = uid,
+                    UsuarioNome = unome,
+                    DataHora = DateTime.UtcNow,
+                    Observacoes = relatorio.Observacoes
+                });
+            }
+
             await _context.SaveChangesAsync();
 
-            return Ok(new { message = "Respostas salvas com sucesso" });
+            return Ok(new { message = "Respostas salvas com sucesso", situacao = relatorio.Situacao });
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Erro ao salvar respostas dos campos do relatório {RelatorioId}", id);
             return StatusCode(500, new { message = "Erro ao salvar respostas", error = ex.Message });
         }
+    }
+
+    /// <summary>
+    /// Conclui (assina) o relatório: fixa Situacao=Concluido, incrementa a versão,
+    /// registra o assinante (usuário logado) e grava um snapshot no histórico. Libera o PDF.
+    /// </summary>
+    [HttpPost("{id:int}/concluir")]
+    [Authorize(Roles = "Admin,Operador")]
+    public async Task<IActionResult> Concluir(int id)
+    {
+        try
+        {
+            var relatorio = await _context.Relatorios
+                .Include(r => r.RespostasCampos)
+                .FirstOrDefaultAsync(r => r.Id == id);
+
+            if (relatorio == null)
+            {
+                return NotFound(new { message = "Relatório não encontrado" });
+            }
+
+            var (uid, unome) = UsuarioAtual();
+            var agora = DateTime.UtcNow;
+
+            var resultado = await AvaliarResultadoAsync(relatorio);
+            var respostasJson = SerializarRespostas(relatorio);
+
+            relatorio.Versao += 1;
+            relatorio.Situacao = "Concluido";
+            relatorio.ConcluidoPorUsuarioId = uid;
+            relatorio.ConcluidoPorNome = unome;
+            relatorio.DataConclusao = agora;
+            relatorio.DataAtualizacao = agora;
+
+            _context.RelatorioVersoes.Add(new RelatorioVersao
+            {
+                RelatorioId = relatorio.Id,
+                NumeroVersao = relatorio.Versao,
+                Acao = "Concluido",
+                UsuarioId = uid,
+                UsuarioNome = unome,
+                DataHora = agora,
+                Resultado = resultado,
+                Observacoes = relatorio.Observacoes,
+                RespostasJson = respostasJson
+            });
+
+            await _context.SaveChangesAsync();
+
+            return Ok(new
+            {
+                message = "Relatório concluído com sucesso",
+                situacao = relatorio.Situacao,
+                versao = relatorio.Versao,
+                concluidoPorNome = relatorio.ConcluidoPorNome,
+                dataConclusao = relatorio.DataConclusao,
+                resultado
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Erro ao concluir relatório {RelatorioId}", id);
+            return StatusCode(500, new { message = "Erro ao concluir relatório", error = ex.Message });
+        }
+    }
+
+    /// <summary>Histórico de versões (conclusões/reaberturas) do relatório.</summary>
+    [HttpGet("{id:int}/versoes")]
+    public async Task<IActionResult> GetVersoes(int id)
+    {
+        try
+        {
+            var versoes = await _context.RelatorioVersoes
+                .Where(v => v.RelatorioId == id)
+                .OrderByDescending(v => v.DataHora)
+                .Select(v => new
+                {
+                    v.Id,
+                    v.NumeroVersao,
+                    v.Acao,
+                    v.UsuarioNome,
+                    v.DataHora,
+                    v.Resultado
+                })
+                .ToListAsync();
+
+            return Ok(versoes);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Erro ao listar versões do relatório {RelatorioId}", id);
+            return StatusCode(500, new { message = "Erro ao listar versões", error = ex.Message });
+        }
+    }
+
+    // ── Helpers de ciclo de vida / versionamento ────────────────────────────
+    private (int? id, string nome) UsuarioAtual()
+    {
+        var idStr = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var nome = User.FindFirst(ClaimTypes.Name)?.Value ?? "—";
+        return (int.TryParse(idStr, out var id) ? id : (int?)null, nome);
+    }
+
+    private static string SerializarRespostas(Relatorio relatorio)
+    {
+        var dict = relatorio.RespostasCampos
+            .ToDictionary(r => r.CampoRelatorioId.ToString(), r => r.Valor);
+        return System.Text.Json.JsonSerializer.Serialize(dict);
+    }
+
+    /// <summary>
+    /// Recalcula o veredito do laudo (mesma regra do GetById): passagem entre câmaras
+    /// + override de checklist "reprova se Sim". Usado no snapshot da conclusão.
+    /// </summary>
+    private async Task<string?> AvaliarResultadoAsync(Relatorio relatorio)
+    {
+        var ensaio = relatorio.EnsaioId.HasValue
+            ? await _context.Ensaios.FindAsync(relatorio.EnsaioId.Value)
+            : null;
+
+        string? resultado = null;
+
+        if (ensaio != null)
+        {
+            try
+            {
+                var pressaoMaximaOposta = await CalcularPressaoMaximaCamaraOpostaAsync(ensaio);
+                if (pressaoMaximaOposta.HasValue)
+                {
+                    var cilindro = await _context.Cilindros.FindAsync(relatorio.CilindroId);
+                    var limite = ObterLimitePassagem(cilindro, ensaio.CamaraTestada);
+                    resultado = pressaoMaximaOposta.Value > limite ? "Reprovado" : "Aprovado";
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Erro ao avaliar resultado do relatório {RelatorioId}", relatorio.Id);
+            }
+        }
+
+        // Override rev02: checklist "reprova se Sim" respondido "Sim" força Reprovado.
+        var camposReprovam = await _context.CamposRelatorio
+            .Where(c => c.ReprovaSeSim)
+            .Select(c => c.Id)
+            .ToListAsync();
+
+        if (camposReprovam.Count > 0)
+        {
+            var reprovado = relatorio.RespostasCampos.Any(r =>
+                camposReprovam.Contains(r.CampoRelatorioId) &&
+                string.Equals(r.Valor?.Trim(), "Sim", StringComparison.OrdinalIgnoreCase));
+            if (reprovado) resultado = "Reprovado";
+        }
+
+        return resultado;
     }
 }
 
