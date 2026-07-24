@@ -26,7 +26,7 @@ const GestaoUsuarios = () => {
   }>({
     nome: '',
     email: '',
-    role: 'Usuario',
+    role: 'Operador',
     senha: '',
     confirmarSenha: '',
     ativo: true
@@ -104,7 +104,7 @@ const GestaoUsuarios = () => {
       setFormData({
         nome: '',
         email: '',
-        role: 'Usuario',
+        role: 'Operador',
         senha: '',
         confirmarSenha: '',
         ativo: true
@@ -148,7 +148,7 @@ const GestaoUsuarios = () => {
     setFormData({
       nome: '',
       email: '',
-      role: 'Usuario',
+      role: 'Operador',
       senha: '',
       confirmarSenha: '',
       ativo: true
@@ -292,7 +292,6 @@ const GestaoUsuarios = () => {
                   value={formData.role}
                   onChange={(e) => setFormData({...formData, role: e.target.value})}
                 >
-                  <option value="Usuario">Operador</option>
                   <option value="Admin">Administrador</option>
                   <option value="Operador">Operador</option>
                   <option value="Visualizador">Visualizador</option>

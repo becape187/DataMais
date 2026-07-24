@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../config/api'
+import { useAuth } from '../contexts/AuthContext'
 import './Clientes.css'
 
 interface Cliente {
@@ -13,6 +14,7 @@ interface Cliente {
 
 const Clientes = () => {
   const navigate = useNavigate()
+  const { isAdmin } = useAuth()
   const [clientes, setClientes] = useState<Cliente[]>([])
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
@@ -149,9 +151,11 @@ const Clientes = () => {
           <h1>Cadastro de Clientes</h1>
           <p className="page-subtitle">Gerenciamento de clientes do sistema</p>
         </div>
-        <button className="btn btn-primary" onClick={handleNew}>
-          ➕ Novo Cliente
-        </button>
+        {isAdmin && (
+          <button className="btn btn-primary" onClick={handleNew}>
+            ➕ Novo Cliente
+          </button>
+        )}
       </div>
 
       <div className="clientes-card">
@@ -189,22 +193,26 @@ const Clientes = () => {
                   <td>{cliente.contato}</td>
                   <td>{cliente.email}</td>
                   <td onClick={(e) => e.stopPropagation()}>
-                    <div className="action-buttons">
-                      <button 
-                        className="btn-icon" 
-                        title="Editar"
-                        onClick={() => handleEdit(cliente)}
-                      >
-                        ✏️
-                      </button>
-                      <button 
-                        className="btn-icon" 
-                        title="Excluir"
-                        onClick={(e) => handleDelete(cliente.id, e)}
-                      >
-                        🗑️
-                      </button>
-                    </div>
+                    {isAdmin ? (
+                      <div className="action-buttons">
+                        <button
+                          className="btn-icon"
+                          title="Editar"
+                          onClick={() => handleEdit(cliente)}
+                        >
+                          ✏️
+                        </button>
+                        <button
+                          className="btn-icon"
+                          title="Excluir"
+                          onClick={(e) => handleDelete(cliente.id, e)}
+                        >
+                          🗑️
+                        </button>
+                      </div>
+                    ) : (
+                      <span className="somente-leitura">—</span>
+                    )}
                   </td>
                 </tr>
               ))}

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import api from '../config/api'
+import { useAuth } from '../contexts/AuthContext'
 import './DetalhesCliente.css'
 
 interface Cliente {
@@ -46,6 +47,7 @@ interface Cilindro {
 const DetalhesCliente = () => {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const { isAdmin } = useAuth()
   const [cliente, setCliente] = useState<Cliente | null>(null)
   const [relatorios, setRelatorios] = useState<Relatorio[]>([])
   const [cilindros, setCilindros] = useState<Cilindro[]>([])
@@ -148,9 +150,11 @@ const DetalhesCliente = () => {
         <section className="section-card">
           <div className="section-header">
             <h2>Cilindros Cadastrados</h2>
-            <button className="btn btn-primary" onClick={handleAdicionarCilindro}>
-              ➕ Adicionar Cilindro
-            </button>
+            {isAdmin && (
+              <button className="btn btn-primary" onClick={handleAdicionarCilindro}>
+                ➕ Adicionar Cilindro
+              </button>
+            )}
           </div>
           <div className="table-container">
             <table>

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import api from '../config/api'
+import { useAuth } from '../contexts/AuthContext'
 import './ConfiguracaoCilindro.css'
 
 interface Cilindro {
@@ -11,6 +12,9 @@ interface Cilindro {
   codigoInterno: string
   modelo: string
   fabricante: string
+  numeroSerie: string
+  partNumber: string
+  fluidoUtilizado: string
   dataFabricacao: string
   diametroInterno: number
   comprimentoHaste: number
@@ -30,6 +34,7 @@ interface Relatorio {
 const ConfiguracaoCilindro = () => {
   const { clienteId, cilindroId } = useParams<{ clienteId: string; cilindroId: string }>()
   const navigate = useNavigate()
+  const { isAdmin } = useAuth()
   const isNew = cilindroId === 'novo'
   const [isEditing, setIsEditing] = useState(isNew)
   const [relatorios, setRelatorios] = useState<Relatorio[]>([])
@@ -42,6 +47,9 @@ const ConfiguracaoCilindro = () => {
     codigoInterno: '',
     modelo: '',
     fabricante: '',
+    numeroSerie: '',
+    partNumber: '',
+    fluidoUtilizado: '',
     dataFabricacao: '',
     diametroInterno: 0,
     comprimentoHaste: 0,
@@ -71,6 +79,9 @@ const ConfiguracaoCilindro = () => {
         codigoInterno: data.codigoInterno || '',
         modelo: data.modelo || '',
         fabricante: data.fabricante || '',
+        numeroSerie: data.numeroSerie || '',
+        partNumber: data.partNumber || '',
+        fluidoUtilizado: data.fluidoUtilizado || '',
         dataFabricacao: data.dataFabricacao || '',
         diametroInterno: Number(data.diametroInterno) || 0,
         comprimentoHaste: Number(data.comprimentoHaste) || 0,
@@ -146,6 +157,15 @@ const ConfiguracaoCilindro = () => {
       }
       if (formData.fabricante && formData.fabricante.trim()) {
         cilindroData.fabricante = formData.fabricante.trim()
+      }
+      if (formData.numeroSerie && formData.numeroSerie.trim()) {
+        cilindroData.numeroSerie = formData.numeroSerie.trim()
+      }
+      if (formData.partNumber && formData.partNumber.trim()) {
+        cilindroData.partNumber = formData.partNumber.trim()
+      }
+      if (formData.fluidoUtilizado && formData.fluidoUtilizado.trim()) {
+        cilindroData.fluidoUtilizado = formData.fluidoUtilizado.trim()
       }
       if (formData.dataFabricacao) {
         cilindroData.dataFabricacao = formData.dataFabricacao
@@ -238,7 +258,7 @@ const ConfiguracaoCilindro = () => {
         </button>
         <div>
           <h1>{isNew ? 'Novo Cilindro' : formData.nome || 'Cilindro'}</h1>
-          {!isNew && !isEditing && (
+          {!isNew && !isEditing && isAdmin && (
             <button className="btn btn-primary" onClick={() => setIsEditing(true)}>
               ✏️ Editar
             </button>
@@ -271,17 +291,18 @@ const ConfiguracaoCilindro = () => {
                 />
               </div>
               <div className="form-group">
-                <label>Código Cliente *</label>
+                <label>Tag / ID do Cilindro *</label>
                 <input
                   type="text"
                   required
+                  placeholder="Ex.: YD266 (ou N/A)"
                   value={formData.codigoCliente}
                   onChange={(e) => handleInputChange('codigoCliente', e.target.value)}
                   disabled={!isEditing}
                 />
               </div>
               <div className="form-group">
-                <label>Código Interno *</label>
+                <label>Código SAP *</label>
                 <input
                   type="text"
                   required
@@ -305,6 +326,34 @@ const ConfiguracaoCilindro = () => {
                   type="text"
                   value={formData.fabricante}
                   onChange={(e) => handleInputChange('fabricante', e.target.value)}
+                  disabled={!isEditing}
+                />
+              </div>
+              <div className="form-group">
+                <label>Nº de Série</label>
+                <input
+                  type="text"
+                  value={formData.numeroSerie}
+                  onChange={(e) => handleInputChange('numeroSerie', e.target.value)}
+                  disabled={!isEditing}
+                />
+              </div>
+              <div className="form-group">
+                <label>Part Number</label>
+                <input
+                  type="text"
+                  value={formData.partNumber}
+                  onChange={(e) => handleInputChange('partNumber', e.target.value)}
+                  disabled={!isEditing}
+                />
+              </div>
+              <div className="form-group">
+                <label>Fluido Utilizado</label>
+                <input
+                  type="text"
+                  placeholder="Ex.: Shell Tellus VG46"
+                  value={formData.fluidoUtilizado}
+                  onChange={(e) => handleInputChange('fluidoUtilizado', e.target.value)}
                   disabled={!isEditing}
                 />
               </div>

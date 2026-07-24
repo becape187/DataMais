@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using DataMais.Services;
 using DataMais.Configuration;
@@ -6,6 +7,7 @@ namespace DataMais.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[Authorize(Roles = "Admin")]
 public class ConfigController : ControllerBase
 {
     private readonly ConfigService _configService;

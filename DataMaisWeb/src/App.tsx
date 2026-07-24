@@ -1,5 +1,7 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
-import Layout from './components/Layout'
+import { AuthProvider } from './contexts/AuthContext'
+import { ProtectedLayout, RequireRole } from './components/RouteGuards'
+import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Ensaio from './pages/Ensaio'
 import Clientes from './pages/Clientes'
@@ -16,28 +18,58 @@ import Configuracoes from './pages/Configuracoes'
 
 function App() {
   return (
-    <Router>
-      <Layout>
+    <AuthProvider>
+      <Router>
         <Routes>
-          <Route path="/" element={<Navigate to="/dashboard" replace />} />
-          <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/ensaio" element={<Ensaio />} />
-          <Route path="/clientes" element={<Clientes />} />
-          <Route path="/clientes/:id" element={<DetalhesCliente />} />
-          <Route path="/clientes/:clienteId/cilindros/:cilindroId" element={<ConfiguracaoCilindro />} />
-          <Route path="/sensores" element={<Sensores />} />
-          <Route path="/sensores/:id/configuracao" element={<ConfiguracaoSensor />} />
-          <Route path="/relatorios" element={<Relatorios />} />
-          <Route path="/relatorios/cliente/:clienteId" element={<RelatoriosPorCliente />} />
-          <Route path="/relatorios/:id" element={<VisualizarRelatorio />} />
-          <Route path="/ensaio/comentarios/:eventoId" element={<ComentariosDesvio />} />
-          <Route path="/usuarios" element={<GestaoUsuarios />} />
-          <Route path="/configuracoes" element={<Configuracoes />} />
+          <Route path="/login" element={<Login />} />
+
+          <Route element={<ProtectedLayout />}>
+            <Route path="/" element={<Navigate to="/dashboard" replace />} />
+            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/ensaio" element={<Ensaio />} />
+            <Route path="/ensaio/comentarios/:eventoId" element={<ComentariosDesvio />} />
+            <Route path="/relatorios" element={<Relatorios />} />
+            <Route path="/relatorios/cliente/:clienteId" element={<RelatoriosPorCliente />} />
+            <Route path="/relatorios/:id" element={<VisualizarRelatorio />} />
+
+            {/* Cadastros — visíveis para Admin e Operador (Operador só leitura; edição é bloqueada nas telas e no backend) */}
+            <Route
+              path="/clientes"
+              element={<RequireRole roles={['Admin', 'Operador']}><Clientes /></RequireRole>}
+            />
+            <Route
+              path="/clientes/:id"
+              element={<RequireRole roles={['Admin', 'Operador']}><DetalhesCliente /></RequireRole>}
+            />
+            <Route
+              path="/clientes/:clienteId/cilindros/:cilindroId"
+              element={<RequireRole roles={['Admin', 'Operador']}><ConfiguracaoCilindro /></RequireRole>}
+            />
+            <Route
+              path="/sensores"
+              element={<RequireRole roles={['Admin', 'Operador']}><Sensores /></RequireRole>}
+            />
+            <Route
+              path="/sensores/:id/configuracao"
+              element={<RequireRole roles={['Admin', 'Operador']}><ConfiguracaoSensor /></RequireRole>}
+            />
+
+            {/* Somente Admin */}
+            <Route
+              path="/usuarios"
+              element={<RequireRole roles={['Admin']}><GestaoUsuarios /></RequireRole>}
+            />
+            <Route
+              path="/configuracoes"
+              element={<RequireRole roles={['Admin']}><Configuracoes /></RequireRole>}
+            />
+          </Route>
+
+          <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
-      </Layout>
-    </Router>
+      </Router>
+    </AuthProvider>
   )
 }
 
 export default App
-

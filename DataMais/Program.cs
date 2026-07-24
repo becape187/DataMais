@@ -1,7 +1,12 @@
 using Microsoft.EntityFrameworkCore;
 using DataMais.Data;
+using DataMais.Models;
 using DataMais.Services;
 using DataMais.Configuration;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.IdentityModel.Tokens;
+using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -79,6 +84,42 @@ builder.Services.AddSingleton<DataMais.Services.ModbusService>();
 // finaliza e gera o relatório automaticamente (mesmo sem ninguém na tela).
 builder.Services.AddHostedService<DataMais.Services.RegistroConclusaoMonitor>();
 
+// ── Autenticação JWT ────────────────────────────────────────────────────────
+// Segredo vem do .env (JWT_SECRET), já carregado pelo ConfigService acima.
+// Em produção DEVE ser definido no EnvironmentFile do systemd.
+var jwtSecret = Environment.GetEnvironmentVariable("JWT_SECRET");
+if (string.IsNullOrWhiteSpace(jwtSecret) || jwtSecret.Length < 32)
+{
+    // Fallback apenas para desenvolvimento local. Nunca usar em produção.
+    jwtSecret = "datamais_dev_secret_change_me_please_0123456789";
+    Console.WriteLine("⚠️ JWT_SECRET ausente/curto — usando segredo de desenvolvimento. Defina JWT_SECRET em produção!");
+}
+
+builder.Services.AddSingleton(new TokenService(jwtSecret));
+
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = false,
+            ValidateAudience = false,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret)),
+            ClockSkew = TimeSpan.FromMinutes(1)
+        };
+    });
+
+// Por padrão, todo endpoint exige usuário autenticado. Endpoints públicos
+// (ex.: /api/auth/login) usam [AllowAnonymous].
+builder.Services.AddAuthorization(options =>
+{
+    options.FallbackPolicy = new AuthorizationPolicyBuilder()
+        .RequireAuthenticatedUser()
+        .Build();
+});
+
 // CORS para permitir requisições do frontend
 builder.Services.AddCors(options =>
 {
@@ -113,6 +154,7 @@ if (app.Environment.IsDevelopment())
 // Em produção, o nginx faz o proxy HTTPS, então não precisa de redirecionamento HTTP->HTTPS
 
 app.UseCors("AllowFrontend");
+app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
 
@@ -125,6 +167,31 @@ using (var scope = app.Services.CreateScope())
     try
     {
         dbContext.Database.Migrate();
+
+        // Normaliza role legada "Usuario" → "Operador" (padronização de perfis).
+        var rolesLegadas = dbContext.Usuarios.Where(u => u.Role == "Usuario").ToList();
+        if (rolesLegadas.Count > 0)
+        {
+            foreach (var u in rolesLegadas) u.Role = "Operador";
+            dbContext.SaveChanges();
+            Console.WriteLine($"✓ {rolesLegadas.Count} usuário(s) com role 'Usuario' migrados para 'Operador'.");
+        }
+
+        // Seed do admin inicial (admin/admin) quando não há nenhum usuário.
+        if (!dbContext.Usuarios.Any())
+        {
+            dbContext.Usuarios.Add(new Usuario
+            {
+                Nome = "Administrador",
+                Email = "admin",
+                SenhaHash = BCrypt.Net.BCrypt.HashPassword("admin"),
+                Role = "Admin",
+                Ativo = true,
+                DataCriacao = DateTime.UtcNow
+            });
+            dbContext.SaveChanges();
+            Console.WriteLine("✓ Usuário admin inicial criado (login: admin / senha: admin). TROQUE A SENHA.");
+        }
     }
     catch (Exception ex)
     {

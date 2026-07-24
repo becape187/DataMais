@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import api from '../config/api'
+import { useAuth } from '../contexts/AuthContext'
 import './Sensores.css'
 
 interface Sensor {
@@ -33,6 +34,7 @@ interface ModbusConfig {
 }
 
 const Sensores = () => {
+  const { isAdmin } = useAuth()
   const [sensores, setSensores] = useState<Sensor[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -166,9 +168,11 @@ const Sensores = () => {
           <h1>Cadastro de Sensores</h1>
           <p className="page-subtitle">Gerenciamento e configuração de sensores</p>
         </div>
-        <button className="btn btn-primary" onClick={handleNewSensor}>
-          ➕ Novo Sensor
-        </button>
+        {isAdmin && (
+          <button className="btn btn-primary" onClick={handleNewSensor}>
+            ➕ Novo Sensor
+          </button>
+        )}
       </div>
 
       {error && (
@@ -228,24 +232,28 @@ const Sensores = () => {
             </div>
 
             <div className="sensor-actions">
-              <Link 
+              <Link
                 to={`/sensores/${sensor.id}/configuracao`}
                 className="btn btn-primary btn-small"
               >
-                ⚙️ Configurar
+                ⚙️ {isAdmin ? 'Configurar' : 'Visualizar'}
               </Link>
-              <button 
-                className="btn btn-secondary btn-small"
-                onClick={() => handleEdit(sensor)}
-              >
-                ✏️ Editar
-              </button>
-              <button 
-                className="btn btn-danger btn-small"
-                onClick={() => handleDelete(sensor.id)}
-              >
-                🗑️ Excluir
-              </button>
+              {isAdmin && (
+                <>
+                  <button
+                    className="btn btn-secondary btn-small"
+                    onClick={() => handleEdit(sensor)}
+                  >
+                    ✏️ Editar
+                  </button>
+                  <button
+                    className="btn btn-danger btn-small"
+                    onClick={() => handleDelete(sensor.id)}
+                  >
+                    🗑️ Excluir
+                  </button>
+                </>
+              )}
             </div>
           </div>
         ))}

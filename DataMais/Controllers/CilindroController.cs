@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System.ComponentModel.DataAnnotations;
@@ -70,6 +71,9 @@ public class CilindroController : ControllerBase
                 cilindro.CodigoInterno,
                 cilindro.Modelo,
                 cilindro.Fabricante,
+                cilindro.NumeroSerie,
+                cilindro.PartNumber,
+                cilindro.FluidoUtilizado,
                 dataFabricacao = cilindro.DataFabricacao?.ToString("yyyy-MM-dd"),
                 diametroInterno = cilindro.DiametroInterno,
                 comprimentoHaste = cilindro.ComprimentoHaste,
@@ -112,6 +116,7 @@ public class CilindroController : ControllerBase
     }
 
     [HttpPost]
+    [Authorize(Roles = "Admin")]
     public async Task<IActionResult> Create([FromBody] CilindroCreateDto dto)
     {
         try
@@ -188,6 +193,9 @@ public class CilindroController : ControllerBase
                 CodigoInterno = dto.CodigoInterno,
                 Modelo = dto.Modelo,
                 Fabricante = dto.Fabricante,
+                NumeroSerie = dto.NumeroSerie,
+                PartNumber = dto.PartNumber,
+                FluidoUtilizado = dto.FluidoUtilizado,
                 DataFabricacao = dto.DataFabricacao,
                 DiametroInterno = dto.DiametroInterno,
                 ComprimentoHaste = dto.ComprimentoHaste,
@@ -229,6 +237,7 @@ public class CilindroController : ControllerBase
     }
 
     [HttpPut("{id}")]
+    [Authorize(Roles = "Admin")]
     public async Task<IActionResult> Update(int id, [FromBody] CilindroUpdateDto dto)
     {
         try
@@ -311,8 +320,11 @@ public class CilindroController : ControllerBase
             cilindro.CodigoInterno = dto.CodigoInterno;
             cilindro.Modelo = dto.Modelo;
             cilindro.Fabricante = dto.Fabricante;
+            cilindro.NumeroSerie = dto.NumeroSerie;
+            cilindro.PartNumber = dto.PartNumber;
+            cilindro.FluidoUtilizado = dto.FluidoUtilizado;
             cilindro.DataFabricacao = dto.DataFabricacao;
-            
+
             // Atualizar ClienteId se fornecido
             if (dto.ClienteId != 0 && dto.ClienteId != cilindro.ClienteId)
             {
@@ -355,6 +367,7 @@ public class CilindroController : ControllerBase
     }
 
     [HttpDelete("{id}")]
+    [Authorize(Roles = "Admin")]
     public async Task<IActionResult> Delete(int id)
     {
         try
@@ -401,6 +414,15 @@ public class CilindroCreateDto
 
     [MaxLength(100)]
     public string? Fabricante { get; set; }
+
+    [MaxLength(100)]
+    public string? NumeroSerie { get; set; }
+
+    [MaxLength(100)]
+    public string? PartNumber { get; set; }
+
+    [MaxLength(200)]
+    public string? FluidoUtilizado { get; set; }
 
     public DateTime? DataFabricacao { get; set; }
 
@@ -459,6 +481,15 @@ public class CilindroUpdateDto
 
     [MaxLength(100)]
     public string? Fabricante { get; set; }
+
+    [MaxLength(100)]
+    public string? NumeroSerie { get; set; }
+
+    [MaxLength(100)]
+    public string? PartNumber { get; set; }
+
+    [MaxLength(200)]
+    public string? FluidoUtilizado { get; set; }
 
     public DateTime? DataFabricacao { get; set; }
 

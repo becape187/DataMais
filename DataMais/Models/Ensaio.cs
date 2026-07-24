@@ -21,6 +21,23 @@ public class Ensaio
     [MaxLength(1000)]
     public string? Observacoes { get; set; }
 
+    // Identificação do documento (relatório rev02) — preenchidos no setup do ensaio.
+    /// <summary>Embarcação / unidade testada (ex.: MV29 / Frota).</summary>
+    [MaxLength(100)]
+    public string? Vessel { get; set; }
+
+    /// <summary>Local do teste (ex.: Macaé).</summary>
+    [MaxLength(200)]
+    public string? LocalTeste { get; set; }
+
+    /// <summary>Departamento responsável (ex.: ONSHORE PRESERVATION).</summary>
+    [MaxLength(100)]
+    public string? Departamento { get; set; }
+
+    /// <summary>Ordem de Serviço / Work Order.</summary>
+    [MaxLength(100)]
+    public string? OrdemServico { get; set; }
+
     /// <summary>
     /// Câmara testada no ensaio (ex: "A" / "B").
     /// </summary>

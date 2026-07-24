@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import api from '../config/api'
+import { useAuth } from '../contexts/AuthContext'
 import './ConfiguracaoSensor.css'
 
 const ConfiguracaoSensor = () => {
   const { id } = useParams<{ id: string }>()
+  const { isAdmin } = useAuth()
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -94,7 +96,14 @@ const ConfiguracaoSensor = () => {
         </div>
       )}
 
+      {!isAdmin && (
+        <div className="message">
+          🔒 Modo somente leitura — apenas administradores podem editar a calibração.
+        </div>
+      )}
+
       <form onSubmit={handleSubmit} className="config-form">
+        <fieldset disabled={!isAdmin} style={{ border: 'none', padding: 0, margin: 0 }}>
         <div className="form-section">
           <h2>Calibração Linear do Sensor</h2>
           <p className="section-description">
@@ -218,6 +227,7 @@ const ConfiguracaoSensor = () => {
             {saving ? '⏳ Salvando...' : '💾 Salvar Configuração'}
           </button>
         </div>
+        </fieldset>
       </form>
     </div>
   )

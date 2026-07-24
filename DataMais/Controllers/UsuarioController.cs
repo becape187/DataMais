@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using DataMais.Data;
@@ -7,6 +8,7 @@ namespace DataMais.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[Authorize(Roles = "Admin")]
 public class UsuarioController : ControllerBase
 {
     private readonly DataMaisDbContext _context;

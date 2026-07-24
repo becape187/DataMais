@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import api from '../config/api'
+import { useAuth } from '../contexts/AuthContext'
 import './Ensaio.css'
 
 interface DataPoint {
@@ -19,6 +20,7 @@ interface LogEvento {
 
 const Ensaio = () => {
   const navigate = useNavigate()
+  const { podeOperar } = useAuth()
   const [ensaioAtivo, setEnsaioAtivo] = useState(false)
   const [ensaioId, setEnsaioId] = useState<number | null>(null)
   const [ensaioDataInicio, setEnsaioDataInicio] = useState<Date | null>(null)
@@ -27,6 +29,11 @@ const Ensaio = () => {
   const [camara, setCamara] = useState<'A' | 'B' | ''>('')
   const [pressaoCarga, setPressaoCarga] = useState<string>('')
   const [tempoCarga, setTempoCarga] = useState<string>('')
+  // Identificação do documento (relatório rev02)
+  const [vessel, setVessel] = useState<string>('')
+  const [localTeste, setLocalTeste] = useState<string>('')
+  const [departamento, setDepartamento] = useState<string>('')
+  const [ordemServico, setOrdemServico] = useState<string>('')
   const [registroRodando, setRegistroRodando] = useState<boolean | null>(null)
   const [totalPontosColetados, setTotalPontosColetados] = useState(0)
   const [tempoAtual, setTempoAtual] = useState(Date.now())
@@ -252,6 +259,10 @@ const Ensaio = () => {
         camara,
         pressaoCarga: pressaoVal,
         tempoCarga: tempoVal,
+        vessel: vessel || null,
+        localTeste: localTeste || null,
+        departamento: departamento || null,
+        ordemServico: ordemServico || null,
       })
       const id = response.data.id as number
       const dataInicio = response.data.dataInicio 
@@ -330,6 +341,7 @@ const Ensaio = () => {
           <h1>Ensaio em Tempo Real</h1>
           <p className="page-subtitle">Monitoramento da curva de pressão</p>
         </div>
+        {podeOperar && (
         <div className="ensaio-controls">
           <div className="ensaio-config">
             <div className="config-field">
@@ -364,6 +376,44 @@ const Ensaio = () => {
                 disabled={ensaioAtivo}
               />
             </div>
+            <div className="config-field">
+              <label>Vessel / Frota</label>
+              <input
+                type="text"
+                placeholder="Ex.: MV29"
+                value={vessel}
+                onChange={(e) => setVessel(e.target.value)}
+                disabled={ensaioAtivo}
+              />
+            </div>
+            <div className="config-field">
+              <label>Local do Teste</label>
+              <input
+                type="text"
+                placeholder="Ex.: Macaé"
+                value={localTeste}
+                onChange={(e) => setLocalTeste(e.target.value)}
+                disabled={ensaioAtivo}
+              />
+            </div>
+            <div className="config-field">
+              <label>Departamento</label>
+              <input
+                type="text"
+                value={departamento}
+                onChange={(e) => setDepartamento(e.target.value)}
+                disabled={ensaioAtivo}
+              />
+            </div>
+            <div className="config-field">
+              <label>Ordem de Serviço</label>
+              <input
+                type="text"
+                value={ordemServico}
+                onChange={(e) => setOrdemServico(e.target.value)}
+                disabled={ensaioAtivo}
+              />
+            </div>
           </div>
           <button 
             className={`btn ${ensaioAtivo ? 'btn-danger' : 'btn-primary'}`}
@@ -372,6 +422,7 @@ const Ensaio = () => {
             {ensaioAtivo ? '⏹️ Interromper Ensaio' : '▶️ Iniciar Ensaio'}
           </button>
         </div>
+        )}
       </div>
 
       <div className="ensaio-stats">

@@ -20,7 +20,7 @@ public class Usuario
     public string SenhaHash { get; set; } = string.Empty;
 
     [MaxLength(50)]
-    public string? Role { get; set; } = "Usuario"; // Admin, Usuario, Operador
+    public string? Role { get; set; } = "Visualizador"; // Admin, Operador, Visualizador
 
     public bool Ativo { get; set; } = true;
 

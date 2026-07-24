@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using DataMais.Data;
@@ -95,6 +96,7 @@ public class CampoRelatorioController : ControllerBase
     /// Cria um novo campo.
     /// </summary>
     [HttpPost]
+    [Authorize(Roles = "Admin")]
     public async Task<IActionResult> Create([FromBody] CreateCampoRelatorioRequest request)
     {
         try
@@ -157,6 +159,7 @@ public class CampoRelatorioController : ControllerBase
     /// Atualiza um campo existente.
     /// </summary>
     [HttpPut("{id:int}")]
+    [Authorize(Roles = "Admin")]
     public async Task<IActionResult> Update(int id, [FromBody] UpdateCampoRelatorioRequest request)
     {
         try
@@ -209,6 +212,7 @@ public class CampoRelatorioController : ControllerBase
     /// Exclui um campo (soft delete).
     /// </summary>
     [HttpDelete("{id:int}")]
+    [Authorize(Roles = "Admin")]
     public async Task<IActionResult> Delete(int id)
     {
         try
@@ -242,6 +246,7 @@ public class CampoRelatorioController : ControllerBase
     /// Atualiza a ordem dos campos.
     /// </summary>
     [HttpPost("reordenar")]
+    [Authorize(Roles = "Admin")]
     public async Task<IActionResult> Reordenar([FromBody] ReordenarCamposRequest request)
     {
         try

@@ -31,6 +31,17 @@ public class Cilindro
 
     public DateTime? DataFabricacao { get; set; }
 
+    // Identificação do equipamento (relatório rev02)
+    // Obs.: "Código SAP" reaproveita CodigoInterno e "Tag / ID" reaproveita CodigoCliente (só relabel na UI).
+    [MaxLength(100)]
+    public string? NumeroSerie { get; set; }
+
+    [MaxLength(100)]
+    public string? PartNumber { get; set; }
+
+    [MaxLength(200)]
+    public string? FluidoUtilizado { get; set; }
+
     // Dimensões (em mm)
     [Column(TypeName = "decimal(10,2)")]
     public decimal? DiametroInterno { get; set; }

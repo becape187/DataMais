@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using DataMais.Data;
@@ -681,6 +682,7 @@ public class RelatorioController : ControllerBase
     /// Salva ou atualiza as respostas dos campos do relatório.
     /// </summary>
     [HttpPost("{id:int}/respostas-campos")]
+    [Authorize(Roles = "Admin,Operador")]
     public async Task<IActionResult> SalvarRespostasCampos(int id, [FromBody] SalvarRespostasCamposRequest request)
     {
         try

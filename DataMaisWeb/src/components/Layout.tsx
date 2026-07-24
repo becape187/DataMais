@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import type { ReactNode } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import api from '../config/api'
+import { useAuth } from '../contexts/AuthContext'
 import './Layout.css'
 
 interface LayoutProps {
@@ -19,6 +20,7 @@ interface ModbusRegistro {
 
 const Layout = ({ children }: LayoutProps) => {
   const location = useLocation()
+  const { usuario, isAdmin, podeOperar, logout } = useAuth()
   const [isLigado, setIsLigado] = useState(false)
   const [processando, setProcessando] = useState(false)
   const [avancaPressionado, setAvancaPressionado] = useState(false)
@@ -438,43 +440,52 @@ const Layout = ({ children }: LayoutProps) => {
               <span className="nav-icon">📈</span>
               Ensaio
             </Link>
-            <Link 
-              to="/clientes" 
-              className={`nav-item ${isActive('/clientes') ? 'active' : ''}`}
+            {podeOperar && (
+              <Link
+                to="/clientes"
+                className={`nav-item ${isActive('/clientes') ? 'active' : ''}`}
+              >
+                <span className="nav-icon">👥</span>
+                Clientes
+              </Link>
+            )}
+          {podeOperar && (
+            <Link
+              to="/sensores"
+              className={`nav-item ${isActive('/sensores') ? 'active' : ''}`}
             >
-              <span className="nav-icon">👥</span>
-              Clientes
+              <span className="nav-icon">🔧</span>
+              Sensores
             </Link>
-          <Link 
-            to="/sensores" 
-            className={`nav-item ${isActive('/sensores') ? 'active' : ''}`}
-          >
-            <span className="nav-icon">🔧</span>
-            Sensores
-          </Link>
-          <Link 
+          )}
+          <Link
             to="/relatorios"
             className={`nav-item ${isActive('/relatorios') ? 'active' : ''}`}
           >
             <span className="nav-icon">📄</span>
             Relatórios
           </Link>
-          <Link 
-            to="/usuarios" 
-            className={`nav-item ${isActive('/usuarios') ? 'active' : ''}`}
-          >
-            <span className="nav-icon">👤</span>
-            Usuários
-          </Link>
-          <Link 
-            to="/configuracoes" 
-            className={`nav-item ${isActive('/configuracoes') ? 'active' : ''}`}
-          >
-            <span className="nav-icon">⚙️</span>
-            Configurações
-          </Link>
+          {isAdmin && (
+            <Link
+              to="/usuarios"
+              className={`nav-item ${isActive('/usuarios') ? 'active' : ''}`}
+            >
+              <span className="nav-icon">👤</span>
+              Usuários
+            </Link>
+          )}
+          {isAdmin && (
+            <Link
+              to="/configuracoes"
+              className={`nav-item ${isActive('/configuracoes') ? 'active' : ''}`}
+            >
+              <span className="nav-icon">⚙️</span>
+              Configurações
+            </Link>
+          )}
         </nav>
         
+        {podeOperar && (
         <div className="hidraulica-controls">
           <div className="hidraulica-display">
             <div className="display-row">
@@ -580,6 +591,17 @@ const Layout = ({ children }: LayoutProps) => {
               {processando ? '⏳ Processando...' : (isLigado ? 'Desliga' : 'Liga')}
             </button>
           </div>
+        </div>
+        )}
+
+        <div className="sidebar-user">
+          <div className="sidebar-user-info">
+            <span className="sidebar-user-name">{usuario?.nome}</span>
+            <span className="sidebar-user-role">{usuario?.role}</span>
+          </div>
+          <button className="sidebar-logout" onClick={logout} title="Sair">
+            ⎋ Sair
+          </button>
         </div>
         </aside>
         <main className="main-content">

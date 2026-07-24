@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System.ComponentModel.DataAnnotations;
@@ -74,6 +75,7 @@ namespace DataMais.Controllers;
     }
 
     [HttpPost("iniciar")]
+    [Authorize(Roles = "Admin,Operador")]
     public async Task<IActionResult> IniciarEnsaio([FromBody] IniciarEnsaioRequest request)
     {
         try
@@ -154,6 +156,10 @@ namespace DataMais.Controllers;
                 CamaraTestada = camara,
                 PressaoCargaConfigurada = request.PressaoCarga,
                 TempoCargaConfigurado = request.TempoCarga,
+                Vessel = string.IsNullOrWhiteSpace(request.Vessel) ? null : request.Vessel.Trim(),
+                LocalTeste = string.IsNullOrWhiteSpace(request.LocalTeste) ? null : request.LocalTeste.Trim(),
+                Departamento = string.IsNullOrWhiteSpace(request.Departamento) ? null : request.Departamento.Trim(),
+                OrdemServico = string.IsNullOrWhiteSpace(request.OrdemServico) ? null : request.OrdemServico.Trim(),
                 DataCriacao = agora,
                 DataAtualizacao = agora
             };
@@ -409,6 +415,7 @@ namespace DataMais.Controllers;
     }
 
     [HttpPost("interromper/{id:int}")]
+    [Authorize(Roles = "Admin,Operador")]
     public async Task<IActionResult> InterromperEnsaio(int id)
     {
         try
@@ -485,6 +492,7 @@ namespace DataMais.Controllers;
     }
 
     [HttpPost("cancelar/{id:int}")]
+    [Authorize(Roles = "Admin,Operador")]
     public async Task<IActionResult> CancelarEnsaio(int id)
     {
         try
@@ -856,4 +864,10 @@ public class IniciarEnsaioRequest
     /// </summary>
     [Range(0.01, double.MaxValue, ErrorMessage = "Tempo de carga deve ser maior que zero.")]
     public decimal TempoCarga { get; set; }
+
+    // Identificação do documento (relatório rev02) — opcionais, preenchidos no setup.
+    public string? Vessel { get; set; }
+    public string? LocalTeste { get; set; }
+    public string? Departamento { get; set; }
+    public string? OrdemServico { get; set; }
 }

@@ -15,18 +15,38 @@ const api = axios.create({
   timeout: 45000, // 45 segundos (maior que o timeout do Modbus de 10s + margem)
 })
 
+// Interceptor de request: injeta o token JWT (se houver) em toda chamada
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('datamais_token')
+  if (token) {
+    config.headers = config.headers ?? {}
+    config.headers.Authorization = `Bearer ${token}`
+  }
+  return config
+})
+
 // Interceptor para tratamento de erros
 api.interceptors.response.use(
   (response) => response,
   (error) => {
+    const status = error.response?.status
+    const url: string = error.config?.url ?? ''
+
+    // Sessão expirada / não autorizado: limpa credenciais e volta ao login.
+    // Não redireciona quando o próprio login falha (mostra o erro na tela).
+    if (status === 401 && !url.includes('/auth/login')) {
+      localStorage.removeItem('datamais_token')
+      localStorage.removeItem('datamais_usuario')
+      if (window.location.pathname !== '/login') {
+        window.location.href = '/login'
+      }
+    }
+
     if (error.response) {
-      // Erro com resposta do servidor
       console.error('Erro da API:', error.response.data)
     } else if (error.request) {
-      // Erro de rede
       console.error('Erro de rede:', error.request)
     } else {
-      // Outro erro
       console.error('Erro:', error.message)
     }
     return Promise.reject(error)

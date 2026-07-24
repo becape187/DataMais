@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using DataMais.Data;
@@ -63,6 +64,7 @@ public class ModbusConfigController : ControllerBase
     }
 
     [HttpPost("import")]
+    [Authorize(Roles = "Admin")]
     public async Task<IActionResult> ImportFromJson([FromBody] ImportModbusRequest request)
     {
         try
@@ -249,6 +251,7 @@ public class ModbusConfigController : ControllerBase
     }
 
     [HttpPost]
+    [Authorize(Roles = "Admin")]
     public async Task<IActionResult> Create([FromBody] ModbusConfig config)
     {
         try
@@ -272,6 +275,7 @@ public class ModbusConfigController : ControllerBase
     }
 
     [HttpPut("{id}")]
+    [Authorize(Roles = "Admin")]
     public async Task<IActionResult> Update(int id, [FromBody] ModbusConfig configAtualizado)
     {
         try
@@ -311,6 +315,7 @@ public class ModbusConfigController : ControllerBase
     }
 
     [HttpDelete("{id}")]
+    [Authorize(Roles = "Admin")]
     public async Task<IActionResult> Delete(int id)
     {
         try
@@ -334,6 +339,7 @@ public class ModbusConfigController : ControllerBase
     }
 
     [HttpPost("{id}/write")]
+    [Authorize(Roles = "Admin,Operador")]
     public async Task<IActionResult> WriteRegister(int id, [FromBody] WriteModbusRequest request)
     {
         try
@@ -612,36 +618,42 @@ public class ModbusConfigController : ControllerBase
     }
 
     [HttpPost("motor/ligar")]
+    [Authorize(Roles = "Admin,Operador")]
     public async Task<IActionResult> LigarMotor()
     {
         return await ExecutarComandoMotor("ligar");
     }
 
     [HttpPost("motor/desligar")]
+    [Authorize(Roles = "Admin,Operador")]
     public async Task<IActionResult> DesligarMotor()
     {
         return await ExecutarComandoMotor("desligar");
     }
 
     [HttpPost("radiador/ligar")]
+    [Authorize(Roles = "Admin,Operador")]
     public async Task<IActionResult> LigarRadiador()
     {
         return await ExecutarComandoRadiador("ligar");
     }
 
     [HttpPost("radiador/desligar")]
+    [Authorize(Roles = "Admin,Operador")]
     public async Task<IActionResult> DesligarRadiador()
     {
         return await ExecutarComandoRadiador("desligar");
     }
 
     [HttpPost("camara/avanca/ligar")]
+    [Authorize(Roles = "Admin,Operador")]
     public async Task<IActionResult> LigarAvanca()
     {
         return await ExecutarComandoCamara("avanca");
     }
 
     [HttpPost("camara/recua/ligar")]
+    [Authorize(Roles = "Admin,Operador")]
     public async Task<IActionResult> LigarRecua()
     {
         return await ExecutarComandoCamara("recua");
@@ -677,6 +689,7 @@ public class ModbusConfigController : ControllerBase
     }
 
     [HttpPost("registro/iniciar")]
+    [Authorize(Roles = "Admin,Operador")]
     public async Task<IActionResult> IniciarRegistro()
     {
         try
@@ -838,6 +851,7 @@ public class ModbusConfigController : ControllerBase
     }
 
     [HttpPost("pressao-carga")]
+    [Authorize(Roles = "Admin,Operador")]
     public async Task<IActionResult> EscreverPressaoCarga([FromBody] double pressao)
     {
         try
@@ -900,6 +914,7 @@ public class ModbusConfigController : ControllerBase
     }
 
     [HttpPost("tempo-carga")]
+    [Authorize(Roles = "Admin,Operador")]
     public async Task<IActionResult> EscreverTempoCarga([FromBody] double tempo)
     {
         try
