@@ -177,8 +177,10 @@ using (var scope = app.Services.CreateScope())
             Console.WriteLine($"✓ {rolesLegadas.Count} usuário(s) com role 'Usuario' migrados para 'Operador'.");
         }
 
-        // Seed do admin inicial (admin/admin) quando não há nenhum usuário.
-        if (!dbContext.Usuarios.Any())
+        // Seed do admin inicial (admin/admin) quando não existe NENHUM usuário Admin.
+        // (Antes checava banco vazio; mudou para self-heal quando o banco já tem usuários
+        //  mas nenhum com perfil Admin — ex.: instalação que existia antes do login.)
+        if (!dbContext.Usuarios.Any(u => u.Role == "Admin"))
         {
             dbContext.Usuarios.Add(new Usuario
             {
