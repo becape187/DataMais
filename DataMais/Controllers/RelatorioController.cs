@@ -199,6 +199,8 @@ public class RelatorioController : ControllerBase
                     id = campo.Id,
                     nome = campo.Nome,
                     tipoResposta = campo.TipoResposta,
+                    secao = campo.Secao,
+                    reprovaSeSim = campo.ReprovaSeSim,
                     ordem = campo.Ordem,
                     respostaId = resposta?.Id,
                     valor = resposta?.Valor,
@@ -236,6 +238,20 @@ public class RelatorioController : ControllerBase
                 {
                     _logger.LogError(ex, "Erro ao avaliar o ensaio {EnsaioId}", ensaio.Id);
                 }
+            }
+
+            // Override rev02: qualquer checklist marcado como "reprova se Sim" e respondido "Sim"
+            // força o veredito para Reprovado (ex.: "Vazamentos visíveis" na inspeção visual),
+            // sobrepondo o veredito automático por passagem entre câmaras.
+            var reprovadoPorChecklist = todosCampos.Any(campo =>
+                campo.ReprovaSeSim &&
+                relatorio.RespostasCampos.Any(r =>
+                    r.CampoRelatorioId == campo.Id &&
+                    string.Equals(r.Valor?.Trim(), "Sim", StringComparison.OrdinalIgnoreCase)));
+
+            if (reprovadoPorChecklist)
+            {
+                resultado = "Reprovado";
             }
 
             var result = new

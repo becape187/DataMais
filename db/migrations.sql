@@ -722,3 +722,29 @@ BEGIN
 END $EF$;
 COMMIT;
 
+START TRANSACTION;
+
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20260724150531_AddSecaoReprovaSeSimCampoRelatorio') THEN
+    ALTER TABLE "CamposRelatorio" ADD "ReprovaSeSim" boolean NOT NULL DEFAULT FALSE;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20260724150531_AddSecaoReprovaSeSimCampoRelatorio') THEN
+    ALTER TABLE "CamposRelatorio" ADD "Secao" character varying(100);
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20260724150531_AddSecaoReprovaSeSimCampoRelatorio') THEN
+    INSERT INTO "__EFMigrationsHistory" ("MigrationId", "ProductVersion")
+    VALUES ('20260724150531_AddSecaoReprovaSeSimCampoRelatorio', '8.0.0');
+    END IF;
+END $EF$;
+COMMIT;
+

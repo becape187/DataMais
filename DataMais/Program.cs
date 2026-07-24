@@ -192,6 +192,9 @@ using (var scope = app.Services.CreateScope())
             dbContext.SaveChanges();
             Console.WriteLine("✓ Usuário admin inicial criado (login: admin / senha: admin). TROQUE A SENHA.");
         }
+
+        // Seed idempotente do checklist do relatório rev02.
+        DataMais.Data.DbSeeder.SeedCamposRelatorioRev02(dbContext);
     }
     catch (Exception ex)
     {

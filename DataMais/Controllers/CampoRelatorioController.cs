@@ -44,6 +44,8 @@ public class CampoRelatorioController : ControllerBase
                 id = c.Id,
                 nome = c.Nome,
                 tipoResposta = c.TipoResposta,
+                secao = c.Secao,
+                reprovaSeSim = c.ReprovaSeSim,
                 ordem = c.Ordem,
                 dataCriacao = c.DataCriacao,
                 dataExclusao = c.DataExclusao
@@ -78,6 +80,8 @@ public class CampoRelatorioController : ControllerBase
                 id = campo.Id,
                 nome = campo.Nome,
                 tipoResposta = campo.TipoResposta,
+                secao = campo.Secao,
+                reprovaSeSim = campo.ReprovaSeSim,
                 ordem = campo.Ordem,
                 dataCriacao = campo.DataCriacao,
                 dataExclusao = campo.DataExclusao
@@ -129,6 +133,8 @@ public class CampoRelatorioController : ControllerBase
             {
                 Nome = request.Nome.Trim(),
                 TipoResposta = request.TipoResposta,
+                Secao = string.IsNullOrWhiteSpace(request.Secao) ? null : request.Secao.Trim(),
+                ReprovaSeSim = request.ReprovaSeSim,
                 Ordem = maxOrdem + 1,
                 DataCriacao = DateTime.UtcNow
             };
@@ -141,6 +147,8 @@ public class CampoRelatorioController : ControllerBase
                 id = campo.Id,
                 nome = campo.Nome,
                 tipoResposta = campo.TipoResposta,
+                secao = campo.Secao,
+                reprovaSeSim = campo.ReprovaSeSim,
                 ordem = campo.Ordem,
                 dataCriacao = campo.DataCriacao,
                 dataExclusao = campo.DataExclusao
@@ -187,6 +195,16 @@ public class CampoRelatorioController : ControllerBase
                 campo.TipoResposta = request.TipoResposta;
             }
 
+            if (request.Secao != null)
+            {
+                campo.Secao = string.IsNullOrWhiteSpace(request.Secao) ? null : request.Secao.Trim();
+            }
+
+            if (request.ReprovaSeSim.HasValue)
+            {
+                campo.ReprovaSeSim = request.ReprovaSeSim.Value;
+            }
+
             await _context.SaveChangesAsync();
 
             var result = new
@@ -194,6 +212,8 @@ public class CampoRelatorioController : ControllerBase
                 id = campo.Id,
                 nome = campo.Nome,
                 tipoResposta = campo.TipoResposta,
+                secao = campo.Secao,
+                reprovaSeSim = campo.ReprovaSeSim,
                 ordem = campo.Ordem,
                 dataCriacao = campo.DataCriacao,
                 dataExclusao = campo.DataExclusao
@@ -292,18 +312,30 @@ public class CreateCampoRelatorioRequest
 {
     [System.Text.Json.Serialization.JsonPropertyName("nome")]
     public string Nome { get; set; } = string.Empty;
-    
+
     [System.Text.Json.Serialization.JsonPropertyName("tipoResposta")]
     public string TipoResposta { get; set; } = string.Empty; // "SimOuNao", "TextoSimples", "MultiplasLinhas"
+
+    [System.Text.Json.Serialization.JsonPropertyName("secao")]
+    public string? Secao { get; set; }
+
+    [System.Text.Json.Serialization.JsonPropertyName("reprovaSeSim")]
+    public bool ReprovaSeSim { get; set; } = false;
 }
 
 public class UpdateCampoRelatorioRequest
 {
     [System.Text.Json.Serialization.JsonPropertyName("nome")]
     public string? Nome { get; set; }
-    
+
     [System.Text.Json.Serialization.JsonPropertyName("tipoResposta")]
     public string? TipoResposta { get; set; }
+
+    [System.Text.Json.Serialization.JsonPropertyName("secao")]
+    public string? Secao { get; set; }
+
+    [System.Text.Json.Serialization.JsonPropertyName("reprovaSeSim")]
+    public bool? ReprovaSeSim { get; set; }
 }
 
 public class ReordenarCamposRequest

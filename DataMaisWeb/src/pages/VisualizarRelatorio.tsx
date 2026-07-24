@@ -11,6 +11,8 @@ interface CampoRelatorio {
   id: number
   nome: string
   tipoResposta: 'SimOuNao' | 'TextoSimples' | 'MultiplasLinhas'
+  secao?: string | null
+  reprovaSeSim?: boolean
   ordem: number
   respostaId?: number | null
   valor?: string | null
@@ -114,6 +116,15 @@ const VisualizarRelatorio = () => {
   // (máximo) da câmara OPOSTA. Se esse pico ultrapassar o limite configurado no cilindro
   // (default 1 bar), o cilindro está dando passagem → Reprovado. Senão → Aprovado.
   const calcularResultado = (): string | null => {
+    // Override rev02: qualquer checklist "reprova se Sim" respondido "Sim" força Reprovado,
+    // sobrepondo o veredito automático (mesma regra do backend).
+    const reprovadoPorChecklist = (relatorio?.campos || []).some(c =>
+      c.reprovaSeSim && (respostasCampos[c.id]?.trim().toLowerCase() === 'sim')
+    )
+    if (reprovadoPorChecklist) {
+      return 'Reprovado'
+    }
+
     if (!relatorio || !relatorio.pressaoCargaConfigurada || dadosGrafico.length === 0) {
       // Sem dados do gráfico para recalcular: usa o resultado já avaliado pelo backend.
       return relatorio?.resultado ?? null

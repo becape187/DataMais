@@ -27,6 +27,8 @@ interface CampoRelatorio {
   id: number
   nome: string
   tipoResposta: 'SimOuNao' | 'TextoSimples' | 'MultiplasLinhas'
+  secao?: string | null
+  reprovaSeSim?: boolean
   ordem: number
   dataCriacao: string
   dataExclusao?: string | null
@@ -62,7 +64,7 @@ const Configuracoes = () => {
   const [showImportDialog, setShowImportDialog] = useState(false)
   const [showCampoModal, setShowCampoModal] = useState(false)
   const [campoEditando, setCampoEditando] = useState<CampoRelatorio | null>(null)
-  const [novoCampo, setNovoCampo] = useState({ nome: '', tipoResposta: 'SimOuNao' as CampoRelatorio['tipoResposta'] })
+  const [novoCampo, setNovoCampo] = useState({ nome: '', tipoResposta: 'SimOuNao' as CampoRelatorio['tipoResposta'], secao: '', reprovaSeSim: false })
   const [importConfig, setImportConfig] = useState({
     ipAddress: 'modec.automais.cloud',
     port: 502,
@@ -352,13 +354,13 @@ const Configuracoes = () => {
 
   const handleAddCampo = () => {
     setCampoEditando(null)
-    setNovoCampo({ nome: '', tipoResposta: 'SimOuNao' })
+    setNovoCampo({ nome: '', tipoResposta: 'SimOuNao', secao: '', reprovaSeSim: false })
     setShowCampoModal(true)
   }
 
   const handleEditCampo = (campo: CampoRelatorio) => {
     setCampoEditando(campo)
-    setNovoCampo({ nome: campo.nome, tipoResposta: campo.tipoResposta })
+    setNovoCampo({ nome: campo.nome, tipoResposta: campo.tipoResposta, secao: campo.secao || '', reprovaSeSim: campo.reprovaSeSim || false })
     setShowCampoModal(true)
   }
 
@@ -373,14 +375,18 @@ const Configuracoes = () => {
         // Atualizar campo existente
         await api.put(`/CampoRelatorio/${campoEditando.id}`, {
           nome: novoCampo.nome.trim(),
-          tipoResposta: novoCampo.tipoResposta
+          tipoResposta: novoCampo.tipoResposta,
+          secao: novoCampo.secao || null,
+          reprovaSeSim: novoCampo.tipoResposta === 'SimOuNao' ? novoCampo.reprovaSeSim : false
         })
         setMessage({ type: 'success', text: 'Campo atualizado com sucesso!' })
       } else {
         // Criar novo campo
         await api.post('/CampoRelatorio', {
           nome: novoCampo.nome.trim(),
-          tipoResposta: novoCampo.tipoResposta
+          tipoResposta: novoCampo.tipoResposta,
+          secao: novoCampo.secao || null,
+          reprovaSeSim: novoCampo.tipoResposta === 'SimOuNao' ? novoCampo.reprovaSeSim : false
         })
         setMessage({ type: 'success', text: 'Campo criado com sucesso!' })
       }
@@ -572,6 +578,33 @@ const Configuracoes = () => {
                       <option value="MultiplasLinhas">Múltiplas Linhas</option>
                     </select>
                   </div>
+                  <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+                    <label>Seção do Relatório</label>
+                    <select
+                      value={novoCampo.secao}
+                      onChange={(e) => setNovoCampo({ ...novoCampo, secao: e.target.value })}
+                    >
+                      <option value="">Perguntas Adicionais (sem seção)</option>
+                      <option value="Inspeção Visual">Inspeção Visual</option>
+                      <option value="Testes Funcionais">Testes Funcionais</option>
+                      <option value="Condições Finais">Condições Finais</option>
+                    </select>
+                  </div>
+                  {novoCampo.tipoResposta === 'SimOuNao' && (
+                    <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                        <input
+                          type="checkbox"
+                          checked={novoCampo.reprovaSeSim}
+                          onChange={(e) => setNovoCampo({ ...novoCampo, reprovaSeSim: e.target.checked })}
+                        />
+                        Resposta "Sim" reprova o laudo automaticamente
+                      </label>
+                      <small style={{ color: '#6b7280' }}>
+                        Ex.: "Vazamentos visíveis" — se marcado Sim, o resultado do relatório vira Reprovado.
+                      </small>
+                    </div>
+                  )}
                 </div>
                 <div className="import-dialog-actions">
                   <button 
@@ -597,6 +630,7 @@ const Configuracoes = () => {
                 <tr>
                   <th style={{ width: '50px' }}>Ordem</th>
                   <th>Nome do Campo</th>
+                  <th>Seção</th>
                   <th>Tipo de Resposta</th>
                   <th>Ações</th>
                 </tr>
@@ -628,7 +662,13 @@ const Configuracoes = () => {
                           </button>
                         </div>
                       </td>
-                      <td>{campo.nome}</td>
+                      <td>
+                        {campo.nome}
+                        {campo.reprovaSeSim && (
+                          <span title="Resposta Sim reprova o laudo" style={{ marginLeft: 6, color: '#dc3545', fontSize: 12 }}>⚠ reprova</span>
+                        )}
+                      </td>
+                      <td>{campo.secao || '—'}</td>
                       <td>
                         {campo.tipoResposta === 'SimOuNao' && 'Sim ou Não'}
                         {campo.tipoResposta === 'TextoSimples' && 'Texto Simples'}
