@@ -5,6 +5,7 @@ import * as XLSX from 'xlsx'
 import jsPDF from 'jspdf'
 import html2canvas from 'html2canvas'
 import api from '../config/api'
+import { useAuth } from '../contexts/AuthContext'
 import './VisualizarRelatorio.css'
 
 interface CampoRelatorio {
@@ -38,6 +39,36 @@ interface RelatorioDetalhe {
   limitePassagem?: number | null
   resultado?: string | null
   campos?: CampoRelatorio[]
+  // Ciclo de vida / assinatura (rev02)
+  situacao?: string | null
+  versao?: number | null
+  concluidoPorNome?: string | null
+  dataConclusao?: string | null
+  // Identificação do documento
+  ensaioVessel?: string | null
+  ensaioLocalTeste?: string | null
+  ensaioDepartamento?: string | null
+  ensaioOrdemServico?: string | null
+  // Identificação do equipamento
+  cilindroCodigoSap?: string | null
+  cilindroTagId?: string | null
+  cilindroFabricante?: string | null
+  cilindroNumeroSerie?: string | null
+  cilindroPartNumber?: string | null
+  cilindroFluido?: string | null
+  cilindroDiametroInterno?: number | null
+  cilindroDiametroHaste?: number | null
+  cilindroMaximaPressaoA?: number | null
+  cilindroMaximaPressaoB?: number | null
+}
+
+interface VersaoHistorico {
+  id: number
+  numeroVersao: number
+  acao: string
+  usuarioNome?: string | null
+  dataHora: string
+  resultado?: string | null
 }
 
 interface DataPoint {
@@ -48,12 +79,17 @@ interface DataPoint {
 
 const VisualizarRelatorio = () => {
   const { id } = useParams<{ id: string }>()
+  const { podeOperar } = useAuth()
   const [relatorio, setRelatorio] = useState<RelatorioDetalhe | null>(null)
   const [loading, setLoading] = useState(true)
   const [dadosGrafico, setDadosGrafico] = useState<DataPoint[]>([])
   const [loadingGrafico, setLoadingGrafico] = useState(true)
   const [respostasCampos, setRespostasCampos] = useState<Record<number, string>>({})
+  const [versoes, setVersoes] = useState<VersaoHistorico[]>([])
+  const [concluindo, setConcluindo] = useState(false)
   const relatorioContainerRef = useRef<HTMLDivElement>(null)
+
+  const concluido = relatorio?.situacao === 'Concluido'
 
   // Calcula as estatísticas de pressão a partir dos dados do gráfico
   // A análise começa APENAS a partir do momento que a pressão atinge o setpoint pela primeira vez
@@ -230,6 +266,24 @@ const VisualizarRelatorio = () => {
           limitePassagem: r.limitePassagem ?? null,
           resultado: r.resultado ?? null,
           campos: r.campos || [],
+          situacao: r.situacao ?? 'Rascunho',
+          versao: r.versao ?? 0,
+          concluidoPorNome: r.concluidoPorNome ?? null,
+          dataConclusao: r.dataConclusao ?? null,
+          ensaioVessel: r.ensaioVessel ?? null,
+          ensaioLocalTeste: r.ensaioLocalTeste ?? null,
+          ensaioDepartamento: r.ensaioDepartamento ?? null,
+          ensaioOrdemServico: r.ensaioOrdemServico ?? null,
+          cilindroCodigoSap: r.cilindroCodigoSap ?? null,
+          cilindroTagId: r.cilindroTagId ?? null,
+          cilindroFabricante: r.cilindroFabricante ?? null,
+          cilindroNumeroSerie: r.cilindroNumeroSerie ?? null,
+          cilindroPartNumber: r.cilindroPartNumber ?? null,
+          cilindroFluido: r.cilindroFluido ?? null,
+          cilindroDiametroInterno: r.cilindroDiametroInterno ?? null,
+          cilindroDiametroHaste: r.cilindroDiametroHaste ?? null,
+          cilindroMaximaPressaoA: r.cilindroMaximaPressaoA ?? null,
+          cilindroMaximaPressaoB: r.cilindroMaximaPressaoB ?? null,
         })
       } catch (err) {
         console.error('Erro ao carregar relatório:', err)
@@ -266,20 +320,57 @@ const VisualizarRelatorio = () => {
     }
   }, [id, relatorio])
 
+  const carregarVersoes = async () => {
+    if (!id) return
+    try {
+      const resp = await api.get(`/Relatorio/${id}/versoes`)
+      setVersoes(Array.isArray(resp.data) ? resp.data : [])
+    } catch (err) {
+      console.error('Erro ao carregar versões:', err)
+    }
+  }
+
+  useEffect(() => {
+    if (id) carregarVersoes()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id])
+
   const salvarRespostas = async (campoId: number, valor: string) => {
     if (!id || !relatorio) return
 
     try {
-      await api.post(`/Relatorio/${id}/respostas-campos`, {
-        respostas: [
-          {
-            campoRelatorioId: campoId,
-            valor: valor || null
-          }
-        ]
+      const resp = await api.post(`/Relatorio/${id}/respostas-campos`, {
+        respostas: [{ campoRelatorioId: campoId, valor: valor || null }]
       })
+      // Editar um relatório concluído o REABRE no backend → reflete na tela.
+      const novaSituacao = resp.data?.situacao
+      if (novaSituacao && novaSituacao !== relatorio.situacao) {
+        setRelatorio(prev => (prev ? { ...prev, situacao: novaSituacao } : prev))
+        carregarVersoes()
+      }
     } catch (error) {
       console.error('Erro ao salvar resposta:', error)
+    }
+  }
+
+  const concluirRelatorio = async () => {
+    if (!id) return
+    if (!window.confirm('Concluir e assinar este relatório? Isso libera a geração do PDF.')) return
+    try {
+      setConcluindo(true)
+      const resp = await api.post(`/Relatorio/${id}/concluir`)
+      setRelatorio(prev => (prev ? {
+        ...prev,
+        situacao: resp.data?.situacao ?? 'Concluido',
+        versao: resp.data?.versao ?? prev.versao,
+        concluidoPorNome: resp.data?.concluidoPorNome ?? prev.concluidoPorNome,
+        dataConclusao: resp.data?.dataConclusao ?? prev.dataConclusao,
+      } : prev))
+      await carregarVersoes()
+    } catch (err: any) {
+      alert(err.response?.data?.message || 'Erro ao concluir relatório')
+    } finally {
+      setConcluindo(false)
     }
   }
 
@@ -552,6 +643,58 @@ const VisualizarRelatorio = () => {
     }
   }
 
+  const secoesRelatorio = ['Inspeção Visual', 'Testes Funcionais', 'Condições Finais']
+
+  const renderCampoInput = (campo: CampoRelatorio) => {
+    if (campo.tipoResposta === 'SimOuNao') {
+      return (
+        <div className="campo-relatorio-radio-group">
+          {['Sim', 'Não'].map(opt => (
+            <label key={opt}>
+              <input
+                type="radio"
+                name={`campo-${campo.id}`}
+                value={opt}
+                checked={respostasCampos[campo.id] === opt}
+                disabled={!podeOperar}
+                onChange={(e) => {
+                  setRespostasCampos({ ...respostasCampos, [campo.id]: e.target.value })
+                  salvarRespostas(campo.id, e.target.value)
+                }}
+              />
+              {opt}
+            </label>
+          ))}
+        </div>
+      )
+    }
+    if (campo.tipoResposta === 'MultiplasLinhas') {
+      return (
+        <textarea
+          className="campo-relatorio-textarea-display"
+          value={respostasCampos[campo.id] || ''}
+          disabled={!podeOperar}
+          onChange={(e) => setRespostasCampos({ ...respostasCampos, [campo.id]: e.target.value })}
+          onBlur={() => salvarRespostas(campo.id, respostasCampos[campo.id] || '')}
+          placeholder="Digite sua resposta..."
+          rows={3}
+          style={{ width: '100%', minHeight: 70, resize: 'vertical' }}
+        />
+      )
+    }
+    return (
+      <input
+        type="text"
+        className="campo-relatorio-input"
+        value={respostasCampos[campo.id] || ''}
+        disabled={!podeOperar}
+        onChange={(e) => setRespostasCampos({ ...respostasCampos, [campo.id]: e.target.value })}
+        onBlur={() => salvarRespostas(campo.id, respostasCampos[campo.id] || '')}
+        placeholder="Digite sua resposta..."
+      />
+    )
+  }
+
   if (loading) {
     return (
       <div className="visualizar-relatorio">
@@ -591,8 +734,30 @@ const VisualizarRelatorio = () => {
           </p>
         </div>
         <div className="header-actions">
-          <button className="btn btn-secondary" onClick={exportarParaPDF}>📥 Download PDF</button>
-          <button className="btn btn-secondary" onClick={imprimirRelatorio}>🖨️ Imprimir</button>
+          <span className={`situacao-badge ${concluido ? 'concluido' : 'rascunho'}`}>
+            {concluido ? `✔ Concluído (v${relatorio.versao})` : '✎ Rascunho'}
+          </span>
+          {podeOperar && !concluido && (
+            <button className="btn btn-primary" onClick={concluirRelatorio} disabled={concluindo}>
+              {concluindo ? 'Concluindo...' : '✔ Concluir / Assinar'}
+            </button>
+          )}
+          <button
+            className="btn btn-secondary"
+            onClick={exportarParaPDF}
+            disabled={!concluido}
+            title={concluido ? '' : 'Conclua o relatório para gerar o PDF'}
+          >
+            📥 Download PDF
+          </button>
+          <button
+            className="btn btn-secondary"
+            onClick={imprimirRelatorio}
+            disabled={!concluido}
+            title={concluido ? '' : 'Conclua o relatório para imprimir'}
+          >
+            🖨️ Imprimir
+          </button>
         </div>
       </div>
 
@@ -623,6 +788,32 @@ const VisualizarRelatorio = () => {
                 </span>
               </div>
             </div>
+          </div>
+        </div>
+
+        <div className="relatorio-section">
+          <h3>Identificação do Documento</h3>
+          <div className="info-grid">
+            <div className="info-card"><span className="info-label">Vessel / Frota</span><span className="info-value">{relatorio.ensaioVessel || '-'}</span></div>
+            <div className="info-card"><span className="info-label">Local do Teste</span><span className="info-value">{relatorio.ensaioLocalTeste || '-'}</span></div>
+            <div className="info-card"><span className="info-label">Departamento</span><span className="info-value">{relatorio.ensaioDepartamento || '-'}</span></div>
+            <div className="info-card"><span className="info-label">Ordem de Serviço</span><span className="info-value">{relatorio.ensaioOrdemServico || '-'}</span></div>
+          </div>
+        </div>
+
+        <div className="relatorio-section">
+          <h3>Identificação do Equipamento</h3>
+          <div className="info-grid">
+            <div className="info-card"><span className="info-label">Código SAP</span><span className="info-value">{relatorio.cilindroCodigoSap || '-'}</span></div>
+            <div className="info-card"><span className="info-label">Tag / ID</span><span className="info-value">{relatorio.cilindroTagId || '-'}</span></div>
+            <div className="info-card"><span className="info-label">Fabricante</span><span className="info-value">{relatorio.cilindroFabricante || '-'}</span></div>
+            <div className="info-card"><span className="info-label">Nº de Série</span><span className="info-value">{relatorio.cilindroNumeroSerie || '-'}</span></div>
+            <div className="info-card"><span className="info-label">Part Number</span><span className="info-value">{relatorio.cilindroPartNumber || '-'}</span></div>
+            <div className="info-card"><span className="info-label">Fluido Utilizado</span><span className="info-value">{relatorio.cilindroFluido || '-'}</span></div>
+            <div className="info-card"><span className="info-label">Ø Êmbolo (mm)</span><span className="info-value">{relatorio.cilindroDiametroInterno ?? '-'}</span></div>
+            <div className="info-card"><span className="info-label">Ø Haste (mm)</span><span className="info-value">{relatorio.cilindroDiametroHaste ?? '-'}</span></div>
+            <div className="info-card"><span className="info-label">Pressão Máx. A (bar)</span><span className="info-value">{relatorio.cilindroMaximaPressaoA ?? '-'}</span></div>
+            <div className="info-card"><span className="info-label">Pressão Máx. B (bar)</span><span className="info-value">{relatorio.cilindroMaximaPressaoB ?? '-'}</span></div>
           </div>
         </div>
 
@@ -790,116 +981,89 @@ const VisualizarRelatorio = () => {
           </div>
         </div>
 
-        {relatorio.campos && relatorio.campos.length > 0 && (
-          <>
-            {/* Campos Sim/Não e Texto Simples */}
-            {relatorio.campos
-              .filter(c => !c.excluido && (c.tipoResposta === 'SimOuNao' || c.tipoResposta === 'TextoSimples'))
-              .sort((a, b) => a.ordem - b.ordem)
-              .length > 0 && (
-              <div className="relatorio-section">
-                <h3>Perguntas Adicionais</h3>
-                <div className="campos-relatorio-container">
-                  {relatorio.campos
-                    .filter(c => !c.excluido && (c.tipoResposta === 'SimOuNao' || c.tipoResposta === 'TextoSimples'))
-                    .sort((a, b) => a.ordem - b.ordem)
-                    .map(campo => (
-                      <div key={campo.id} className="campo-relatorio-item">
-                        <label className="campo-relatorio-label">{campo.nome}</label>
-                        {campo.tipoResposta === 'SimOuNao' && (
-                          <div className="campo-relatorio-radio-group">
-                            <label>
-                              <input
-                                type="radio"
-                                name={`campo-${campo.id}`}
-                                value="Sim"
-                                checked={respostasCampos[campo.id] === 'Sim'}
-                                onChange={(e) => {
-                                  const novasRespostas = { ...respostasCampos, [campo.id]: e.target.value }
-                                  setRespostasCampos(novasRespostas)
-                                  salvarRespostas(campo.id, e.target.value)
-                                }}
-                              />
-                              Sim
-                            </label>
-                            <label>
-                              <input
-                                type="radio"
-                                name={`campo-${campo.id}`}
-                                value="Não"
-                                checked={respostasCampos[campo.id] === 'Não'}
-                                onChange={(e) => {
-                                  const novasRespostas = { ...respostasCampos, [campo.id]: e.target.value }
-                                  setRespostasCampos(novasRespostas)
-                                  salvarRespostas(campo.id, e.target.value)
-                                }}
-                              />
-                              Não
-                            </label>
-                          </div>
-                        )}
-                        {campo.tipoResposta === 'TextoSimples' && (
-                          <input
-                            type="text"
-                            className="campo-relatorio-input"
-                            value={respostasCampos[campo.id] || ''}
-                            onChange={(e) => {
-                              setRespostasCampos({ ...respostasCampos, [campo.id]: e.target.value })
-                            }}
-                            onBlur={() => salvarRespostas(campo.id, respostasCampos[campo.id] || '')}
-                            placeholder="Digite sua resposta..."
-                          />
-                        )}
-                      </div>
-                    ))}
-                </div>
-              </div>
-            )}
-
-            {/* Campos Múltiplas Linhas - apresentados como seções separadas */}
-            {relatorio.campos
-              .filter(c => !c.excluido && c.tipoResposta === 'MultiplasLinhas')
-              .sort((a, b) => a.ordem - b.ordem)
-              .map(campo => (
-                <div key={campo.id} className="relatorio-section">
-                  <h3>{campo.nome}</h3>
-                  <div className="observacoes-box">
-                    <textarea
-                      className="campo-relatorio-textarea-display"
-                      value={respostasCampos[campo.id] || ''}
-                      onChange={(e) => {
-                        setRespostasCampos({ ...respostasCampos, [campo.id]: e.target.value })
-                        // Ajusta altura automaticamente
-                        e.target.style.height = 'auto'
-                        e.target.style.height = `${Math.max(100, e.target.scrollHeight)}px`
-                      }}
-                      onBlur={() => salvarRespostas(campo.id, respostasCampos[campo.id] || '')}
-                      placeholder={respostasCampos[campo.id] ? '' : 'Digite sua resposta...'}
-                      rows={4}
-                      style={{ 
-                        minHeight: '100px',
-                        resize: 'none',
-                        overflow: 'hidden',
-                        width: '100%',
-                        border: 'none',
-                        background: 'transparent',
-                        padding: 0,
-                        fontFamily: 'inherit',
-                        fontSize: 'inherit',
-                        color: 'inherit',
-                        lineHeight: 'inherit'
-                      }}
-                    />
-                  </div>
+        {relatorio.campos && relatorio.campos.length > 0 && (() => {
+          const ativos = (relatorio.campos || [])
+            .filter(c => !c.excluido)
+            .sort((a, b) => a.ordem - b.ordem)
+          const grupos = secoesRelatorio
+            .map(sec => ({ sec, itens: ativos.filter(c => (c.secao || '').trim() === sec) }))
+            .filter(g => g.itens.length > 0)
+          const semSecao = ativos.filter(c => !secoesRelatorio.includes((c.secao || '').trim()))
+          const renderItens = (itens: CampoRelatorio[]) => (
+            <div className="campos-relatorio-container">
+              {itens.map(campo => (
+                <div key={campo.id} className="campo-relatorio-item">
+                  <label className="campo-relatorio-label">
+                    {campo.nome}
+                    {campo.reprovaSeSim && respostasCampos[campo.id] === 'Sim' && (
+                      <span style={{ color: '#dc3545', marginLeft: 6, fontSize: 12, fontWeight: 600 }}>→ Reprova o laudo</span>
+                    )}
+                  </label>
+                  {renderCampoInput(campo)}
                 </div>
               ))}
-          </>
+            </div>
+          )
+          return (
+            <>
+              {grupos.map(g => (
+                <div key={g.sec} className="relatorio-section">
+                  <h3>{g.sec}</h3>
+                  {renderItens(g.itens)}
+                </div>
+              ))}
+              {semSecao.length > 0 && (
+                <div className="relatorio-section">
+                  <h3>Perguntas Adicionais</h3>
+                  {renderItens(semSecao)}
+                </div>
+              )}
+            </>
+          )
+        })()}
+
+        {versoes.length > 0 && (
+          <div className="relatorio-section">
+            <h3>Histórico de Versões</h3>
+            <div className="table-container">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Versão</th>
+                    <th>Ação</th>
+                    <th>Assinado por</th>
+                    <th>Data</th>
+                    <th>Resultado</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {versoes.map(v => (
+                    <tr key={v.id}>
+                      <td>v{v.numeroVersao}</td>
+                      <td>{v.acao}</td>
+                      <td>{v.usuarioNome || '—'}</td>
+                      <td>{new Date(v.dataHora).toLocaleString('pt-BR')}</td>
+                      <td>{v.resultado || '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
         )}
 
         <div className="relatorio-footer">
           <div className="footer-signature">
             <div className="signature-line"></div>
-            <p>Assinatura do Técnico Responsável</p>
+            {concluido ? (
+              <p>
+                <strong>{relatorio.concluidoPorNome || '—'}</strong><br />
+                Concluído (v{relatorio.versao}) em{' '}
+                {relatorio.dataConclusao ? new Date(relatorio.dataConclusao).toLocaleString('pt-BR') : '-'}
+              </p>
+            ) : (
+              <p>Relatório em rascunho — não assinado</p>
+            )}
           </div>
           <div className="footer-date">
             <p>Data de Emissão: {relatorio.data}</p>

@@ -282,6 +282,21 @@ public class RelatorioController : ControllerBase
                 versao = relatorio.Versao,
                 concluidoPorNome = relatorio.ConcluidoPorNome,
                 dataConclusao = relatorio.DataConclusao,
+                // Identificação do documento (Ensaio) e do equipamento (Cilindro) — relatório rev02
+                ensaioVessel = ensaio?.Vessel,
+                ensaioLocalTeste = ensaio?.LocalTeste,
+                ensaioDepartamento = ensaio?.Departamento,
+                ensaioOrdemServico = ensaio?.OrdemServico,
+                cilindroCodigoSap = relatorio.Cilindro?.CodigoInterno,
+                cilindroTagId = relatorio.Cilindro?.CodigoCliente,
+                cilindroFabricante = relatorio.Cilindro?.Fabricante,
+                cilindroNumeroSerie = relatorio.Cilindro?.NumeroSerie,
+                cilindroPartNumber = relatorio.Cilindro?.PartNumber,
+                cilindroFluido = relatorio.Cilindro?.FluidoUtilizado,
+                cilindroDiametroInterno = relatorio.Cilindro?.DiametroInterno,
+                cilindroDiametroHaste = relatorio.Cilindro?.DiametroHaste,
+                cilindroMaximaPressaoA = relatorio.Cilindro?.MaximaPressaoA,
+                cilindroMaximaPressaoB = relatorio.Cilindro?.MaximaPressaoB,
                 campos = camposComRespostas
             };
 
