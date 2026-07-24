@@ -3,11 +3,17 @@ name: Deploy to DataMais
 on:
   push:
     branches: [ main ]
+  workflow_dispatch:   # permite rodar manualmente pela aba Actions quando reativar
 
 jobs:
   deploy:
+    # ⛔ DEPLOY AUTOMÁTICO DESABILITADO POR ORA.
+    # A VM de destino está offline e o deploy é feito manualmente via deploy-local.sh.
+    # Com este guard, o job é SEMPRE PULADO (aparece como "skipped", não como falha).
+    # Para reativar o deploy automático: troque 'false' por 'true' (ou remova esta linha).
+    if: ${{ false }}
     runs-on: ubuntu-latest
-    
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
