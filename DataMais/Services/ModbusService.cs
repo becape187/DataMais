@@ -349,10 +349,18 @@ public class ModbusService
             
             // Conecta com timeout
             var connectTask = tcpClient.ConnectAsync(ipAddress, port);
-            if (!connectTask.Wait(_connectionTimeout))
+            try
+            {
+                if (!connectTask.Wait(_connectionTimeout))
+                {
+                    tcpClient.Close();
+                    throw new TimeoutException($"Timeout ao conectar em {ipAddress}:{port}");
+                }
+            }
+            catch (AggregateException ae)
             {
                 tcpClient.Close();
-                throw new TimeoutException($"Timeout ao conectar em {ipAddress}:{port}");
+                throw ae.InnerException ?? ae;
             }
 
             if (!tcpClient.Connected)
@@ -479,7 +487,7 @@ public class ModbusService
             {
                 return await operacao();
             }
-            catch (Exception ex) when (ex is SocketException || ex is TimeoutException || ex is InvalidOperationException)
+            catch (Exception ex) when (IsErroTransiente(ex))
             {
                 lastException = ex;
                 _logger.LogWarning(ex, "Erro na tentativa {Tentativa}/{MaxRetries} para {IpAddress}:{Port}", 
@@ -496,9 +504,26 @@ public class ModbusService
             }
         }
 
-        _logger.LogError(lastException, "Falha após {MaxRetries} tentativas para {IpAddress}:{Port}", 
+        _logger.LogError(lastException, "Falha após {MaxRetries} tentativas para {IpAddress}:{Port}",
             maxRetries + 1, ipAddress, port);
         throw lastException!;
+    }
+
+    /// <summary>
+    /// Erros de conexão/transporte que justificam derrubar a conexão e tentar novamente.
+    /// Erros de programação (ArgumentException, NotSupportedException) e de protocolo (SlaveException)
+    /// não são retentados. Task.Run/Wait podem embrulhar o erro real em AggregateException.
+    /// </summary>
+    private static bool IsErroTransiente(Exception ex)
+    {
+        if (ex is AggregateException ae)
+            ex = ae.InnerException ?? ex;
+
+        return ex is SocketException
+            || ex is TimeoutException
+            || ex is InvalidOperationException
+            || ex is System.IO.IOException
+            || ex is ObjectDisposedException;
     }
 
     /// <summary>
