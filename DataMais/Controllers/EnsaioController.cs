@@ -172,45 +172,83 @@ namespace DataMais.Controllers;
 
             try
             {
-                // 1. Liga a câmara correspondente (Avança para Câmara A, Recua para Câmara B)
+                // 1. Seleciona a câmara (Avança para Câmara A, Recua para Câmara B).
+                //    Desliga o botão OPOSTO antes de ligar o escolhido — se o operador deixou
+                //    o outro coil retido pela IHM, os dois ficariam ligados ao mesmo tempo.
+                //    Depois relê os dois coils para confirmar o estado no CLP (double-check).
                 var nomeBotaoCamara = camara == "A" ? "BOTAO_AVANCA_IHM" : "BOTAO_RECUA_IHM";
+                var nomeBotaoOposto = camara == "A" ? "BOTAO_RECUA_IHM" : "BOTAO_AVANCA_IHM";
+
                 var botaoCamara = await _context.ModbusConfigs
                     .FirstOrDefaultAsync(m => m.Nome == nomeBotaoCamara && m.Ativo);
+                var botaoOposto = await _context.ModbusConfigs
+                    .FirstOrDefaultAsync(m => m.Nome == nomeBotaoOposto && m.Ativo);
 
-                if (botaoCamara != null)
+                if (botaoCamara == null)
                 {
-                    string funcaoEscrita = botaoCamara.TipoDado == "Boolean" || botaoCamara.FuncaoModbus == "ReadCoils" 
-                        ? "WriteSingleCoil" 
-                        : "WriteSingleRegister";
+                    return await AbortarEnsaioPorFalhaCamaraAsync(ensaio, botaoCamara, botaoOposto,
+                        $"Registro '{nomeBotaoCamara}' não encontrado no cadastro Modbus.");
+                }
 
-                    var configTemp = new ModbusConfig
+                // 1a. Desliga o botão oposto primeiro
+                if (botaoOposto != null)
+                {
+                    var opostoDesligado = await _modbusService.EscreverRegistroAsync(ConfigParaEscrita(botaoOposto), false);
+                    if (!opostoDesligado)
                     {
-                        Id = botaoCamara.Id,
-                        Nome = botaoCamara.Nome,
-                        IpAddress = botaoCamara.IpAddress,
-                        Port = botaoCamara.Port,
-                        SlaveId = botaoCamara.SlaveId,
-                        FuncaoModbus = funcaoEscrita,
-                        EnderecoRegistro = botaoCamara.EnderecoRegistro,
-                        QuantidadeRegistros = botaoCamara.QuantidadeRegistros,
-                        TipoDado = botaoCamara.TipoDado,
-                        Ativo = botaoCamara.Ativo
-                    };
-
-                    var camaraAtivada = await _modbusService.EscreverRegistroAsync(configTemp, true);
-                    if (!camaraAtivada)
-                    {
-                        errosModbus.Add($"Erro ao ativar {nomeBotaoCamara}");
-                    }
-                    else
-                    {
-                        _logger.LogInformation("Câmara {Camara} ({Botao}) ativada com sucesso", camara, nomeBotaoCamara);
+                        return await AbortarEnsaioPorFalhaCamaraAsync(ensaio, botaoCamara, botaoOposto,
+                            $"Não foi possível desligar {nomeBotaoOposto} antes de ativar a câmara {camara}.");
                     }
                 }
                 else
                 {
-                    errosModbus.Add($"Registro '{nomeBotaoCamara}' não encontrado");
+                    errosModbus.Add($"Registro '{nomeBotaoOposto}' não encontrado — não foi possível garantir que o botão oposto está desligado");
                 }
+
+                // 1b. Liga o botão da câmara escolhida
+                var camaraAtivada = await _modbusService.EscreverRegistroAsync(ConfigParaEscrita(botaoCamara), true);
+                if (!camaraAtivada)
+                {
+                    return await AbortarEnsaioPorFalhaCamaraAsync(ensaio, botaoCamara, botaoOposto,
+                        $"Não foi possível ativar {nomeBotaoCamara}.");
+                }
+
+                // 1c. Double-check: relê os dois coils e confirma escolhido=ON, oposto=OFF.
+                //     Se não bater, reaplica os comandos e confere mais uma vez.
+                bool confirmado = false;
+                bool? estadoCamara = null, estadoOposto = null;
+
+                for (int tentativa = 1; tentativa <= 2 && !confirmado; tentativa++)
+                {
+                    await Task.Delay(200);
+                    estadoCamara = await LerCoilAsync(botaoCamara.Id);
+                    estadoOposto = botaoOposto != null ? await LerCoilAsync(botaoOposto.Id) : false;
+
+                    if (estadoCamara == true && estadoOposto != true)
+                    {
+                        confirmado = true;
+                    }
+                    else if (tentativa < 2)
+                    {
+                        _logger.LogWarning(
+                            "Estado dos botões de câmara divergente ({BotaoCamara}={EstadoCamara}, {BotaoOposto}={EstadoOposto}), reaplicando comandos",
+                            nomeBotaoCamara, estadoCamara, nomeBotaoOposto, estadoOposto);
+
+                        if (botaoOposto != null && estadoOposto == true)
+                            await _modbusService.EscreverRegistroAsync(ConfigParaEscrita(botaoOposto), false);
+                        if (estadoCamara != true)
+                            await _modbusService.EscreverRegistroAsync(ConfigParaEscrita(botaoCamara), true);
+                    }
+                }
+
+                if (!confirmado)
+                {
+                    return await AbortarEnsaioPorFalhaCamaraAsync(ensaio, botaoCamara, botaoOposto,
+                        $"Estado dos botões de câmara não confirmado após reaplicar: {nomeBotaoCamara}={FormatarEstadoCoil(estadoCamara)}, {nomeBotaoOposto}={FormatarEstadoCoil(estadoOposto)} (esperado: ligado / desligado). Verifique se o botão Avança/Recua não está pressionado na tela.");
+                }
+
+                _logger.LogInformation("Câmara {Camara} ({Botao}) ativada e confirmada por leitura ({Oposto} desligado)",
+                    camara, nomeBotaoCamara, nomeBotaoOposto);
 
                 // 2. Escreve Pressão de Carga
                 var pressaoRegistro = await _context.ModbusConfigs
@@ -789,29 +827,102 @@ namespace DataMais.Controllers;
             return false;
         }
 
-        string funcaoEscrita = iniciaRegistro.TipoDado == "Boolean" || iniciaRegistro.FuncaoModbus == "ReadCoils"
-            ? "WriteSingleCoil"
-            : "WriteSingleRegister";
+        var configTemp = ConfigParaEscrita(iniciaRegistro);
 
-        var configTemp = new ModbusConfig
-        {
-            Id = iniciaRegistro.Id,
-            Nome = iniciaRegistro.Nome,
-            IpAddress = iniciaRegistro.IpAddress,
-            Port = iniciaRegistro.Port,
-            SlaveId = iniciaRegistro.SlaveId,
-            FuncaoModbus = funcaoEscrita,
-            EnderecoRegistro = iniciaRegistro.EnderecoRegistro,
-            QuantidadeRegistros = iniciaRegistro.QuantidadeRegistros,
-            TipoDado = iniciaRegistro.TipoDado,
-            Ativo = iniciaRegistro.Ativo
-        };
-
-        object v = funcaoEscrita == "WriteSingleCoil"
+        object v = configTemp.FuncaoModbus == "WriteSingleCoil"
             ? (object)valor
             : (object)(ushort)(valor ? 1 : 0);
 
         return await _modbusService.EscreverRegistroAsync(configTemp, v);
+    }
+
+    /// <summary>
+    /// Monta uma cópia do registro com a função de ESCRITA correspondente — os registros
+    /// de botão são cadastrados como ReadCoils (leitura de estado) e precisam virar
+    /// WriteSingleCoil/WriteSingleRegister para escrever.
+    /// </summary>
+    private static ModbusConfig ConfigParaEscrita(ModbusConfig registro)
+    {
+        string funcaoEscrita = registro.TipoDado == "Boolean" || registro.FuncaoModbus == "ReadCoils"
+            ? "WriteSingleCoil"
+            : "WriteSingleRegister";
+
+        return new ModbusConfig
+        {
+            Id = registro.Id,
+            Nome = registro.Nome,
+            IpAddress = registro.IpAddress,
+            Port = registro.Port,
+            SlaveId = registro.SlaveId,
+            FuncaoModbus = funcaoEscrita,
+            EnderecoRegistro = registro.EnderecoRegistro,
+            QuantidadeRegistros = registro.QuantidadeRegistros,
+            TipoDado = registro.TipoDado,
+            Ativo = registro.Ativo
+        };
+    }
+
+    /// <summary>
+    /// Lê o estado atual de um coil pelo registro cadastrado (ReadCoils).
+    /// Retorna null se a leitura falhar.
+    /// </summary>
+    private async Task<bool?> LerCoilAsync(int registroId)
+    {
+        try
+        {
+            var valor = await _modbusService.LerRegistroAsync(registroId);
+            if (valor == null)
+                return null;
+            return valor is bool b ? b : valor.ToString() == "1" || valor.ToString() == "True";
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Erro ao ler estado do coil {RegistroId} para confirmação", registroId);
+            return null;
+        }
+    }
+
+    private static string FormatarEstadoCoil(bool? estado) =>
+        estado == null ? "leitura falhou" : (estado.Value ? "ligado" : "desligado");
+
+    /// <summary>
+    /// Aborta o início do ensaio quando a seleção da câmara não pôde ser garantida:
+    /// desliga os dois botões por segurança (best-effort), remove o ensaio recém-criado
+    /// do banco e devolve erro 500 com a causa (o frontend exibe a message no alert).
+    /// </summary>
+    private async Task<IActionResult> AbortarEnsaioPorFalhaCamaraAsync(
+        Ensaio ensaio, ModbusConfig? botaoCamara, ModbusConfig? botaoOposto, string motivo)
+    {
+        _logger.LogError("Abortando início do ensaio {EnsaioId}: {Motivo}", ensaio.Id, motivo);
+
+        foreach (var botao in new[] { botaoCamara, botaoOposto })
+        {
+            if (botao == null) continue;
+            try
+            {
+                await _modbusService.EscreverRegistroAsync(ConfigParaEscrita(botao), false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Falha ao desligar {Botao} durante aborto do ensaio {EnsaioId}", botao.Nome, ensaio.Id);
+            }
+        }
+
+        try
+        {
+            _context.Ensaios.Remove(ensaio);
+            await _context.SaveChangesAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Falha ao remover ensaio {EnsaioId} abortado do banco", ensaio.Id);
+        }
+
+        return StatusCode(500, new
+        {
+            message = $"Ensaio abortado: {motivo}",
+            abortado = true
+        });
     }
 
     /// <summary>
