@@ -115,8 +115,16 @@ public class RegistroConclusaoMonitor : BackgroundService
     private async Task ConcluirEnsaioAsync(DataMaisDbContext context, Ensaio ensaio, CancellationToken ct)
     {
         // Best-effort: desliga o coil INICIA_REGISTRO para deixar a unidade pronta para o próximo ciclo
-        try { await SetIniciaRegistroAsync(context, false); }
+        try { await SetCoilPorNomeAsync(context, "INICIA_REGISTRO", false); }
         catch (Exception ex) { _logger.LogWarning(ex, "Falha ao desligar INICIA_REGISTRO ao concluir ensaio {EnsaioId}", ensaio.Id); }
+
+        // Best-effort: desliga os dois botões de câmara da IHM (avança e recua),
+        // independente da câmara testada, para não deixar coil retido no CLP.
+        foreach (var nomeBotao in new[] { "BOTAO_AVANCA_IHM", "BOTAO_RECUA_IHM" })
+        {
+            try { await SetCoilPorNomeAsync(context, nomeBotao, false); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Falha ao desligar {Botao} ao concluir ensaio {EnsaioId}", nomeBotao, ensaio.Id); }
+        }
 
         ensaio.Status = "Concluido";
         ensaio.DataFim = DateTime.UtcNow;
@@ -141,29 +149,33 @@ public class RegistroConclusaoMonitor : BackgroundService
         _logger.LogInformation("Ensaio {EnsaioId} concluído e relatório {Relatorio} gerado pelo monitor.", ensaio.Id, relatorio.Numero);
     }
 
-    private async Task SetIniciaRegistroAsync(DataMaisDbContext context, bool valor)
+    private async Task SetCoilPorNomeAsync(DataMaisDbContext context, string nome, bool valor)
     {
-        var iniciaRegistro = await context.ModbusConfigs
-            .FirstOrDefaultAsync(m => m.Nome == "INICIA_REGISTRO" && m.Ativo);
+        var registro = await context.ModbusConfigs
+            .FirstOrDefaultAsync(m => m.Nome == nome && m.Ativo);
 
-        if (iniciaRegistro == null) return;
+        if (registro == null)
+        {
+            _logger.LogWarning("Registro '{Nome}' não encontrado ao tentar definir {Valor}", nome, valor);
+            return;
+        }
 
-        string funcaoEscrita = iniciaRegistro.TipoDado == "Boolean" || iniciaRegistro.FuncaoModbus == "ReadCoils"
+        string funcaoEscrita = registro.TipoDado == "Boolean" || registro.FuncaoModbus == "ReadCoils"
             ? "WriteSingleCoil"
             : "WriteSingleRegister";
 
         var configTemp = new ModbusConfig
         {
-            Id = iniciaRegistro.Id,
-            Nome = iniciaRegistro.Nome,
-            IpAddress = iniciaRegistro.IpAddress,
-            Port = iniciaRegistro.Port,
-            SlaveId = iniciaRegistro.SlaveId,
+            Id = registro.Id,
+            Nome = registro.Nome,
+            IpAddress = registro.IpAddress,
+            Port = registro.Port,
+            SlaveId = registro.SlaveId,
             FuncaoModbus = funcaoEscrita,
-            EnderecoRegistro = iniciaRegistro.EnderecoRegistro,
-            QuantidadeRegistros = iniciaRegistro.QuantidadeRegistros,
-            TipoDado = iniciaRegistro.TipoDado,
-            Ativo = iniciaRegistro.Ativo
+            EnderecoRegistro = registro.EnderecoRegistro,
+            QuantidadeRegistros = registro.QuantidadeRegistros,
+            TipoDado = registro.TipoDado,
+            Ativo = registro.Ativo
         };
 
         object v = funcaoEscrita == "WriteSingleCoil" ? (object)valor : (object)(ushort)(valor ? 1 : 0);

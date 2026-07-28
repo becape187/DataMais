@@ -481,6 +481,15 @@ namespace DataMais.Controllers;
                 _logger.LogWarning("Não foi possível desligar INICIA_REGISTRO ao interromper o ensaio {EnsaioId}", id);
             }
 
+            // Desliga explicitamente os dois botões de câmara da IHM (avança e recua),
+            // independente da câmara testada, para não deixar coil retido no CLP.
+            var falhasBotoes = await DesligarBotoesCamaraAsync();
+            if (falhasBotoes.Any())
+            {
+                _logger.LogWarning("Falhas ao desligar botões de câmara ao interromper o ensaio {EnsaioId}: {Falhas}",
+                    id, string.Join(", ", falhasBotoes));
+            }
+
             // Finaliza ensaio
             ensaio.Status = "Concluido";
             ensaio.DataFim = DateTime.UtcNow;
@@ -546,6 +555,15 @@ namespace DataMais.Controllers;
             if (!desligou)
             {
                 _logger.LogWarning("Não foi possível desligar INICIA_REGISTRO ao cancelar o ensaio {EnsaioId}", id);
+            }
+
+            // Desliga explicitamente os dois botões de câmara da IHM (avança e recua),
+            // independente da câmara testada, para não deixar coil retido no CLP.
+            var falhasBotoes = await DesligarBotoesCamaraAsync();
+            if (falhasBotoes.Any())
+            {
+                _logger.LogWarning("Falhas ao desligar botões de câmara ao cancelar o ensaio {EnsaioId}: {Falhas}",
+                    id, string.Join(", ", falhasBotoes));
             }
 
             // Marca como cancelado (não salvo pelo usuário)
@@ -884,6 +902,50 @@ namespace DataMais.Controllers;
 
     private static string FormatarEstadoCoil(bool? estado) =>
         estado == null ? "leitura falhou" : (estado.Value ? "ligado" : "desligado");
+
+    /// <summary>
+    /// Desliga explicitamente os DOIS botões de câmara da IHM (BOTAO_AVANCA_IHM e
+    /// BOTAO_RECUA_IHM) no CLP, independente da câmara do ensaio. Usado ao parar o
+    /// ensaio (interromper/cancelar) para não deixar nenhum coil retido. Best-effort:
+    /// falhas são logadas e devolvidas na lista, sem lançar exceção.
+    /// </summary>
+    private async Task<List<string>> DesligarBotoesCamaraAsync()
+    {
+        var falhas = new List<string>();
+
+        foreach (var nome in new[] { "BOTAO_AVANCA_IHM", "BOTAO_RECUA_IHM" })
+        {
+            try
+            {
+                var botao = await _context.ModbusConfigs
+                    .FirstOrDefaultAsync(m => m.Nome == nome && m.Ativo);
+
+                if (botao == null)
+                {
+                    _logger.LogWarning("Registro '{Nome}' não encontrado ao desligar botões de câmara", nome);
+                    falhas.Add($"Registro '{nome}' não encontrado");
+                    continue;
+                }
+
+                var desligado = await _modbusService.EscreverRegistroAsync(ConfigParaEscrita(botao), false);
+                if (!desligado)
+                {
+                    falhas.Add($"Erro ao desligar {nome}");
+                }
+                else
+                {
+                    _logger.LogInformation("{Nome} desligado ao parar o ensaio", nome);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Erro ao desligar {Nome} ao parar o ensaio", nome);
+                falhas.Add($"Erro ao desligar {nome}: {ex.Message}");
+            }
+        }
+
+        return falhas;
+    }
 
     /// <summary>
     /// Aborta o início do ensaio quando a seleção da câmara não pôde ser garantida:
