@@ -61,13 +61,9 @@ const Dashboard = () => {
   const [loading, setLoading] = useState(true)
   const [modbusConectado, setModbusConectado] = useState(false)
   
-  // Estados para cliente e cilindro selecionado
+  // Cliente e cilindro do último ensaio — a escolha acontece na tela de Ensaio
   const [clienteSelecionado, setClienteSelecionado] = useState<Cliente | null>(null)
   const [cilindroSelecionado, setCilindroSelecionado] = useState<Cilindro | null>(null)
-  const [clientes, setClientes] = useState<Cliente[]>([])
-  const [cilindros, setCilindros] = useState<Cilindro[]>([])
-  const [showConfigModal, setShowConfigModal] = useState(false)
-  const [savingConfig, setSavingConfig] = useState(false)
 
   // Estados dos registros Modbus
   const [registros, setRegistros] = useState<{
@@ -126,31 +122,6 @@ const Dashboard = () => {
 
     buscarConfiguracaoSistema()
   }, [])
-
-  // Busca lista de clientes e cilindros para o modal
-  useEffect(() => {
-    if (showConfigModal) {
-      const buscarListas = async () => {
-        try {
-          const clientesResponse = await api.get('/Cliente')
-          setClientes(clientesResponse.data || [])
-          
-          if (clienteSelecionado?.id) {
-            try {
-              const cilindrosResponse = await api.get(`/Cilindro/cliente/${clienteSelecionado.id}`)
-              setCilindros(cilindrosResponse.data || [])
-            } catch (err) {
-              console.warn('Erro ao buscar cilindros:', err)
-            }
-          }
-        } catch (err) {
-          console.error('Erro ao buscar listas:', err)
-        }
-      }
-      
-      buscarListas()
-    }
-  }, [showConfigModal, clienteSelecionado?.id])
 
   // Busca os registros Modbus e sensores
   useEffect(() => {
@@ -402,246 +373,6 @@ const Dashboard = () => {
     }
   }
 
-  const enviarLimitesPressaoViaModbus = async (cilindro: Cilindro | null) => {
-    try {
-      // Verifica se há cilindro selecionado com valores de pressão máxima
-      if (!cilindro || !registros.limiteA || !registros.limiteB) {
-        console.warn('Cilindro ou registros LIMITE_A/LIMITE_B não encontrados')
-        return
-      }
-
-      // Verifica se os valores de pressão máxima estão definidos
-      if (cilindro.maximaPressaoA === undefined || cilindro.maximaPressaoA === null ||
-          cilindro.maximaPressaoB === undefined || cilindro.maximaPressaoB === null) {
-        console.warn('Valores de pressão máxima não definidos para o cilindro')
-        return
-      }
-
-      console.log('Enviando limites de pressão via Modbus:', {
-        limiteA: cilindro.maximaPressaoA,
-        limiteB: cilindro.maximaPressaoB,
-        registroLimiteA: registros.limiteA.id,
-        registroLimiteB: registros.limiteB.id
-      })
-
-      // Envia pressão máxima A para LIMITE_A
-      await api.post(`/ModbusConfig/${registros.limiteA.id}/write`, { 
-        valor: cilindro.maximaPressaoA 
-      })
-
-      // Envia pressão máxima B para LIMITE_B
-      await api.post(`/ModbusConfig/${registros.limiteB.id}/write`, { 
-        valor: cilindro.maximaPressaoB 
-      })
-
-      console.log('Limites de pressão enviados com sucesso via Modbus')
-    } catch (err: any) {
-      console.error('Erro ao enviar limites de pressão via Modbus:', err)
-      throw err // Propaga o erro para ser tratado no handleSalvarConfiguracao
-    }
-  }
-
-  const enviarCalibracaoViaModbus = async () => {
-    try {
-      // Busca sensores configurados
-      const responseSensores = await api.get('/Sensor')
-      const todosSensores: Sensor[] = responseSensores.data
-
-      // Identifica sensores A, B e Geral
-      const sensorA = todosSensores.find(s => {
-        const nomeUpper = s.nome.toUpperCase()
-        return s.ativo && nomeUpper.includes('A') && nomeUpper.includes('PRESSÃO')
-      })
-
-      const sensorB = todosSensores.find(s => {
-        const nomeUpper = s.nome.toUpperCase()
-        return s.ativo && nomeUpper.includes('B') && nomeUpper.includes('PRESSÃO')
-      })
-
-      const sensorGeral = todosSensores.find(s => {
-        const nomeUpper = s.nome.toUpperCase()
-        return s.ativo && (nomeUpper.includes('GERAL') || (nomeUpper.includes('PRESSÃO') && !nomeUpper.includes('A') && !nomeUpper.includes('B')))
-      })
-
-      // Busca registros Modbus para escrita
-      const responseModbus = await api.get('/ModbusConfig')
-      const todosRegistros: ModbusRegistro[] = responseModbus.data
-
-      const registrosModbus: Record<string, ModbusRegistro> = {}
-      todosRegistros.forEach(reg => {
-        if (reg.ativo) {
-          registrosModbus[reg.nome] = reg
-        }
-      })
-
-      console.log('Registros Modbus encontrados para escrita:', {
-        INPUT_MIN: registrosModbus['INPUT_MIN']?.id,
-        INPUT_MAX: registrosModbus['INPUT_MAX']?.id,
-        OUTPUT_MIN: registrosModbus['OUTPUT_MIN']?.id,
-        OUTPUT_MAX: registrosModbus['OUTPUT_MAX']?.id,
-        INPUT_MIN_1: registrosModbus['INPUT_MIN_1']?.id,
-        INPUT_MAX_1: registrosModbus['INPUT_MAX_1']?.id,
-        OUTPUT_MIN_1: registrosModbus['OUTPUT_MIN_1']?.id,
-        OUTPUT_MAX_1: registrosModbus['OUTPUT_MAX_1']?.id,
-        INPUT_MIN_2: registrosModbus['INPUT_MIN_2']?.id,
-        INPUT_MAX_2: registrosModbus['INPUT_MAX_2']?.id,
-        OUTPUT_MIN_2: registrosModbus['OUTPUT_MIN_2']?.id,
-        OUTPUT_MAX_2: registrosModbus['OUTPUT_MAX_2']?.id
-      })
-
-      console.log('Sensores encontrados:', {
-        sensorA: sensorA ? { id: sensorA.id, nome: sensorA.nome, inputMin: sensorA.inputMin, inputMax: sensorA.inputMax, outputMin: sensorA.outputMin, outputMax: sensorA.outputMax } : null,
-        sensorB: sensorB ? { id: sensorB.id, nome: sensorB.nome, inputMin: sensorB.inputMin, inputMax: sensorB.inputMax, outputMin: sensorB.outputMin, outputMax: sensorB.outputMax } : null,
-        sensorGeral: sensorGeral ? { id: sensorGeral.id, nome: sensorGeral.nome, inputMin: sensorGeral.inputMin, inputMax: sensorGeral.inputMax, outputMin: sensorGeral.outputMin, outputMax: sensorGeral.outputMax } : null
-      })
-
-      // Envia calibração para PRESSAO_A
-      if (sensorA && sensorA.inputMin !== null && sensorA.inputMax !== null && 
-          sensorA.outputMin !== null && sensorA.outputMax !== null) {
-        const registros = {
-          INPUT_MIN: registrosModbus['INPUT_MIN'],
-          INPUT_MAX: registrosModbus['INPUT_MAX'],
-          OUTPUT_MIN: registrosModbus['OUTPUT_MIN'],
-          OUTPUT_MAX: registrosModbus['OUTPUT_MAX']
-        }
-
-        if (registros.INPUT_MIN) {
-          await api.post(`/ModbusConfig/${registros.INPUT_MIN.id}/write`, { valor: sensorA.inputMin })
-        }
-        if (registros.INPUT_MAX) {
-          await api.post(`/ModbusConfig/${registros.INPUT_MAX.id}/write`, { valor: sensorA.inputMax })
-        }
-        if (registros.OUTPUT_MIN) {
-          await api.post(`/ModbusConfig/${registros.OUTPUT_MIN.id}/write`, { valor: sensorA.outputMin })
-        }
-        if (registros.OUTPUT_MAX) {
-          await api.post(`/ModbusConfig/${registros.OUTPUT_MAX.id}/write`, { valor: sensorA.outputMax })
-        }
-      }
-
-      // Envia calibração para PRESSAO_B
-      if (sensorB && sensorB.inputMin !== null && sensorB.inputMax !== null && 
-          sensorB.outputMin !== null && sensorB.outputMax !== null) {
-        const registros = {
-          INPUT_MIN_1: registrosModbus['INPUT_MIN_1'],
-          INPUT_MAX_1: registrosModbus['INPUT_MAX_1'],
-          OUTPUT_MIN_1: registrosModbus['OUTPUT_MIN_1'],
-          OUTPUT_MAX_1: registrosModbus['OUTPUT_MAX_1']
-        }
-
-        if (registros.INPUT_MIN_1) {
-          await api.post(`/ModbusConfig/${registros.INPUT_MIN_1.id}/write`, { valor: sensorB.inputMin })
-        }
-        if (registros.INPUT_MAX_1) {
-          await api.post(`/ModbusConfig/${registros.INPUT_MAX_1.id}/write`, { valor: sensorB.inputMax })
-        }
-        if (registros.OUTPUT_MIN_1) {
-          await api.post(`/ModbusConfig/${registros.OUTPUT_MIN_1.id}/write`, { valor: sensorB.outputMin })
-        }
-        if (registros.OUTPUT_MAX_1) {
-          await api.post(`/ModbusConfig/${registros.OUTPUT_MAX_1.id}/write`, { valor: sensorB.outputMax })
-        }
-      }
-
-      // Envia calibração para PRESSAO_GERAL
-      if (sensorGeral && sensorGeral.inputMin !== null && sensorGeral.inputMax !== null && 
-          sensorGeral.outputMin !== null && sensorGeral.outputMax !== null) {
-        const registros = {
-          INPUT_MIN_2: registrosModbus['INPUT_MIN_2'],
-          INPUT_MAX_2: registrosModbus['INPUT_MAX_2'],
-          OUTPUT_MIN_2: registrosModbus['OUTPUT_MIN_2'],
-          OUTPUT_MAX_2: registrosModbus['OUTPUT_MAX_2']
-        }
-
-        if (registros.INPUT_MIN_2) {
-          await api.post(`/ModbusConfig/${registros.INPUT_MIN_2.id}/write`, { valor: sensorGeral.inputMin })
-        }
-        if (registros.INPUT_MAX_2) {
-          await api.post(`/ModbusConfig/${registros.INPUT_MAX_2.id}/write`, { valor: sensorGeral.inputMax })
-        }
-        if (registros.OUTPUT_MIN_2) {
-          await api.post(`/ModbusConfig/${registros.OUTPUT_MIN_2.id}/write`, { valor: sensorGeral.outputMin })
-        }
-        if (registros.OUTPUT_MAX_2) {
-          await api.post(`/ModbusConfig/${registros.OUTPUT_MAX_2.id}/write`, { valor: sensorGeral.outputMax })
-        }
-      }
-    } catch (err: any) {
-      console.error('Erro ao enviar calibração via Modbus:', err)
-      throw err // Propaga o erro para ser tratado no handleSalvarConfiguracao
-    }
-  }
-
-  const handleSalvarConfiguracao = async () => {
-    try {
-      setSavingConfig(true)
-      
-      // Busca dados completos do cilindro se foi selecionado
-      let cilindroCompleto = cilindroSelecionado
-      if (cilindroSelecionado?.id) {
-        try {
-          const cilindroResponse = await api.get(`/cilindro/${cilindroSelecionado.id}`)
-          const cilindroData = cilindroResponse.data
-          cilindroCompleto = {
-            id: cilindroData.id,
-            nome: cilindroData.nome,
-            codigoCliente: cilindroData.codigoCliente,
-            codigoInterno: cilindroData.codigoInterno,
-            maximaPressaoA: cilindroData.maximaPressaoA,
-            maximaPressaoB: cilindroData.maximaPressaoB
-          }
-          setCilindroSelecionado(cilindroCompleto)
-        } catch (err) {
-          console.warn('Erro ao buscar dados completos do cilindro:', err)
-        }
-      }
-      
-      // Envia limites de pressão para MODBUS LIMITE_A e LIMITE_B
-      if (cilindroCompleto) {
-        await enviarLimitesPressaoViaModbus(cilindroCompleto)
-      }
-      
-      // Envia calibrações dos sensores via Modbus
-      await enviarCalibracaoViaModbus()
-      
-      // Usa endpoint específico para salvar apenas configurações do sistema
-      // Isso evita problemas de permissão ao tentar salvar no arquivo .env completo
-      const sistemaConfig = {
-        clienteId: clienteSelecionado?.id || null,
-        cilindroId: cilindroSelecionado?.id || null
-      }
-      
-      await api.post('/config/sistema', sistemaConfig)
-      setShowConfigModal(false)
-      
-      // Recarrega a página para atualizar os dados
-      window.location.reload()
-    } catch (err: any) {
-      console.error('Erro ao salvar configuração:', err)
-      const errorMessage = err.response?.data?.message || err.message || 'Erro desconhecido'
-      alert('Erro ao salvar configuração: ' + errorMessage)
-    } finally {
-      setSavingConfig(false)
-    }
-  }
-
-  const handleClienteChange = async (clienteId: number) => {
-    const cliente = clientes.find(c => c.id === clienteId)
-    setClienteSelecionado(cliente || null)
-    setCilindroSelecionado(null) // Reseta cilindro quando muda cliente
-    
-    // Busca cilindros do cliente selecionado
-    if (clienteId) {
-      try {
-        const response = await api.get(`/Cilindro/cliente/${clienteId}`)
-        setCilindros(response.data || [])
-      } catch (err) {
-        console.error('Erro ao buscar cilindros:', err)
-        setCilindros([])
-      }
-    }
-  }
-
   return (
     <div className="dashboard">
       <div className="page-header">
@@ -649,15 +380,9 @@ const Dashboard = () => {
           <h1>Dashboard</h1>
           <p className="page-subtitle">Visão geral do sistema</p>
         </div>
-        <button 
-          className="btn btn-primary"
-          onClick={() => setShowConfigModal(true)}
-        >
-          ⚙️ Configurar Sistema
-        </button>
       </div>
 
-      {/* Card de destaque - Cliente e Cilindro */}
+      {/* Cliente e cilindro do último ensaio — a escolha é feita ao iniciar o ensaio */}
       {(clienteSelecionado || cilindroSelecionado) && (
         <div className="sistema-card">
           <div className="sistema-content">
@@ -678,98 +403,6 @@ const Dashboard = () => {
                     ? `${cilindroSelecionado.nome} (${cilindroSelecionado.codigoCliente})`
                     : 'Não selecionado'}
                 </span>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal de configuração */}
-      {showConfigModal && (
-        <div className="modal-overlay" onClick={() => setShowConfigModal(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h2>Configurar Sistema</h2>
-              <button className="modal-close" onClick={() => setShowConfigModal(false)}>×</button>
-            </div>
-            <div className="modal-form">
-              <div className="form-group">
-                <label>Cliente *</label>
-                <select
-                  value={clienteSelecionado?.id || ''}
-                  onChange={(e) => handleClienteChange(Number(e.target.value))}
-                  required
-                >
-                  <option value="">Selecione um cliente</option>
-                  {clientes.map(cliente => (
-                    <option key={cliente.id} value={cliente.id}>
-                      {cliente.nome}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              
-              <div className="form-group">
-                <label>Cilindro Instalado</label>
-                <select
-                  value={cilindroSelecionado?.id || ''}
-                  onChange={async (e) => {
-                    const cilindroId = Number(e.target.value)
-                    const cilindro = cilindros.find(c => c.id === cilindroId)
-                    
-                    if (cilindro) {
-                      // Busca dados completos do cilindro para obter pressões máximas
-                      try {
-                        const cilindroResponse = await api.get(`/cilindro/${cilindroId}`)
-                        const cilindroData = cilindroResponse.data
-                        setCilindroSelecionado({
-                          id: cilindroData.id,
-                          nome: cilindroData.nome,
-                          codigoCliente: cilindroData.codigoCliente,
-                          codigoInterno: cilindroData.codigoInterno,
-                          maximaPressaoA: cilindroData.maximaPressaoA,
-                          maximaPressaoB: cilindroData.maximaPressaoB
-                        })
-                      } catch (err) {
-                        console.warn('Erro ao buscar dados completos do cilindro:', err)
-                        setCilindroSelecionado(cilindro)
-                      }
-                    } else {
-                      setCilindroSelecionado(null)
-                    }
-                  }}
-                  disabled={!clienteSelecionado}
-                >
-                  <option value="">Selecione um cilindro</option>
-                  {cilindros.map(cilindro => (
-                    <option key={cilindro.id} value={cilindro.id}>
-                      {cilindro.nome} ({cilindro.codigoCliente})
-                    </option>
-                  ))}
-                </select>
-                {!clienteSelecionado && (
-                  <small style={{ color: '#666', marginTop: '4px', display: 'block' }}>
-                    Selecione um cliente primeiro
-                  </small>
-                )}
-              </div>
-
-              <div className="modal-actions">
-                <button 
-                  type="button" 
-                  className="btn btn-secondary" 
-                  onClick={() => setShowConfigModal(false)}
-                >
-                  Cancelar
-                </button>
-                <button 
-                  type="button" 
-                  className="btn btn-primary" 
-                  onClick={handleSalvarConfiguracao}
-                  disabled={savingConfig || !clienteSelecionado}
-                >
-                  {savingConfig ? 'Salvando...' : 'Salvar Configuração'}
-                </button>
               </div>
             </div>
           </div>

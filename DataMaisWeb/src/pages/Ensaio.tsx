@@ -48,6 +48,17 @@ interface EnsaioAberto {
   podeAceitar: boolean
 }
 
+interface OpcaoCliente {
+  id: number
+  nome: string
+}
+
+interface OpcaoCilindro {
+  id: number
+  nome: string
+  codigoCliente?: string | null
+}
+
 const CAMARAS: Camara[] = ['A', 'B']
 
 /** Etapa que vale para o laudo: última tentativa concluída da câmara. */
@@ -68,6 +79,12 @@ const Ensaio = () => {
   const [carregando, setCarregando] = useState(true)
   const [erro, setErro] = useState<string | null>(null)
 
+  // Equipamento sob teste — escolhido aqui, não numa tela de configuração à parte
+  const [clientes, setClientes] = useState<OpcaoCliente[]>([])
+  const [cilindros, setCilindros] = useState<OpcaoCilindro[]>([])
+  const [clienteId, setClienteId] = useState<number | ''>('')
+  const [cilindroId, setCilindroId] = useState<number | ''>('')
+
   // Identificação do documento — preenchida uma vez, no passo 1
   const [vessel, setVessel] = useState('')
   const [localTeste, setLocalTeste] = useState('')
@@ -87,6 +104,7 @@ const Ensaio = () => {
 
   const [modalEncerrar, setModalEncerrar] = useState<Etapa | null>(null)
   const [modalCancelar, setModalCancelar] = useState(false)
+  const [pendenteADescartar, setPendenteADescartar] = useState<EnsaioAberto | null>(null)
   const [ocupado, setOcupado] = useState(false)
 
   const etapaAtiva = ensaio?.etapas.find(e => e.id === ensaio.etapaEmExecucaoId) ?? null
@@ -132,6 +150,55 @@ const Ensaio = () => {
 
     carregar()
   }, [carregarPendentes, registrarLog])
+
+  // Clientes disponíveis + pré-seleção pelo último ensaio (o backend guarda a escolha)
+  useEffect(() => {
+    const carregarOpcoes = async () => {
+      try {
+        const { data } = await api.get('/Cliente')
+        const lista: OpcaoCliente[] = Array.isArray(data) ? data : []
+        setClientes(lista)
+
+        const { data: config } = await api.get('/config')
+        const padraoCliente = config?.sistema?.clienteId
+        const padraoCilindro = config?.sistema?.cilindroId
+
+        if (padraoCliente && lista.some(c => c.id === padraoCliente)) {
+          setClienteId(padraoCliente)
+          if (padraoCilindro) setCilindroId(padraoCilindro)
+        }
+      } catch (err) {
+        console.error('Erro ao carregar clientes:', err)
+      }
+    }
+
+    carregarOpcoes()
+  }, [])
+
+  // Cilindros do cliente escolhido
+  useEffect(() => {
+    if (!clienteId) {
+      setCilindros([])
+      setCilindroId('')
+      return
+    }
+
+    const carregarCilindros = async () => {
+      try {
+        const { data } = await api.get(`/Cilindro/cliente/${clienteId}`)
+        const lista: OpcaoCilindro[] = Array.isArray(data) ? data : []
+        setCilindros(lista)
+        // Mantém a pré-seleção só se o cilindro pertencer mesmo a este cliente
+        setCilindroId(prev => (prev !== '' && lista.some(c => c.id === prev) ? prev : ''))
+      } catch (err) {
+        console.error('Erro ao carregar cilindros do cliente:', err)
+        setCilindros([])
+        setCilindroId('')
+      }
+    }
+
+    carregarCilindros()
+  }, [clienteId])
 
   // Reconstrói o gráfico da etapa em execução ao reentrar na tela
   useEffect(() => {
@@ -227,10 +294,18 @@ const Ensaio = () => {
   // ── Ações ────────────────────────────────────────────────────────────────
   const criarEnsaio = async () => {
     setErro(null)
+
+    if (clienteId === '' || cilindroId === '') {
+      setErro('Selecione o cliente e o cilindro que serão ensaiados.')
+      return
+    }
+
     setOcupado(true)
 
     try {
       const { data } = await api.post('/ensaio', {
+        clienteId,
+        cilindroId,
         vessel: vessel || null,
         localTeste: localTeste || null,
         departamento: departamento || null,
@@ -241,6 +316,13 @@ const Ensaio = () => {
       setDados([])
       setTotalPontosColetados(0)
       registrarLog(`Ensaio ${data.ensaio.numero} criado — escolha por qual câmara começar`)
+
+      // Ao criar o ensaio o backend manda ao CLP os limites do cilindro e a calibração
+      // dos sensores; se algo não foi enviado, o operador precisa saber antes de rodar.
+      if (data.avisosModbus?.length) {
+        setErro(`Parâmetros enviados ao CLP com avisos: ${data.avisosModbus.join(' · ')}`)
+        data.avisosModbus.forEach((aviso: string) => registrarLog(aviso, 'desvio'))
+      }
     } catch (err: any) {
       console.error('Erro ao criar ensaio:', err)
       setErro(mensagemDeErro(err, 'Erro ao criar ensaio'))
@@ -367,6 +449,26 @@ const Ensaio = () => {
     }
   }
 
+  const descartarPendente = async () => {
+    const alvo = pendenteADescartar
+    if (!alvo) return
+
+    setPendenteADescartar(null)
+    setOcupado(true)
+    setErro(null)
+
+    try {
+      await api.post(`/ensaio/${alvo.id}/cancelar`)
+      registrarLog(`Ensaio ${alvo.numero} descartado`)
+      await carregarPendentes()
+    } catch (err: any) {
+      console.error('Erro ao descartar ensaio pendente:', err)
+      setErro(mensagemDeErro(err, 'Erro ao descartar o ensaio'))
+    } finally {
+      setOcupado(false)
+    }
+  }
+
   const abrirComentarios = (eventoId: number) => {
     navigate(`/ensaio/comentarios/${eventoId}`)
   }
@@ -416,11 +518,42 @@ const Ensaio = () => {
       {/* Passo 1 — identificação, só enquanto não existe ensaio aberto */}
       {!ensaio && podeOperar && (
         <div className="ensaio-card">
-          <h2>Identificação do ensaio</h2>
+          <h2>Novo ensaio</h2>
           <p className="ensaio-card-hint">
-            Preenchido uma vez e válido para as duas câmaras.
+            Escolha o equipamento e preencha a identificação — vale para as duas câmaras.
           </p>
           <div className="ensaio-form-grid">
+            <div className="config-field">
+              <label htmlFor="cliente">Cliente *</label>
+              <select
+                id="cliente"
+                value={clienteId}
+                onChange={e => setClienteId(e.target.value ? Number(e.target.value) : '')}
+              >
+                <option value="">Selecione o cliente…</option>
+                {clientes.map(c => (
+                  <option key={c.id} value={c.id}>{c.nome}</option>
+                ))}
+              </select>
+            </div>
+            <div className="config-field">
+              <label htmlFor="cilindro">Cilindro *</label>
+              <select
+                id="cilindro"
+                value={cilindroId}
+                onChange={e => setCilindroId(e.target.value ? Number(e.target.value) : '')}
+                disabled={clienteId === ''}
+              >
+                <option value="">
+                  {clienteId === '' ? 'Escolha o cliente primeiro' : 'Selecione o cilindro…'}
+                </option>
+                {cilindros.map(c => (
+                  <option key={c.id} value={c.id}>
+                    {c.codigoCliente ? `${c.nome} (${c.codigoCliente})` : c.nome}
+                  </option>
+                ))}
+              </select>
+            </div>
             <div className="config-field">
               <label htmlFor="vessel">Vessel / Frota</label>
               <input id="vessel" type="text" value={vessel} onChange={e => setVessel(e.target.value)} />
@@ -462,9 +595,14 @@ const Ensaio = () => {
                   </span>
                 </div>
                 {podeOperar && (
-                  <button className="btn btn-secondary" onClick={() => retomarPendente(p)}>
-                    Retomar
-                  </button>
+                  <div className="pendente-acoes">
+                    <button className="btn btn-secondary" onClick={() => retomarPendente(p)}>
+                      Retomar
+                    </button>
+                    <button className="btn btn-link" onClick={() => setPendenteADescartar(p)}>
+                      Descartar
+                    </button>
+                  </div>
                 )}
               </li>
             ))}
@@ -770,6 +908,26 @@ const Ensaio = () => {
               </button>
               <button className="btn btn-link" onClick={() => setModalEncerrar(null)}>
                 Voltar ao ensaio
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pendenteADescartar && (
+        <div className="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="titulo-descartar">
+          <div className="modal-card">
+            <h2 id="titulo-descartar">Descartar o ensaio {pendenteADescartar.numero}?</h2>
+            <p>
+              As corridas já feitas são perdidas e as leituras apagadas. Nenhum relatório é
+              gerado. Use para limpar ensaios que ficaram pela metade.
+            </p>
+            <div className="modal-acoes">
+              <button className="btn btn-outline-danger" onClick={descartarPendente}>
+                Descartar ensaio
+              </button>
+              <button className="btn btn-link" onClick={() => setPendenteADescartar(null)}>
+                Voltar
               </button>
             </div>
           </div>

@@ -112,11 +112,19 @@
 }
 
 .ensaio-form-grid input,
+.ensaio-form-grid select,
 .camara-parametros input {
   padding: 10px 12px;
   border-radius: 6px;
   border: 1px solid #ddd;
   font-size: 14px;
+  background: var(--white);
+}
+
+.ensaio-form-grid select:disabled {
+  background: var(--bg-light, #F5F7FA);
+  color: var(--text-secondary);
+  cursor: not-allowed;
 }
 
 .ensaio-vazio {
@@ -286,6 +294,27 @@
   font-size: 13px;
   color: var(--text-secondary);
   margin-top: 2px;
+}
+
+.pendente-acoes {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.pendente-acoes .btn-link {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 8px;
+}
+
+.pendente-acoes .btn-link:hover {
+  color: var(--danger);
 }
 
 /* ── Modais de decisão ───────────────────────────────────────────────────── */

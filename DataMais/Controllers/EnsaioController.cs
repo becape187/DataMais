@@ -41,15 +41,17 @@ public class EnsaioController : ControllerBase
     // ── Consulta ────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Ensaio aberto no momento (EmAndamento ou AguardandoAceite), com todas as etapas.
-    /// A tela usa isso para se reidratar: o backend é a fonte da verdade do que está rodando.
+    /// Ensaio com uma câmara RODANDO agora, com todas as etapas. A tela usa isso para se
+    /// reidratar: o backend é a fonte da verdade do que está em execução.
+    /// Ensaio aberto porém parado não entra aqui — ele vive em /pendentes, para o operador
+    /// escolher explicitamente se retoma. Sem isso, um ensaio esquecido sequestraria a tela.
     /// </summary>
     [HttpGet("ativo")]
     public async Task<IActionResult> GetEnsaioAtivo()
     {
         try
         {
-            var ensaio = await CarregarEnsaioAbertoAsync();
+            var ensaio = await CarregarEnsaioEmExecucaoAsync();
 
             if (ensaio == null)
             {
@@ -121,8 +123,9 @@ public class EnsaioController : ControllerBase
 
     /// <summary>
     /// Cria o cabeçalho do ensaio (passo 1). Nenhuma câmara roda ainda.
-    /// Idempotente: se já existe um ensaio aberto, devolve ele em vez de criar outro
-    /// — a bancada é uma só.
+    /// Sempre cria um ensaio NOVO — ensaios abertos e parados ficam em /pendentes e só
+    /// voltam se o operador retomar. O único bloqueio é uma câmara em execução, porque
+    /// a bancada é uma só.
     /// </summary>
     [HttpPost]
     [Authorize(Roles = "Admin,Operador")]
@@ -130,29 +133,40 @@ public class EnsaioController : ControllerBase
     {
         try
         {
-            var aberto = await CarregarEnsaioAbertoAsync();
-            if (aberto != null)
-            {
-                _logger.LogInformation("Criar ensaio idempotente: ensaio {EnsaioId} já está aberto", aberto.Id);
-                return Ok(new { ensaio = MontarDto(aberto), jaExistia = true });
-            }
+            var rodando = await _context.EnsaioEtapas
+                .Include(e => e.Ensaio)
+                .FirstOrDefaultAsync(e => e.Status == StatusEtapa.EmExecucao);
 
-            var sistema = _configService.GetConfig().Sistema;
-
-            if (!sistema.ClienteId.HasValue || !sistema.CilindroId.HasValue)
+            if (rodando != null)
             {
-                return BadRequest(new
+                return Conflict(new
                 {
-                    message = "Cliente e cilindro do sistema não configurados. Configure na tela de Dashboard antes de iniciar o ensaio."
+                    message = $"O ensaio {rodando.Ensaio?.Numero} está com a câmara {rodando.Camara} rodando. Encerre-a antes de começar outro."
                 });
             }
 
-            var cliente = await _context.Clientes.FindAsync(sistema.ClienteId.Value);
-            var cilindro = await _context.Cilindros.FindAsync(sistema.CilindroId.Value);
+            // O cliente/cilindro vêm da tela; o último escolhido fica gravado como padrão
+            // para pré-selecionar no próximo ensaio.
+            var sistema = _configService.GetConfig().Sistema;
+            var clienteId = request.ClienteId ?? sistema.ClienteId;
+            var cilindroId = request.CilindroId ?? sistema.CilindroId;
+
+            if (!clienteId.HasValue || !cilindroId.HasValue)
+            {
+                return BadRequest(new { message = "Selecione o cliente e o cilindro do ensaio." });
+            }
+
+            var cliente = await _context.Clientes.FindAsync(clienteId.Value);
+            var cilindro = await _context.Cilindros.FindAsync(cilindroId.Value);
 
             if (cliente == null || cilindro == null)
             {
-                return BadRequest(new { message = "Cliente ou cilindro configurado não encontrado no banco de dados." });
+                return BadRequest(new { message = "Cliente ou cilindro não encontrado no banco de dados." });
+            }
+
+            if (cilindro.ClienteId != cliente.Id)
+            {
+                return BadRequest(new { message = $"O cilindro {cilindro.Nome} não pertence ao cliente {cliente.Nome}." });
             }
 
             var agora = DateTime.UtcNow;
@@ -177,10 +191,34 @@ public class EnsaioController : ControllerBase
             await _context.Entry(ensaio).Reference(e => e.Cliente).LoadAsync();
             await _context.Entry(ensaio).Reference(e => e.Cilindro).LoadAsync();
 
+            // Guarda a escolha como padrão do próximo ensaio (best-effort: falhar aqui
+            // não pode derrubar um ensaio que já está criado no banco).
+            try
+            {
+                _configService.SaveSistemaConfig(new Configuration.SistemaConfig
+                {
+                    ClienteId = cliente.Id,
+                    CilindroId = cilindro.Id
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Falha ao gravar cliente/cilindro padrão após criar o ensaio {EnsaioId}", ensaio.Id);
+            }
+
             _logger.LogInformation("Ensaio {Numero} criado (cliente {Cliente}, cilindro {Cilindro})",
                 ensaio.Numero, cliente.Nome, cilindro.Nome);
 
-            return Ok(new { ensaio = MontarDto(ensaio), jaExistia = false });
+            // Manda para o CLP os limites deste cilindro e a calibração dos sensores.
+            // Antes isso acontecia ao salvar a tela "Configurar Sistema"; agora acontece
+            // quando o ensaio do cilindro começa, que é quando os valores importam.
+            var avisos = await AplicarParametrosDoCilindroNoClpAsync(cilindro);
+
+            return Ok(new
+            {
+                ensaio = MontarDto(ensaio),
+                avisosModbus = avisos.Any() ? avisos : null
+            });
         }
         catch (Exception ex)
         {
@@ -706,12 +744,12 @@ public class EnsaioController : ControllerBase
 
     // ── Helpers de domínio ──────────────────────────────────────────────────
 
-    private Task<Ensaio?> CarregarEnsaioAbertoAsync() =>
+    private Task<Ensaio?> CarregarEnsaioEmExecucaoAsync() =>
         _context.Ensaios
             .Include(e => e.Cliente)
             .Include(e => e.Cilindro)
             .Include(e => e.Etapas)
-            .Where(e => e.Status == StatusEnsaio.EmAndamento || e.Status == StatusEnsaio.AguardandoAceite)
+            .Where(e => e.Etapas.Any(et => et.Status == StatusEtapa.EmExecucao))
             .OrderByDescending(e => e.DataCriacao)
             .FirstOrDefaultAsync();
 
@@ -884,6 +922,93 @@ public class EnsaioController : ControllerBase
         }
 
         return new ResultadoInicioClp(true, null, avisos);
+    }
+
+    /// <summary>
+    /// Escreve no CLP os parâmetros que dependem do equipamento montado na bancada:
+    /// os limites de pressão do cilindro (LIMITE_A/LIMITE_B) e a calibração de 2 pontos
+    /// dos sensores de pressão. Best-effort — devolve avisos em vez de falhar o ensaio.
+    /// </summary>
+    private async Task<List<string>> AplicarParametrosDoCilindroNoClpAsync(Cilindro cilindro)
+    {
+        var avisos = new List<string>();
+
+        try
+        {
+            if (cilindro.MaximaPressaoA > 0)
+                await EscreverParametroAsync("LIMITE_A", cilindro.MaximaPressaoA, avisos);
+            else
+                avisos.Add("Cilindro sem pressão máxima da câmara A — LIMITE_A não foi enviado ao CLP");
+
+            if (cilindro.MaximaPressaoB > 0)
+                await EscreverParametroAsync("LIMITE_B", cilindro.MaximaPressaoB, avisos);
+            else
+                avisos.Add("Cilindro sem pressão máxima da câmara B — LIMITE_B não foi enviado ao CLP");
+
+            var sensores = await _context.Sensores.Where(s => s.Ativo).ToListAsync();
+
+            // O sensor "geral" é identificado primeiro: o nome dele também contém a letra A
+            // (de "GERAL") e cairia na regra da câmara A se a ordem fosse outra.
+            var sensorGeral = sensores.FirstOrDefault(s => s.Nome.ToUpperInvariant().Contains("GERAL"));
+            var candidatos = sensores.Where(s => s != sensorGeral).ToList();
+
+            var sensorA = candidatos.FirstOrDefault(s => EhCamara(s.Nome, 'A'));
+            var sensorB = candidatos.FirstOrDefault(s => EhCamara(s.Nome, 'B'));
+
+            await EscreverCalibracaoAsync(sensorA, "", "câmara A", avisos);
+            await EscreverCalibracaoAsync(sensorB, "_1", "câmara B", avisos);
+            await EscreverCalibracaoAsync(sensorGeral, "_2", "pressão geral", avisos);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Erro ao aplicar parâmetros do cilindro {CilindroId} no CLP", cilindro.Id);
+            avisos.Add($"Erro ao aplicar parâmetros do cilindro no CLP: {ex.Message}");
+        }
+
+        if (avisos.Any())
+        {
+            _logger.LogWarning("Parâmetros do cilindro {CilindroId} aplicados com avisos: {Avisos}",
+                cilindro.Id, string.Join(", ", avisos));
+        }
+
+        return avisos;
+    }
+
+    /// <summary>
+    /// Reconhece o sensor de uma câmara pela letra isolada no nome ("Pressão A",
+    /// "Sensor B"), sem casar com a letra no meio de outra palavra.
+    /// </summary>
+    private static bool EhCamara(string nome, char letra)
+    {
+        var upper = nome.ToUpperInvariant();
+        if (!upper.Contains("PRESS")) return false;
+
+        return System.Text.RegularExpressions.Regex.IsMatch(upper, $@"(^|[^A-Z]){letra}([^A-Z]|$)");
+    }
+
+    /// <summary>
+    /// Escreve os 4 registros de calibração de um sensor. O sufixo separa os blocos no
+    /// CLP: "" = câmara A, "_1" = câmara B, "_2" = pressão geral.
+    /// </summary>
+    private async Task EscreverCalibracaoAsync(Sensor? sensor, string sufixo, string descricao, List<string> avisos)
+    {
+        if (sensor == null)
+        {
+            avisos.Add($"Nenhum sensor ativo identificado para {descricao} — calibração não enviada");
+            return;
+        }
+
+        if (!sensor.InputMin.HasValue || !sensor.InputMax.HasValue ||
+            !sensor.OutputMin.HasValue || !sensor.OutputMax.HasValue)
+        {
+            avisos.Add($"Sensor '{sensor.Nome}' ({descricao}) sem calibração completa — não enviada ao CLP");
+            return;
+        }
+
+        await EscreverParametroAsync($"INPUT_MIN{sufixo}", sensor.InputMin.Value, avisos);
+        await EscreverParametroAsync($"INPUT_MAX{sufixo}", sensor.InputMax.Value, avisos);
+        await EscreverParametroAsync($"OUTPUT_MIN{sufixo}", sensor.OutputMin.Value, avisos);
+        await EscreverParametroAsync($"OUTPUT_MAX{sufixo}", sensor.OutputMax.Value, avisos);
     }
 
     private async Task EscreverParametroAsync(string nome, decimal valor, List<string> avisos)
@@ -1228,6 +1353,12 @@ public class EnsaioController : ControllerBase
 
 public class CriarEnsaioRequest
 {
+    /// <summary>Cliente dono do cilindro. Se omitido, usa o último ensaio como padrão.</summary>
+    public int? ClienteId { get; set; }
+
+    /// <summary>Cilindro sob teste. Se omitido, usa o último ensaio como padrão.</summary>
+    public int? CilindroId { get; set; }
+
     /// <summary>Embarcação / unidade testada (ex.: MV29 / Frota).</summary>
     public string? Vessel { get; set; }
 
