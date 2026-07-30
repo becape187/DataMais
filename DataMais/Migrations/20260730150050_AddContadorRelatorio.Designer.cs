@@ -3,6 +3,7 @@ using System;
 using DataMais.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace DataMais.Migrations
 {
     [DbContext(typeof(DataMaisDbContext))]
-    partial class DataMaisDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260730150050_AddContadorRelatorio")]
+    partial class AddContadorRelatorio
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -336,58 +339,6 @@ namespace DataMais.Migrations
                     b.HasIndex("Status");
 
                     b.ToTable("Ensaios");
-                });
-
-            modelBuilder.Entity("DataMais.Models.EnsaioEtapa", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<string>("Camara")
-                        .IsRequired()
-                        .HasMaxLength(1)
-                        .HasColumnType("character varying(1)");
-
-                    b.Property<DateTime?>("DataAtualizacao")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTime>("DataCriacao")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTime?>("DataFim")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTime>("DataInicio")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<int>("EnsaioId")
-                        .HasColumnType("integer");
-
-                    b.Property<decimal>("PressaoCargaConfigurada")
-                        .HasColumnType("decimal(10,2)");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)");
-
-                    b.Property<decimal>("TempoCargaConfigurado")
-                        .HasColumnType("decimal(10,2)");
-
-                    b.Property<int>("Tentativa")
-                        .HasColumnType("integer");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("Status");
-
-                    b.HasIndex("EnsaioId", "Camara", "Tentativa")
-                        .IsUnique();
-
-                    b.ToTable("EnsaioEtapas");
                 });
 
             modelBuilder.Entity("DataMais.Models.ModbusConfig", b =>
@@ -773,17 +724,6 @@ namespace DataMais.Migrations
                     b.Navigation("Cliente");
                 });
 
-            modelBuilder.Entity("DataMais.Models.EnsaioEtapa", b =>
-                {
-                    b.HasOne("DataMais.Models.Ensaio", "Ensaio")
-                        .WithMany("Etapas")
-                        .HasForeignKey("EnsaioId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Ensaio");
-                });
-
             modelBuilder.Entity("DataMais.Models.Relatorio", b =>
                 {
                     b.HasOne("DataMais.Models.Cilindro", "Cilindro")
@@ -875,8 +815,6 @@ namespace DataMais.Migrations
 
             modelBuilder.Entity("DataMais.Models.Ensaio", b =>
                 {
-                    b.Navigation("Etapas");
-
                     b.Navigation("Relatorios");
                 });
 

@@ -42,6 +42,328 @@
   font-size: 13px;
 }
 
+/* ── Aviso inline (substitui os alert() do navegador) ────────────────────── */
+.ensaio-aviso {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  background: #FFF4F4;
+  border: 1px solid var(--modec-red);
+  border-left-width: 4px;
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-bottom: 20px;
+  color: #8B1518;
+  font-size: 14px;
+}
+
+.ensaio-aviso-fechar {
+  background: none;
+  border: none;
+  color: inherit;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+/* ── Cartões de conteúdo ─────────────────────────────────────────────────── */
+.ensaio-card {
+  background: var(--white);
+  border-radius: 12px;
+  padding: 24px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  margin-bottom: 24px;
+}
+
+.ensaio-card h2 {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--modec-navy);
+  margin: 0 0 4px;
+}
+
+.ensaio-card-hint {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin: 0 0 20px;
+}
+
+.ensaio-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.ensaio-form-grid .config-field,
+.camara-parametros .config-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ensaio-form-grid label,
+.camara-parametros label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.ensaio-form-grid input,
+.camara-parametros input {
+  padding: 10px 12px;
+  border-radius: 6px;
+  border: 1px solid #ddd;
+  font-size: 14px;
+}
+
+.ensaio-vazio {
+  background: var(--white);
+  border-radius: 12px;
+  padding: 48px;
+  text-align: center;
+  color: var(--text-secondary);
+}
+
+/* ── Identificação travada do ensaio em andamento ────────────────────────── */
+.ensaio-identificacao {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 16px;
+  background: var(--white);
+  border-radius: 12px;
+  padding: 16px 24px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  margin-bottom: 24px;
+}
+
+.identificacao-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.identificacao-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+}
+
+.identificacao-valor {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--modec-navy);
+}
+
+/* ── Cards das duas câmaras ──────────────────────────────────────────────── */
+.camaras-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 20px;
+  margin-bottom: 20px;
+}
+
+.camara-card {
+  background: var(--white);
+  border-radius: 12px;
+  padding: 20px 24px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  border-top: 4px solid #ddd;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.camara-card.camara-rodando {
+  border-top-color: var(--success);
+}
+
+.camara-card.camara-concluida {
+  border-top-color: var(--modec-navy);
+}
+
+.camara-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.camara-header h2 {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--modec-navy);
+  margin: 0;
+}
+
+.camara-estado {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.camara-rodando .camara-estado {
+  color: var(--success);
+}
+
+.camara-concluida .camara-estado {
+  color: var(--modec-navy);
+}
+
+.camara-dados {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin: 0;
+}
+
+.camara-dados dt {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+  margin-bottom: 2px;
+}
+
+.camara-dados dd {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--modec-navy);
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.camara-parametros {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+/* ── Aceite ──────────────────────────────────────────────────────────────── */
+.ensaio-aceite {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 24px;
+}
+
+.btn-aceite {
+  padding: 14px 28px;
+  font-size: 16px;
+}
+
+.ensaio-aceite-hint {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+/* ── Pendentes ───────────────────────────────────────────────────────────── */
+.pendentes-lista {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.pendente-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--border-color, #E0E0E0);
+  border-radius: 8px;
+}
+
+.pendente-detalhe {
+  display: block;
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+/* ── Modais de decisão ───────────────────────────────────────────────────── */
+.ensaio .modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 20px;
+}
+
+.modal-card {
+  background: var(--white);
+  border-radius: 12px;
+  padding: 28px;
+  width: 100%;
+  max-width: 520px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+}
+
+.modal-card h2 {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--modec-navy);
+  margin: 0 0 12px;
+}
+
+.modal-card p {
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin: 0 0 24px;
+}
+
+.modal-acoes {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+/* Ação destrutiva: visível, mas nunca com cara de botão padrão */
+.btn-outline-danger {
+  background: transparent;
+  color: var(--danger);
+  border: 2px solid var(--danger);
+  padding: 10px 22px;
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-outline-danger:hover:not(:disabled) {
+  background: var(--danger);
+  color: var(--white);
+}
+
+.btn-outline-danger:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.modal-acoes .btn-link {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 10px 8px;
+}
+
 .ensaio-stats {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));

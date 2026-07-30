@@ -145,6 +145,67 @@
   border-bottom: 2px solid var(--border-color);
 }
 
+/* Cabeçalho de seção com ação/veredito à direita */
+.secao-titulo-linha {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+  padding-bottom: 12px;
+  border-bottom: 2px solid var(--border-color);
+}
+
+.secao-titulo-linha h3 {
+  margin: 0;
+  padding: 0;
+  border-bottom: none;
+}
+
+.etapa-tentativa {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+/* Veredito de uma câmara, ao lado do título da seção */
+.resultado-camara {
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 700;
+  background: var(--bg-light);
+  color: var(--text-secondary);
+}
+
+.resultado-camara.aprovado {
+  background-color: #D4EDDA;
+  color: #155724;
+}
+
+.resultado-camara.reprovado {
+  background-color: #F8D7DA;
+  color: #721C24;
+}
+
+.resultado-criterio {
+  margin-top: 16px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.export-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.export-button {
+  font-size: 14px;
+  padding: 8px 16px;
+}
+
 .info-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));

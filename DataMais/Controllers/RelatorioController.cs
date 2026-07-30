@@ -157,6 +157,7 @@ public class RelatorioController : ControllerBase
                 .Include(r => r.Cliente)
                 .Include(r => r.Cilindro)
                 .Include(r => r.Ensaio)
+                    .ThenInclude(e => e!.Etapas)
                 .Include(r => r.RespostasCampos)
                     .ThenInclude(resp => resp.CampoRelatorio)
                 .FirstOrDefaultAsync(r => r.Id == id);
@@ -209,37 +210,17 @@ public class RelatorioController : ControllerBase
                 };
             }).ToList();
 
-            double? pressaoMin = null;
-            double? pressaoMax = null;
-            double? pressaoMedia = null;
-            double? pressaoMaximaOposta = null;
-            double? limitePassagem = null;
-            string? resultado = null;
+            // Uma análise por câmara: cada etapa é avaliada na SUA janela de tempo,
+            // pressurizando a própria câmara e medindo a passagem para a oposta.
+            var analises = ensaio != null
+                ? await AnalisarEtapasAsync(ensaio, relatorio.Cilindro)
+                : new List<AnaliseEtapa>();
 
-            if (ensaio != null)
-            {
-                try
-                {
-                    // Estatísticas da câmara TESTADA - apenas informativas (exibidas no laudo).
-                    // NÃO decidem mais o resultado: a pressão da câmara testada sempre cai por
-                    // diversos fatores, então não serve como critério de aprovação.
-                    (pressaoMin, pressaoMax, pressaoMedia) = await CalcularEstatisticasPressaoAsync(ensaio);
+            var resultado = CombinarResultados(analises);
 
-                    // Veredito por PASSAGEM entre câmaras: avalia o PICO da câmara OPOSTA,
-                    // a partir do instante em que a câmara testada atinge o setpoint.
-                    // Reprova se esse pico ultrapassar o limite do cilindro (default 1 bar).
-                    pressaoMaximaOposta = await CalcularPressaoMaximaCamaraOpostaAsync(ensaio);
-                    if (pressaoMaximaOposta.HasValue)
-                    {
-                        limitePassagem = ObterLimitePassagem(relatorio.Cilindro, ensaio.CamaraTestada);
-                        resultado = pressaoMaximaOposta.Value > limitePassagem.Value ? "Reprovado" : "Aprovado";
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Erro ao avaliar o ensaio {EnsaioId}", ensaio.Id);
-                }
-            }
+            // Campos de câmara única, mantidos para os laudos anteriores ao modelo de
+            // duas câmaras (que têm exatamente uma etapa). Código novo lê de "etapas".
+            var primeira = analises.FirstOrDefault();
 
             // Override rev02: qualquer checklist marcado como "reprova se Sim" e respondido "Sim"
             // força o veredito para Reprovado (ex.: "Vazamentos visíveis" na inspeção visual),
@@ -269,14 +250,32 @@ public class RelatorioController : ControllerBase
                 ensaioNumero = ensaio != null ? ensaio.Numero : null,
                 ensaioDataInicio = ensaio?.DataInicio,
                 ensaioDataFim = ensaio?.DataFim,
-                camaraTestada = ensaio?.CamaraTestada,
-                pressaoCargaConfigurada = ensaio?.PressaoCargaConfigurada,
-                tempoCargaConfigurado = ensaio?.TempoCargaConfigurado,
-                pressaoMinima = pressaoMin,
-                pressaoMaxima = pressaoMax,
-                pressaoMedia = pressaoMedia,
-                pressaoMaximaCamaraOposta = pressaoMaximaOposta,
-                limitePassagem = limitePassagem,
+                // Análise por câmara — é isto que o laudo apresenta
+                etapas = analises.Select(a => new
+                {
+                    etapaId = a.EtapaId,
+                    camara = a.Camara,
+                    tentativa = a.Tentativa,
+                    dataInicio = a.DataInicio,
+                    dataFim = a.DataFim,
+                    pressaoCargaConfigurada = a.PressaoCargaConfigurada,
+                    tempoCargaConfigurado = a.TempoCargaConfigurado,
+                    pressaoMinima = a.PressaoMinima,
+                    pressaoMaxima = a.PressaoMaxima,
+                    pressaoMedia = a.PressaoMedia,
+                    pressaoMaximaCamaraOposta = a.PressaoMaximaCamaraOposta,
+                    limitePassagem = a.LimitePassagem,
+                    resultado = a.Resultado
+                }),
+                // Compatibilidade com laudos de câmara única (uma etapa só)
+                camaraTestada = primeira?.Camara,
+                pressaoCargaConfigurada = primeira?.PressaoCargaConfigurada,
+                tempoCargaConfigurado = primeira?.TempoCargaConfigurado,
+                pressaoMinima = primeira?.PressaoMinima,
+                pressaoMaxima = primeira?.PressaoMaxima,
+                pressaoMedia = primeira?.PressaoMedia,
+                pressaoMaximaCamaraOposta = primeira?.PressaoMaximaCamaraOposta,
+                limitePassagem = primeira?.LimitePassagem,
                 resultado = resultado,
                 situacao = relatorio.Situacao,
                 versao = relatorio.Versao,
@@ -309,122 +308,156 @@ public class RelatorioController : ControllerBase
         }
     }
 
-    private async Task<(double? min, double? max, double? avg)> CalcularEstatisticasPressaoAsync(Ensaio ensaio)
+    /// <summary>Resultado da avaliação de uma câmara do ensaio.</summary>
+    private sealed record AnaliseEtapa(
+        int EtapaId,
+        string Camara,
+        int Tentativa,
+        DateTime DataInicio,
+        DateTime? DataFim,
+        decimal PressaoCargaConfigurada,
+        decimal TempoCargaConfigurado,
+        double? PressaoMinima,
+        double? PressaoMaxima,
+        double? PressaoMedia,
+        double? PressaoMaximaCamaraOposta,
+        double? LimitePassagem,
+        string? Resultado);
+
+    /// <summary>
+    /// Etapas que valem para o laudo: a ÚLTIMA tentativa concluída de cada câmara.
+    /// As tentativas anteriores ficam no banco como histórico (Status=Repetida),
+    /// mas não entram no documento.
+    /// </summary>
+    private static List<EnsaioEtapa> EtapasValidas(Ensaio ensaio) =>
+        ensaio.Etapas
+            .Where(e => e.Status == StatusEtapa.Concluida)
+            .GroupBy(e => e.Camara)
+            .Select(g => g.OrderByDescending(e => e.Tentativa).First())
+            .OrderBy(e => e.Camara)
+            .ToList();
+
+    /// <summary>
+    /// Veredito do ensaio a partir das câmaras: basta UMA reprovar para reprovar tudo.
+    /// Se nenhuma reprovou mas alguma não pôde ser avaliada, o ensaio fica sem veredito.
+    /// </summary>
+    private static string? CombinarResultados(IEnumerable<AnaliseEtapa> analises)
     {
+        var lista = analises.ToList();
+
+        if (lista.Count == 0) return null;
+        if (lista.Any(a => a.Resultado == "Reprovado")) return "Reprovado";
+        if (lista.Any(a => a.Resultado == null)) return null;
+
+        return "Aprovado";
+    }
+
+    private async Task<List<AnaliseEtapa>> AnalisarEtapasAsync(Ensaio ensaio, Cilindro? cilindro)
+    {
+        var etapas = EtapasValidas(ensaio);
+        var analises = new List<AnaliseEtapa>();
+
+        if (etapas.Count == 0)
+        {
+            return analises;
+        }
+
         var appConfig = _configService.GetConfig();
 
-        if (string.IsNullOrWhiteSpace(appConfig.Influx.Url) ||
-            string.IsNullOrWhiteSpace(appConfig.Influx.Token) ||
-            string.IsNullOrWhiteSpace(appConfig.Influx.Organization) ||
-            string.IsNullOrWhiteSpace(appConfig.Influx.Bucket))
+        if (!InfluxConfigurado(appConfig))
         {
-            _logger.LogWarning("Configuração do InfluxDB incompleta. Não será possível calcular estatísticas para o ensaio {EnsaioId}.", ensaio.Id);
-            return (null, null, null);
+            _logger.LogWarning("Configuração do InfluxDB incompleta. Não será possível avaliar o ensaio {EnsaioId}.", ensaio.Id);
+            return etapas.Select(e => SemAnalise(e)).ToList();
         }
-
-        // Verifica se há setpoint configurado
-        if (!ensaio.PressaoCargaConfigurada.HasValue || ensaio.PressaoCargaConfigurada.Value <= 0)
-        {
-            _logger.LogWarning("Ensaio {EnsaioId} não possui pressão de carga configurada. Não será possível calcular estatísticas.", ensaio.Id);
-            return (null, null, null);
-        }
-
-        var setpoint = (double)ensaio.PressaoCargaConfigurada.Value;
-
-        // Determina qual campo de pressão usar baseado na câmara testada
-        // Se câmara A, usa pressaoA; se câmara B, usa pressaoB; se não especificado, tenta ambos
-        string campoPressao = "pressaoA"; // padrão
-        if (!string.IsNullOrWhiteSpace(ensaio.CamaraTestada))
-        {
-            var camara = ensaio.CamaraTestada.Trim().ToUpperInvariant();
-            campoPressao = camara == "B" ? "pressaoB" : "pressaoA";
-        }
-
-        var from = (ensaio.DataInicio ?? ensaio.DataCriacao).ToUniversalTime().AddMinutes(-1);
-        var to = (ensaio.DataFim ?? DateTime.UtcNow).ToUniversalTime().AddMinutes(1);
-
-        // Busca todos os dados de pressão ordenados por tempo
-        var flux = $@"from(bucket: ""{appConfig.Influx.Bucket}"")
-  |> range(start: {from:o}, stop: {to:o})
-  |> filter(fn: (r) => r._measurement == ""ensaio_pressao"" and r.ensaioId == ""{ensaio.Id}"" and r._field == ""{campoPressao}"")
-  |> sort(columns: [""_time""])
-  |> keep(columns: [""_time"", ""_value""])";
 
         using var influxClient = new InfluxDBClient(appConfig.Influx.Url, appConfig.Influx.Token);
         var queryApi = influxClient.GetQueryApi();
 
-        try
+        foreach (var etapa in etapas)
         {
-            var tables = await queryApi.QueryAsync(flux, appConfig.Influx.Organization);
-            
-            // Primeiro, coleta todos os dados ordenados por tempo
-            var todosDados = new List<(DateTime time, double pressao)>();
-            
-            foreach (var table in tables)
+            try
             {
-                foreach (var record in table.Records)
-                {
-                    var value = record.GetValue();
-                    var time = record.GetTime();
-                    if (value != null && value is IConvertible && time != null)
-                    {
-                        try
-                        {
-                            var pressao = Convert.ToDouble(value);
-                            var dateTime = time.Value.ToDateTimeUtc();
-                            todosDados.Add((dateTime, pressao));
-                        }
-                        catch { }
-                    }
-                }
+                analises.Add(await AnalisarEtapaAsync(queryApi, appConfig, etapa, cilindro));
             }
-
-            // Ordena por tempo para garantir ordem cronológica
-            todosDados = todosDados.OrderBy(d => d.time).ToList();
-
-            // Encontra o primeiro ponto onde a pressão >= setpoint
-            int inicioAnalise = -1;
-            for (int i = 0; i < todosDados.Count; i++)
+            catch (Exception ex)
             {
-                if (todosDados[i].pressao >= setpoint)
-                {
-                    inicioAnalise = i;
-                    break; // Encontrou o primeiro ponto que alcança o setpoint
-                }
+                _logger.LogError(ex, "Erro ao avaliar a câmara {Camara} do ensaio {EnsaioId}", etapa.Camara, ensaio.Id);
+                analises.Add(SemAnalise(etapa));
             }
-
-            // Se nunca alcançou o setpoint, retorna null
-            if (inicioAnalise == -1)
-            {
-                _logger.LogWarning("Nenhum dado de pressão >= setpoint ({Setpoint}) encontrado para o ensaio {EnsaioId}.", setpoint, ensaio.Id);
-                return (null, null, null);
-            }
-
-            // A partir do momento que alcançou o setpoint, coleta TODOS os valores
-            // (mesmo que depois caia abaixo do setpoint)
-            var valoresFiltrados = new List<double>();
-            for (int i = inicioAnalise; i < todosDados.Count; i++)
-            {
-                valoresFiltrados.Add(todosDados[i].pressao);
-            }
-
-            if (valoresFiltrados.Count == 0)
-            {
-                return (null, null, null);
-            }
-
-            var min = valoresFiltrados.Min();
-            var max = valoresFiltrados.Max();
-            var avg = valoresFiltrados.Average();
-
-            return (min, max, avg);
         }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Erro ao calcular estatísticas de pressão para o ensaio {EnsaioId}", ensaio.Id);
-            return (null, null, null);
-        }
+
+        return analises;
     }
+
+    /// <summary>
+    /// Avalia uma câmara na sua janela de tempo. A partir do instante em que a câmara
+    /// pressurizada atinge o setpoint, mede-se o PICO da câmara OPOSTA: se ultrapassar
+    /// o limite do cilindro, o cilindro está dando passagem → Reprovado.
+    /// As estatísticas da própria câmara são informativas — a pressão dela cai por
+    /// vários motivos, então não servem como critério de aprovação.
+    /// </summary>
+    private async Task<AnaliseEtapa> AnalisarEtapaAsync(
+        QueryApi queryApi, AppConfig appConfig, EnsaioEtapa etapa, Cilindro? cilindro)
+    {
+        if (etapa.PressaoCargaConfigurada <= 0)
+        {
+            _logger.LogWarning("Etapa {EtapaId} (câmara {Camara}) não tem pressão de carga configurada.", etapa.Id, etapa.Camara);
+            return SemAnalise(etapa);
+        }
+
+        var setpoint = (double)etapa.PressaoCargaConfigurada;
+        var camara = etapa.Camara.Trim().ToUpperInvariant();
+        var campoTestada = camara == "B" ? "pressaoB" : "pressaoA";
+        var campoOposta = camara == "B" ? "pressaoA" : "pressaoB";
+
+        var from = etapa.DataInicio.ToUniversalTime().AddMinutes(-1);
+        var to = (etapa.DataFim ?? DateTime.UtcNow).ToUniversalTime().AddMinutes(1);
+        var ensaioId = etapa.EnsaioId.ToString();
+
+        var serieTestada = await FetchSeriePressaoAsync(queryApi, appConfig, ensaioId, campoTestada, from, to);
+
+        // A análise só começa quando a câmara atinge o setpoint pela primeira vez
+        var indiceT0 = serieTestada.FindIndex(p => p.pressao >= setpoint);
+        if (indiceT0 < 0)
+        {
+            _logger.LogWarning("Câmara {Camara} nunca atingiu o setpoint ({Setpoint}) na etapa {EtapaId}.",
+                camara, setpoint, etapa.Id);
+            return SemAnalise(etapa);
+        }
+
+        var t0 = serieTestada[indiceT0].time;
+        var valoresTestada = serieTestada.Where(p => p.time >= t0).Select(p => p.pressao).ToList();
+
+        double? min = valoresTestada.Count > 0 ? valoresTestada.Min() : null;
+        double? max = valoresTestada.Count > 0 ? valoresTestada.Max() : null;
+        double? avg = valoresTestada.Count > 0 ? valoresTestada.Average() : null;
+
+        var serieOposta = await FetchSeriePressaoAsync(queryApi, appConfig, ensaioId, campoOposta, from, to);
+        var valoresOposta = serieOposta.Where(p => p.time >= t0).Select(p => p.pressao).ToList();
+
+        double? maxOposta = valoresOposta.Count > 0 ? valoresOposta.Max() : null;
+        var limite = ObterLimitePassagem(cilindro, camara);
+
+        string? resultado = maxOposta.HasValue
+            ? (maxOposta.Value > limite ? "Reprovado" : "Aprovado")
+            : null;
+
+        return new AnaliseEtapa(
+            etapa.Id, camara, etapa.Tentativa, etapa.DataInicio, etapa.DataFim,
+            etapa.PressaoCargaConfigurada, etapa.TempoCargaConfigurado,
+            min, max, avg, maxOposta, limite, resultado);
+    }
+
+    private static AnaliseEtapa SemAnalise(EnsaioEtapa etapa) => new(
+        etapa.Id, etapa.Camara, etapa.Tentativa, etapa.DataInicio, etapa.DataFim,
+        etapa.PressaoCargaConfigurada, etapa.TempoCargaConfigurado,
+        null, null, null, null, null, null);
+
+    private static bool InfluxConfigurado(AppConfig appConfig) =>
+        !string.IsNullOrWhiteSpace(appConfig.Influx.Url) &&
+        !string.IsNullOrWhiteSpace(appConfig.Influx.Token) &&
+        !string.IsNullOrWhiteSpace(appConfig.Influx.Organization) &&
+        !string.IsNullOrWhiteSpace(appConfig.Influx.Bucket);
 
     /// <summary>
     /// Limite de pressão (bar) admitido na câmara OPOSTA durante o ensaio.
@@ -440,81 +473,6 @@ public class RelatorioController : ControllerBase
         var camara = camaraTestada?.Trim().ToUpperInvariant();
         var limite = camara == "B" ? cilindro.LimitePassagemCamaraB : cilindro.LimitePassagemCamaraA;
         return limite.HasValue ? (double)limite.Value : padrao;
-    }
-
-    /// <summary>
-    /// Calcula o PICO (máximo) de pressão da câmara OPOSTA à testada, considerando
-    /// apenas o período a partir do momento em que a câmara testada atinge o setpoint.
-    /// Retorna null se não houver setpoint, se ele nunca for atingido, se faltar config
-    /// do InfluxDB ou se não houver dados da câmara oposta no período.
-    /// </summary>
-    private async Task<double?> CalcularPressaoMaximaCamaraOpostaAsync(Ensaio ensaio)
-    {
-        var appConfig = _configService.GetConfig();
-
-        if (string.IsNullOrWhiteSpace(appConfig.Influx.Url) ||
-            string.IsNullOrWhiteSpace(appConfig.Influx.Token) ||
-            string.IsNullOrWhiteSpace(appConfig.Influx.Organization) ||
-            string.IsNullOrWhiteSpace(appConfig.Influx.Bucket))
-        {
-            _logger.LogWarning("Configuração do InfluxDB incompleta. Não será possível avaliar a câmara oposta no ensaio {EnsaioId}.", ensaio.Id);
-            return null;
-        }
-
-        if (!ensaio.PressaoCargaConfigurada.HasValue || ensaio.PressaoCargaConfigurada.Value <= 0)
-        {
-            _logger.LogWarning("Ensaio {EnsaioId} não possui pressão de carga configurada. Não será possível avaliar a câmara oposta.", ensaio.Id);
-            return null;
-        }
-
-        var setpoint = (double)ensaio.PressaoCargaConfigurada.Value;
-
-        // Câmara testada x câmara oposta (a oposta é quem denuncia a passagem)
-        var camara = ensaio.CamaraTestada?.Trim().ToUpperInvariant();
-        string campoTestada = camara == "B" ? "pressaoB" : "pressaoA";
-        string campoOposta = camara == "B" ? "pressaoA" : "pressaoB";
-
-        var from = (ensaio.DataInicio ?? ensaio.DataCriacao).ToUniversalTime().AddMinutes(-1);
-        var to = (ensaio.DataFim ?? DateTime.UtcNow).ToUniversalTime().AddMinutes(1);
-
-        using var influxClient = new InfluxDBClient(appConfig.Influx.Url, appConfig.Influx.Token);
-        var queryApi = influxClient.GetQueryApi();
-
-        try
-        {
-            // 1) Série da câmara testada: acha o instante em que atinge o setpoint
-            var serieTestada = await FetchSeriePressaoAsync(queryApi, appConfig, ensaio.Id.ToString(), campoTestada, from, to);
-
-            DateTime? t0 = null;
-            foreach (var ponto in serieTestada)
-            {
-                if (ponto.pressao >= setpoint)
-                {
-                    t0 = ponto.time;
-                    break;
-                }
-            }
-
-            if (t0 == null)
-            {
-                _logger.LogWarning("Câmara testada nunca atingiu o setpoint ({Setpoint}) no ensaio {EnsaioId}.", setpoint, ensaio.Id);
-                return null;
-            }
-
-            // 2) Pico da câmara oposta a partir de t0
-            var serieOposta = await FetchSeriePressaoAsync(queryApi, appConfig, ensaio.Id.ToString(), campoOposta, from, to);
-            var valoresAposT0 = serieOposta.Where(d => d.time >= t0.Value).Select(d => d.pressao).ToList();
-
-            if (valoresAposT0.Count == 0)
-                return null;
-
-            return valoresAposT0.Max();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Erro ao calcular pressão máxima da câmara oposta para o ensaio {EnsaioId}", ensaio.Id);
-            return null;
-        }
     }
 
     /// <summary>
@@ -554,8 +512,9 @@ public class RelatorioController : ControllerBase
     }
 
     /// <summary>
-    /// Busca os dados de pressão do InfluxDB para o gráfico do relatório.
-    /// Retorna os dados de pressão do período do ensaio associado ao relatório.
+    /// Séries de pressão do laudo, UMA POR CÂMARA — cada etapa recorta a sua janela
+    /// de tempo no InfluxDB. Cada série traz pressaoA e pressaoB juntas, porque é o
+    /// par que mostra a passagem entre as câmaras.
     /// </summary>
     [HttpGet("{id:int}/dados-grafico")]
     public async Task<IActionResult> GetDadosGrafico(int id)
@@ -564,6 +523,7 @@ public class RelatorioController : ControllerBase
         {
             var relatorio = await _context.Relatorios
                 .Include(r => r.Ensaio)
+                    .ThenInclude(e => e!.Etapas)
                 .FirstOrDefaultAsync(r => r.Id == id);
 
             if (relatorio == null)
@@ -574,138 +534,60 @@ public class RelatorioController : ControllerBase
             var ensaio = relatorio.Ensaio;
             if (ensaio == null)
             {
-                return Ok(new { dados = Array.Empty<object>() });
+                return Ok(new { etapas = Array.Empty<object>() });
             }
 
             var appConfig = _configService.GetConfig();
 
-            if (string.IsNullOrWhiteSpace(appConfig.Influx.Url) ||
-                string.IsNullOrWhiteSpace(appConfig.Influx.Token) ||
-                string.IsNullOrWhiteSpace(appConfig.Influx.Organization) ||
-                string.IsNullOrWhiteSpace(appConfig.Influx.Bucket))
+            if (!InfluxConfigurado(appConfig))
             {
                 _logger.LogWarning("Configuração do InfluxDB incompleta. Não será possível buscar dados do gráfico para o relatório {RelatorioId}.", id);
-                return Ok(new { dados = Array.Empty<object>() });
+                return Ok(new { etapas = Array.Empty<object>() });
             }
-
-            var from = (ensaio.DataInicio ?? ensaio.DataCriacao).ToUniversalTime().AddMinutes(-1);
-            var to = (ensaio.DataFim ?? DateTime.UtcNow).ToUniversalTime().AddMinutes(1);
-
-            // Busca ambas as pressões A e B
-            var fluxA = $@"from(bucket: ""{appConfig.Influx.Bucket}"")
-  |> range(start: {from:o}, stop: {to:o})
-  |> filter(fn: (r) => r._measurement == ""ensaio_pressao"" and r.ensaioId == ""{ensaio.Id}"" and r._field == ""pressaoA"")
-  |> sort(columns: [""_time""])
-  |> keep(columns: [""_time"", ""_value""])";
-
-            var fluxB = $@"from(bucket: ""{appConfig.Influx.Bucket}"")
-  |> range(start: {from:o}, stop: {to:o})
-  |> filter(fn: (r) => r._measurement == ""ensaio_pressao"" and r.ensaioId == ""{ensaio.Id}"" and r._field == ""pressaoB"")
-  |> sort(columns: [""_time""])
-  |> keep(columns: [""_time"", ""_value""])";
 
             using var influxClient = new InfluxDBClient(appConfig.Influx.Url, appConfig.Influx.Token);
             var queryApi = influxClient.GetQueryApi();
 
-            var dados = new Dictionary<string, Dictionary<string, double>>();
+            var series = new List<object>();
 
-            try
+            foreach (var etapa in EtapasValidas(ensaio))
             {
-                // Busca pressão A
-                var tablesA = await queryApi.QueryAsync(fluxA, appConfig.Influx.Organization);
-                foreach (var table in tablesA)
+                var from = etapa.DataInicio.ToUniversalTime().AddMinutes(-1);
+                var to = (etapa.DataFim ?? DateTime.UtcNow).ToUniversalTime().AddMinutes(1);
+                var ensaioId = etapa.EnsaioId.ToString();
+
+                var serieA = await FetchSeriePressaoAsync(queryApi, appConfig, ensaioId, "pressaoA", from, to);
+                var serieB = await FetchSeriePressaoAsync(queryApi, appConfig, ensaioId, "pressaoB", from, to);
+
+                // Combina A e B pelo instante da leitura (são gravadas no mesmo ponto)
+                var porInstante = new SortedDictionary<DateTime, (double? a, double? b)>();
+
+                foreach (var (time, pressao) in serieA)
                 {
-                    foreach (var record in table.Records)
-                    {
-                        var time = record.GetTime();
-                        var value = record.GetValue();
-
-                        if (time != null && value != null)
-                        {
-                            var dateTime = time.Value.ToDateTimeUtc().ToLocalTime();
-                            var timeStr = dateTime.ToString("HH:mm:ss");
-                            
-                            double pressao = 0;
-                            if (value is IConvertible)
-                            {
-                                try
-                                {
-                                    pressao = Convert.ToDouble(value);
-                                }
-                                catch
-                                {
-                                    continue;
-                                }
-                            }
-                            else
-                            {
-                                continue;
-                            }
-
-                            if (!dados.ContainsKey(timeStr))
-                            {
-                                dados[timeStr] = new Dictionary<string, double>();
-                            }
-                            dados[timeStr]["pressaoA"] = Math.Round(pressao, 2);
-                        }
-                    }
+                    porInstante[time] = (Math.Round(pressao, 2), porInstante.TryGetValue(time, out var atual) ? atual.b : null);
                 }
 
-                // Busca pressão B
-                var tablesB = await queryApi.QueryAsync(fluxB, appConfig.Influx.Organization);
-                foreach (var table in tablesB)
+                foreach (var (time, pressao) in serieB)
                 {
-                    foreach (var record in table.Records)
-                    {
-                        var time = record.GetTime();
-                        var value = record.GetValue();
-
-                        if (time != null && value != null)
-                        {
-                            var dateTime = time.Value.ToDateTimeUtc().ToLocalTime();
-                            var timeStr = dateTime.ToString("HH:mm:ss");
-                            
-                            double pressao = 0;
-                            if (value is IConvertible)
-                            {
-                                try
-                                {
-                                    pressao = Convert.ToDouble(value);
-                                }
-                                catch
-                                {
-                                    continue;
-                                }
-                            }
-                            else
-                            {
-                                continue;
-                            }
-
-                            if (!dados.ContainsKey(timeStr))
-                            {
-                                dados[timeStr] = new Dictionary<string, double>();
-                            }
-                            dados[timeStr]["pressaoB"] = Math.Round(pressao, 2);
-                        }
-                    }
+                    var atual = porInstante.TryGetValue(time, out var v) ? v : (null, null);
+                    porInstante[time] = (atual.a, Math.Round(pressao, 2));
                 }
 
-                // Converte o dicionário para lista de objetos
-                var dadosLista = dados.Select(kvp => new
+                series.Add(new
                 {
-                    time = kvp.Key,
-                    pressaoA = kvp.Value.ContainsKey("pressaoA") ? (double?)kvp.Value["pressaoA"] : null,
-                    pressaoB = kvp.Value.ContainsKey("pressaoB") ? (double?)kvp.Value["pressaoB"] : null
-                }).OrderBy(d => d.time).ToList();
+                    etapaId = etapa.Id,
+                    camara = etapa.Camara,
+                    tentativa = etapa.Tentativa,
+                    dados = porInstante.Select(kv => new
+                    {
+                        time = kv.Key.ToLocalTime().ToString("HH:mm:ss"),
+                        pressaoA = kv.Value.a,
+                        pressaoB = kv.Value.b
+                    }).ToList()
+                });
+            }
 
-                return Ok(new { dados = dadosLista });
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Erro ao buscar dados do InfluxDB para o gráfico do relatório {RelatorioId}", id);
-                return StatusCode(500, new { message = "Erro ao buscar dados do gráfico", error = ex.Message });
-            }
+            return Ok(new { etapas = series });
         }
         catch (Exception ex)
         {
@@ -924,13 +806,16 @@ public class RelatorioController : ControllerBase
     }
 
     /// <summary>
-    /// Recalcula o veredito do laudo (mesma regra do GetById): passagem entre câmaras
-    /// + override de checklist "reprova se Sim". Usado no snapshot da conclusão.
+    /// Recalcula o veredito do laudo (mesma regra do GetById): cada câmara é avaliada
+    /// pela passagem para a oposta, uma reprovada reprova o ensaio, e o checklist
+    /// "reprova se Sim" sobrepõe tudo. Usado no snapshot da conclusão.
     /// </summary>
     private async Task<string?> AvaliarResultadoAsync(Relatorio relatorio)
     {
         var ensaio = relatorio.EnsaioId.HasValue
-            ? await _context.Ensaios.FindAsync(relatorio.EnsaioId.Value)
+            ? await _context.Ensaios
+                .Include(e => e.Etapas)
+                .FirstOrDefaultAsync(e => e.Id == relatorio.EnsaioId.Value)
             : null;
 
         string? resultado = null;
@@ -939,13 +824,8 @@ public class RelatorioController : ControllerBase
         {
             try
             {
-                var pressaoMaximaOposta = await CalcularPressaoMaximaCamaraOpostaAsync(ensaio);
-                if (pressaoMaximaOposta.HasValue)
-                {
-                    var cilindro = await _context.Cilindros.FindAsync(relatorio.CilindroId);
-                    var limite = ObterLimitePassagem(cilindro, ensaio.CamaraTestada);
-                    resultado = pressaoMaximaOposta.Value > limite ? "Reprovado" : "Aprovado";
-                }
+                var cilindro = await _context.Cilindros.FindAsync(relatorio.CilindroId);
+                resultado = CombinarResultados(await AnalisarEtapasAsync(ensaio, cilindro));
             }
             catch (Exception ex)
             {

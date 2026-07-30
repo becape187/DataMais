@@ -61,22 +61,49 @@ Services/         → ModbusService (conexões/leitura/escrita CLP), ConfigServi
 
 `Sensor` guarda uma **calibração linear de 2 pontos** (`InputMin/OutputMin`, `InputMax/OutputMax`): converte valor AD bruto → grandeza de engenharia por interpolação linear.
 
+## Ciclo de vida do ensaio (as duas câmaras, um laudo)
+
+Um **ensaio** é o cabeçalho do teste (cliente, cilindro, vessel, OS) e tem **sempre as duas câmaras**, cada uma rodada como uma `EnsaioEtapa` — em qualquer ordem, repetíveis. Estados do ensaio (`StatusEnsaio`): `EmAndamento` → `AguardandoAceite` → `Aceito`, ou `Cancelado`. Estados da etapa (`StatusEtapa`): `EmExecucao` → `Concluida` / `Descartada`, e `Repetida` quando uma tentativa posterior da mesma câmara a substitui.
+
+O fluxo, em `EnsaioController`:
+
+```
+POST /ensaio                       cria o cabeçalho
+POST /ensaio/{id}/etapa            inicia câmara A ou B (Modbus)
+POST /ensaio/etapa/{id}/encerrar   ?salvar=true|false
+POST /ensaio/{id}/aceitar          → cria o Relatorio (queima o número REH-MPR)
+POST /ensaio/{id}/cancelar
+GET  /ensaio/ativo · /ensaio/pendentes
+```
+
+Pontos que não são óbvios pelo código:
+
+- **O laudo só nasce no aceite.** `RegistroConclusaoMonitor` (borda de descida do `REGISTRO_RODANDO`) fecha a **etapa**, não gera relatório. Ensaio descartado não consome número.
+- **Todas as etapas compartilham a tag `ensaioId` no Influx** — o que separa uma câmara da outra é a janela `[DataInicio, DataFim]` da etapa. Toda query de análise recorta por essa janela.
+- **Só a última tentativa concluída de cada câmara entra no laudo** (`EtapasValidas`); as anteriores ficam como histórico `Repetida`.
+- `Ensaio.CamaraTestada`/`PressaoCargaConfigurada`/`TempoCargaConfigurado` estão **depreciados** — existem só para os ensaios anteriores a este modelo, cujo backfill os copiou para a primeira etapa.
+
 ## Critério de Aprovado / Reprovado (regra de negócio central)
 
-O veredito do ensaio é **calculado on-the-fly** ao abrir o relatório — **não é persistido** em coluna. A regra está duplicada em backend e frontend (mantenha as duas em sincronia ao alterar):
+O veredito é **calculado on-the-fly** ao abrir o relatório — **não é persistido** em coluna (só no snapshot da versão assinada).
 
-- Backend: `DataMais/Controllers/RelatorioController.cs` → `GetById` + `CalcularEstatisticasPressaoAsync`.
-- Frontend: `DataMaisWeb/src/pages/VisualizarRelatorio.tsx` → `calcularResultado()`.
+Regra, por câmara: a partir do instante em que a câmara pressurizada **atinge o setpoint** (`EnsaioEtapa.PressaoCargaConfigurada`) pela primeira vez, mede-se o **pico da câmara OPOSTA**. Se esse pico ultrapassar `Cilindro.LimitePassagemCamaraA/B` (default 1 bar), o cilindro está dando passagem → **Reprovado**. As estatísticas da própria câmara (min/máx/média) são informativas: a pressão dela cai por vários motivos e não serve como critério.
 
-Regra: a partir do instante em que a pressão **atinge o setpoint** (`Ensaio.PressaoCargaConfigurada`) pela primeira vez, coleta-se a pressão mínima do restante do ensaio. **Aprovado se `pressaoMin >= setpoint * 0.95`** (desvio ≤ 5%), senão **Reprovado**. A câmara testada (`Ensaio.CamaraTestada` = "A"/"B") seleciona o field Influx (`pressaoA`/`pressaoB`). Se nunca atinge o setpoint ou falta config Influx, o resultado fica nulo (`-`).
+Combinação: **uma câmara reprovada reprova o ensaio inteiro**; se nenhuma reprovou mas alguma não pôde ser avaliada, o resultado fica nulo (`-`). Qualquer campo de checklist `ReprovaSeSim` respondido "Sim" **sobrepõe tudo** e força Reprovado.
+
+Onde fica:
+
+- Backend: `DataMais/Controllers/RelatorioController.cs` → `AnalisarEtapaAsync` (por câmara) + `CombinarResultados` + override do checklist em `GetById`/`AvaliarResultadoAsync`.
+- Frontend: `DataMaisWeb/src/pages/VisualizarRelatorio.tsx` consome o veredito por câmara **pronto do backend** e só aplica por cima o override do checklist (que o operador muda sem recarregar). A matemática de pressão **não é mais duplicada** no frontend — ao alterar a regra, mexa só no backend.
 
 ## Modelo de domínio (PostgreSQL)
 
-`Cliente` 1—N `Cilindro` 1—N `Ensaio` 1—N `Relatorio`. Resumo dos centrais:
+`Cliente` 1—N `Cilindro` 1—N `Ensaio` 1—N `EnsaioEtapa`, e `Ensaio` 1—1 `Relatorio` (na prática: um laudo por ensaio aceito). Resumo dos centrais:
 
 - **Cilindro** — equipamento sob teste. Tem duas câmaras (A/B) com parâmetros próprios de ensaio: `MaximaPressaoA/B`, `PreCargaA/B`, `CargaNominalA/B`, tempos de rampa/duração, e percentuais de processo: `PercentualVariacaoAlarmeA/B`, `HistereseAlarmeA/B`, `PercentualVariacaoDesligaProcessoA/B` (estes regem alarme/desligamento durante o ensaio, distintos do critério de 5% do laudo).
-- **Ensaio** — execução de um teste num cilindro. `Status` (string: Pendente/EmExecucao/Concluido/Cancelado), `CamaraTestada`, `PressaoCargaConfigurada` (setpoint), `TempoCargaConfigurado`.
-- **Relatorio** — laudo de um ensaio. Tem `RespostaCampoRelatorio` (respostas a `CampoRelatorio`, campos configuráveis tipo "SimOuNao" etc.).
+- **Ensaio** — cabeçalho do teste num cilindro: identificação do documento (`Vessel`, `LocalTeste`, `Departamento`, `OrdemServico`) e `Status`. Ver seção de ciclo de vida acima.
+- **EnsaioEtapa** — uma corrida numa câmara: `Camara` (A/B), `Tentativa`, `Status`, janela `DataInicio`/`DataFim`, `PressaoCargaConfigurada` (setpoint) e `TempoCargaConfigurado`. Único por `(EnsaioId, Camara, Tentativa)`.
+- **Relatorio** — laudo de um ensaio, criado no aceite. Numeração `REH-MPR-0000001-2026` via `NumeroRelatorioService` (UPSERT atômico em `ContadorRelatorio`, sequencial reinicia a cada ano). Tem `RespostaCampoRelatorio` (respostas a `CampoRelatorio`, campos configuráveis tipo "SimOuNao" etc.) — o checklist é **do ensaio**, respondido uma vez e valendo para as duas câmaras.
 - **Sensor** / **ModbusConfig** — ver seções acima.
 
 ## Convenções

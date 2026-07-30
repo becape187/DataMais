@@ -10,36 +10,46 @@
 # O QUE ELE FAZ (mesma ordem do Action):
 #   1. Builda o backend (dotnet publish) e o frontend (npm run build)
 #   2. Para o serviço systemd
-#   3. Faz backup e substitui os arquivos em /home/becape/datamais.api e /var/www/datamais
-#   4. Reinicia o serviço  →  a API aplica as migrations do EF Core no startup
-#   5. Mostra o log pra você conferir migrations/seed
+#   3. Faz backup do BANCO (pg_dump) e dos arquivos atuais
+#   4. Substitui /home/becape/datamais.api e /var/www/datamais
+#   5. Reinicia o serviço  →  a API aplica as migrations do EF Core no startup
+#   6. Mostra o log pra você conferir migrations/seed
 #
 # A ALTERAÇÃO NO BANCO é feita pela própria API ao subir (dbContext.Database.Migrate()),
 # exatamente como acontece no deploy via GitHub Action. Não é preciso rodar SQL na mão.
 # (Fallback manual, se algum dia quiser: db/migrations.sql — script SQL idempotente.)
 #
+# ⚠️  A migration AddEnsaioEtapa faz um BACKFILL: cria uma etapa para cada ensaio
+#     existente e reescreve o Status de todos eles (Concluido→Aceito, EmExecucao→
+#     EmAndamento, Pendente→Cancelado). O Down reverte os status mas APAGA as etapas.
+#     Por isso o dump do banco virou parte do deploy, e não uma sugestão.
+#
 # USO:
 #   cd <pasta-do-repo-pullado>
 #   chmod +x deploy-local.sh
-#   ./deploy-local.sh                 # deploy normal
-#   ./deploy-local.sh --reset-admin   # deploy + FORÇA admin/admin no banco (reseta a senha)
+#   ./deploy-local.sh                  # deploy normal (com dump do banco)
+#   ./deploy-local.sh --reset-admin    # deploy + FORÇA admin/admin no banco
+#   ./deploy-local.sh --sem-backup-db  # pula o pg_dump (só se souber o que está fazendo)
 #
 # --reset-admin: faz um upsert do usuário admin (email 'admin', senha 'admin', perfil Admin)
 #   direto no Postgres. Use quando não conseguir logar. Sem a flag, o deploy NÃO mexe na senha.
 #   Requer o cliente psql na VM.
 #
-# Requisitos na VM: dotnet SDK 8.0, Node 20 (npm), sudo, systemd (e psql p/ --reset-admin).
+# Requisitos na VM: dotnet SDK 8.0, Node 20 (npm), sudo, systemd, pg_dump (e psql p/ --reset-admin).
 # Se der erro de "\r": rode  sed -i 's/\r$//' deploy-local.sh
 
 set -euo pipefail
 
 # ── Flags ───────────────────────────────────────────────────────────────────
 RESET_ADMIN=0
+BACKUP_DB=1
+USO="Uso: ./deploy-local.sh [--reset-admin] [--sem-backup-db]"
 for arg in "$@"; do
   case "$arg" in
-    --reset-admin) RESET_ADMIN=1 ;;
-    -h|--help) echo "Uso: ./deploy-local.sh [--reset-admin]"; exit 0 ;;
-    *) echo "Argumento desconhecido: $arg"; echo "Uso: ./deploy-local.sh [--reset-admin]"; exit 1 ;;
+    --reset-admin)   RESET_ADMIN=1 ;;
+    --sem-backup-db) BACKUP_DB=0 ;;
+    -h|--help) echo "$USO"; exit 0 ;;
+    *) echo "Argumento desconhecido: $arg"; echo "$USO"; exit 1 ;;
   esac
 done
 
@@ -96,6 +106,43 @@ TS="$(date +%Y%m%d_%H%M%S)"
 echo "==> Parando $SERVICE..."
 sudo systemctl stop "$SERVICE" || true
 
+# ── Backup do banco (com o serviço parado, ninguém escrevendo) ──────────────
+# Feito ANTES de trocar os binários: se a migration der errado, o restore volta
+# ao estado exato de agora.
+if [ "$BACKUP_DB" = "1" ]; then
+  DUMP="/home/becape/backup_db_$TS.sql.gz"
+  echo "==> Backup do banco em $DUMP ..."
+
+  if ! command -v pg_dump >/dev/null 2>&1; then
+    echo "⚠️  pg_dump não encontrado na VM — o deploy seguiria SEM rede de segurança."
+    echo "    Instale (sudo apt install postgresql-client) ou rode com --sem-backup-db."
+    read -r -p "    Continuar sem backup do banco? [s/N] " resp
+    [ "${resp,,}" = "s" ] || { echo "Abortado. Serviço segue parado: sudo systemctl start $SERVICE"; exit 1; }
+  else
+    TMPENV="$(mktemp)"
+    sudo grep -E '^(POSTGRES_HOST|POSTGRES_PORT|POSTGRES_USER|POSTGRES_DATABASE|POSTGRES_PASSWORD)=' \
+      "$ENV_FILE" > "$TMPENV" 2>/dev/null || true
+    set -a; . "$TMPENV"; set +a
+    rm -f "$TMPENV"
+
+    if PGPASSWORD="${POSTGRES_PASSWORD:-}" pg_dump \
+         -h "${POSTGRES_HOST:-localhost}" -p "${POSTGRES_PORT:-5432}" \
+         -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DATABASE:-datamais}" \
+         -F p | gzip > "$DUMP"; then
+      echo "    ✓ $(du -h "$DUMP" | cut -f1)"
+      echo "    Restore, se precisar:"
+      echo "      gunzip -c $DUMP | PGPASSWORD=... psql -h ... -U ... -d ${POSTGRES_DATABASE:-datamais}"
+    else
+      rm -f "$DUMP"
+      echo "❌ pg_dump falhou — abortando antes de mexer no banco."
+      echo "   Serviço segue parado: sudo systemctl start $SERVICE"
+      exit 1
+    fi
+  fi
+else
+  echo "==> --sem-backup-db: pulando o dump do banco."
+fi
+
 # ── Backend: backup + substituição ──────────────────────────────────────────
 echo "==> Atualizando backend em $API_DIR (backup: /home/becape/backup_api_$TS.tar.gz)..."
 sudo mkdir -p "$API_DIR"
@@ -129,6 +176,29 @@ fi
 echo "==> Log recente (confira migrations/seed):"
 sudo journalctl -u "$SERVICE" -n 40 --no-pager | grep -Ei "migrat|seed|admin|usuário|role|✓|error|erro|exception" || \
   sudo journalctl -u "$SERVICE" -n 20 --no-pager
+
+# ── Conferência do backfill de etapas ───────────────────────────────────────
+if command -v psql >/dev/null 2>&1; then
+  echo ""
+  echo "==> Conferindo o backfill de etapas:"
+  TMPENV="$(mktemp)"
+  sudo grep -E '^(POSTGRES_HOST|POSTGRES_PORT|POSTGRES_USER|POSTGRES_DATABASE|POSTGRES_PASSWORD)=' \
+    "$ENV_FILE" > "$TMPENV" 2>/dev/null || true
+  set -a; . "$TMPENV"; set +a
+  rm -f "$TMPENV"
+
+  PGPASSWORD="${POSTGRES_PASSWORD:-}" psql \
+    -h "${POSTGRES_HOST:-localhost}" -p "${POSTGRES_PORT:-5432}" \
+    -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DATABASE:-datamais}" <<'SQL' || \
+    echo "⚠️  Não deu para conferir via psql (siga pelo log acima)."
+\echo '-- Ensaios por status --'
+SELECT "Status", count(*) AS total FROM "Ensaios" GROUP BY "Status" ORDER BY 1;
+\echo '-- Ensaios sem etapa (esperado: 0) --'
+SELECT count(*) AS ensaios_sem_etapa
+FROM "Ensaios" e
+WHERE NOT EXISTS (SELECT 1 FROM "EnsaioEtapas" et WHERE et."EnsaioId" = e."Id");
+SQL
+fi
 
 # ── (--reset-admin) Força admin/admin no banco ──────────────────────────────
 if [ "$RESET_ADMIN" = "1" ]; then

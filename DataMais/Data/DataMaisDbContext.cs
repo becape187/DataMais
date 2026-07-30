@@ -20,6 +20,8 @@ public class DataMaisDbContext : DbContext
     public DbSet<CampoRelatorio> CamposRelatorio { get; set; }
     public DbSet<RespostaCampoRelatorio> RespostasCampoRelatorio { get; set; }
     public DbSet<RelatorioVersao> RelatorioVersoes { get; set; }
+    public DbSet<ContadorRelatorio> ContadoresRelatorio { get; set; }
+    public DbSet<EnsaioEtapa> EnsaioEtapas { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -80,6 +82,19 @@ public class DataMaisDbContext : DbContext
                 .WithMany(c => c.Ensaios)
                 .HasForeignKey(e => e.CilindroId)
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // Configuração de EnsaioEtapa
+        modelBuilder.Entity<EnsaioEtapa>(entity =>
+        {
+            // Uma tentativa por câmara: a repetição entra como Tentativa seguinte
+            entity.HasIndex(e => new { e.EnsaioId, e.Camara, e.Tentativa }).IsUnique();
+            entity.HasIndex(e => e.Status);
+
+            entity.HasOne(e => e.Ensaio)
+                .WithMany(en => en.Etapas)
+                .HasForeignKey(e => e.EnsaioId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         // Configuração de Relatorio

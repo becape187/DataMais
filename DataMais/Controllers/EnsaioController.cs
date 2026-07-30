@@ -11,9 +11,15 @@ using InfluxDB.Client.Writes;
 
 namespace DataMais.Controllers;
 
+/// <summary>
+/// Ciclo de vida do ensaio hidráulico. Um ensaio é o cabeçalho do teste (cliente,
+/// cilindro, vessel, OS) e tem SEMPRE as duas câmaras, cada uma rodada como uma
+/// <see cref="EnsaioEtapa"/> — em qualquer ordem, repetíveis. O laudo só nasce
+/// quando o operador ACEITA o ensaio com as duas câmaras concluídas.
+/// </summary>
 [ApiController]
 [Route("api/[controller]")]
-    public class EnsaioController : ControllerBase
+public class EnsaioController : ControllerBase
 {
     private readonly DataMaisDbContext _context;
     private readonly ModbusService _modbusService;
@@ -32,40 +38,25 @@ namespace DataMais.Controllers;
         _logger = logger;
     }
 
+    // ── Consulta ────────────────────────────────────────────────────────────
+
     /// <summary>
-    /// Retorna o ensaio atualmente em execução (se houver), para a tela retomar o registro
-    /// ao reentrar — o backend é a fonte da verdade do que está rodando.
+    /// Ensaio aberto no momento (EmAndamento ou AguardandoAceite), com todas as etapas.
+    /// A tela usa isso para se reidratar: o backend é a fonte da verdade do que está rodando.
     /// </summary>
     [HttpGet("ativo")]
     public async Task<IActionResult> GetEnsaioAtivo()
     {
         try
         {
-            var ensaio = await _context.Ensaios
-                .Include(e => e.Cliente)
-                .Include(e => e.Cilindro)
-                .Where(e => e.Status == "EmExecucao")
-                .OrderByDescending(e => e.DataInicio)
-                .FirstOrDefaultAsync();
+            var ensaio = await CarregarEnsaioAbertoAsync();
 
             if (ensaio == null)
             {
                 return Ok(new { ativo = false });
             }
 
-            return Ok(new
-            {
-                ativo = true,
-                id = ensaio.Id,
-                numero = ensaio.Numero,
-                status = ensaio.Status,
-                dataInicio = ensaio.DataInicio,
-                camara = ensaio.CamaraTestada,
-                pressaoCarga = ensaio.PressaoCargaConfigurada,
-                tempoCarga = ensaio.TempoCargaConfigurado,
-                clienteNome = ensaio.Cliente != null ? ensaio.Cliente.Nome : null,
-                cilindroNome = ensaio.Cilindro != null ? ensaio.Cilindro.Nome : null
-            });
+            return Ok(new { ativo = true, ensaio = MontarDto(ensaio) });
         }
         catch (Exception ex)
         {
@@ -74,9 +65,137 @@ namespace DataMais.Controllers;
         }
     }
 
-    [HttpPost("iniciar")]
+    /// <summary>
+    /// Ensaios que ficaram pendentes: falta rodar uma câmara ou falta o aceite.
+    /// Sair da tela no meio do ensaio não perde nada — ele reaparece aqui.
+    /// </summary>
+    [HttpGet("pendentes")]
+    public async Task<IActionResult> GetPendentes()
+    {
+        try
+        {
+            var ensaios = await _context.Ensaios
+                .Include(e => e.Cliente)
+                .Include(e => e.Cilindro)
+                .Include(e => e.Etapas)
+                .Where(e => e.Status == StatusEnsaio.EmAndamento || e.Status == StatusEnsaio.AguardandoAceite)
+                .OrderByDescending(e => e.DataCriacao)
+                .ToListAsync();
+
+            return Ok(ensaios.Select(MontarDto));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Erro ao listar ensaios pendentes");
+            return StatusCode(500, new { message = "Erro ao listar ensaios pendentes", error = ex.Message });
+        }
+    }
+
+    /// <summary>Detalhe de um ensaio com suas etapas.</summary>
+    [HttpGet("{id:int}")]
+    public async Task<IActionResult> GetById(int id)
+    {
+        try
+        {
+            var ensaio = await _context.Ensaios
+                .Include(e => e.Cliente)
+                .Include(e => e.Cilindro)
+                .Include(e => e.Etapas)
+                .FirstOrDefaultAsync(e => e.Id == id);
+
+            if (ensaio == null)
+            {
+                return NotFound(new { message = "Ensaio não encontrado" });
+            }
+
+            return Ok(MontarDto(ensaio));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Erro ao obter ensaio {EnsaioId}", id);
+            return StatusCode(500, new { message = "Erro ao obter ensaio", error = ex.Message });
+        }
+    }
+
+    // ── Ciclo de vida ───────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Cria o cabeçalho do ensaio (passo 1). Nenhuma câmara roda ainda.
+    /// Idempotente: se já existe um ensaio aberto, devolve ele em vez de criar outro
+    /// — a bancada é uma só.
+    /// </summary>
+    [HttpPost]
     [Authorize(Roles = "Admin,Operador")]
-    public async Task<IActionResult> IniciarEnsaio([FromBody] IniciarEnsaioRequest request)
+    public async Task<IActionResult> CriarEnsaio([FromBody] CriarEnsaioRequest request)
+    {
+        try
+        {
+            var aberto = await CarregarEnsaioAbertoAsync();
+            if (aberto != null)
+            {
+                _logger.LogInformation("Criar ensaio idempotente: ensaio {EnsaioId} já está aberto", aberto.Id);
+                return Ok(new { ensaio = MontarDto(aberto), jaExistia = true });
+            }
+
+            var sistema = _configService.GetConfig().Sistema;
+
+            if (!sistema.ClienteId.HasValue || !sistema.CilindroId.HasValue)
+            {
+                return BadRequest(new
+                {
+                    message = "Cliente e cilindro do sistema não configurados. Configure na tela de Dashboard antes de iniciar o ensaio."
+                });
+            }
+
+            var cliente = await _context.Clientes.FindAsync(sistema.ClienteId.Value);
+            var cilindro = await _context.Cilindros.FindAsync(sistema.CilindroId.Value);
+
+            if (cliente == null || cilindro == null)
+            {
+                return BadRequest(new { message = "Cliente ou cilindro configurado não encontrado no banco de dados." });
+            }
+
+            var agora = DateTime.UtcNow;
+
+            var ensaio = new Ensaio
+            {
+                Numero = $"ENSAIO-{agora:yyyyMMdd-HHmmss}",
+                Status = StatusEnsaio.EmAndamento,
+                ClienteId = cliente.Id,
+                CilindroId = cilindro.Id,
+                Vessel = Limpar(request.Vessel),
+                LocalTeste = Limpar(request.LocalTeste),
+                Departamento = Limpar(request.Departamento),
+                OrdemServico = Limpar(request.OrdemServico),
+                DataCriacao = agora,
+                DataAtualizacao = agora
+            };
+
+            _context.Ensaios.Add(ensaio);
+            await _context.SaveChangesAsync();
+
+            await _context.Entry(ensaio).Reference(e => e.Cliente).LoadAsync();
+            await _context.Entry(ensaio).Reference(e => e.Cilindro).LoadAsync();
+
+            _logger.LogInformation("Ensaio {Numero} criado (cliente {Cliente}, cilindro {Cilindro})",
+                ensaio.Numero, cliente.Nome, cilindro.Nome);
+
+            return Ok(new { ensaio = MontarDto(ensaio), jaExistia = false });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Erro ao criar ensaio");
+            return StatusCode(500, new { message = "Erro ao criar ensaio", error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Inicia uma câmara do ensaio. Repetir uma câmara já concluída é permitido:
+    /// entra como a próxima tentativa e a anterior só é aposentada quando ESTA for salva.
+    /// </summary>
+    [HttpPost("{id:int}/etapa")]
+    [Authorize(Roles = "Admin,Operador")]
+    public async Task<IActionResult> IniciarEtapa(int id, [FromBody] IniciarEtapaRequest request)
     {
         try
         {
@@ -85,24 +204,20 @@ namespace DataMais.Controllers;
                 return BadRequest(ModelState);
             }
 
-            // Idempotência: se já existe um ensaio em execução, retorna ele em vez de criar
-            // outro (e sem reenviar os comandos Modbus de início).
-            var ensaioEmExecucao = await _context.Ensaios
-                .Where(e => e.Status == "EmExecucao")
-                .OrderByDescending(e => e.DataInicio)
-                .FirstOrDefaultAsync();
+            var ensaio = await _context.Ensaios
+                .Include(e => e.Cliente)
+                .Include(e => e.Cilindro)
+                .Include(e => e.Etapas)
+                .FirstOrDefaultAsync(e => e.Id == id);
 
-            if (ensaioEmExecucao != null)
+            if (ensaio == null)
             {
-                _logger.LogInformation("Iniciar ensaio idempotente: já há ensaio {EnsaioId} em execução", ensaioEmExecucao.Id);
-                return Ok(new
-                {
-                    id = ensaioEmExecucao.Id,
-                    numero = ensaioEmExecucao.Numero,
-                    status = ensaioEmExecucao.Status,
-                    dataInicio = ensaioEmExecucao.DataInicio,
-                    jaExistia = true
-                });
+                return NotFound(new { message = "Ensaio não encontrado" });
+            }
+
+            if (ensaio.Status != StatusEnsaio.EmAndamento && ensaio.Status != StatusEnsaio.AguardandoAceite)
+            {
+                return BadRequest(new { message = $"Ensaio não está aberto (status atual: {ensaio.Status})." });
             }
 
             var camara = request.Camara?.Trim().ToUpperInvariant();
@@ -121,474 +236,322 @@ namespace DataMais.Controllers;
                 return BadRequest(new { message = "Tempo de carga deve ser maior que zero." });
             }
 
-            var appConfig = _configService.GetConfig();
-            var sistema = appConfig.Sistema;
+            // Só uma etapa pode rodar por vez em toda a bancada — o CLP é um só.
+            var emExecucao = await _context.EnsaioEtapas
+                .Include(e => e.Ensaio)
+                .FirstOrDefaultAsync(e => e.Status == StatusEtapa.EmExecucao);
 
-            if (!sistema.ClienteId.HasValue || !sistema.CilindroId.HasValue)
+            if (emExecucao != null)
             {
-                return BadRequest(new
+                return Conflict(new
                 {
-                    message = "Cliente e cilindro do sistema não configurados. Configure na tela de Dashboard antes de iniciar o ensaio."
-                });
-            }
-
-            var cliente = await _context.Clientes.FindAsync(sistema.ClienteId.Value);
-            var cilindro = await _context.Cilindros.FindAsync(sistema.CilindroId.Value);
-
-            if (cliente == null || cilindro == null)
-            {
-                return BadRequest(new
-                {
-                    message = "Cliente ou cilindro configurado não encontrado no banco de dados."
+                    message = emExecucao.EnsaioId == id
+                        ? $"A câmara {emExecucao.Camara} deste ensaio ainda está rodando. Encerre-a antes de iniciar outra."
+                        : $"O ensaio {emExecucao.Ensaio?.Numero} está com a câmara {emExecucao.Camara} rodando. Encerre-o antes."
                 });
             }
 
             var agora = DateTime.UtcNow;
-            var numero = $"ENSAIO-{agora:yyyyMMdd-HHmmss}";
+            var proximaTentativa = ensaio.Etapas
+                .Where(e => e.Camara == camara)
+                .Select(e => e.Tentativa)
+                .DefaultIfEmpty(0)
+                .Max() + 1;
 
-            var ensaio = new Ensaio
+            var etapa = new EnsaioEtapa
             {
-                Numero = numero,
-                Status = "EmExecucao",
+                EnsaioId = ensaio.Id,
+                Camara = camara,
+                Tentativa = proximaTentativa,
+                Status = StatusEtapa.EmExecucao,
                 DataInicio = agora,
-                ClienteId = cliente.Id,
-                CilindroId = cilindro.Id,
-                CamaraTestada = camara,
                 PressaoCargaConfigurada = request.PressaoCarga,
                 TempoCargaConfigurado = request.TempoCarga,
-                Vessel = string.IsNullOrWhiteSpace(request.Vessel) ? null : request.Vessel.Trim(),
-                LocalTeste = string.IsNullOrWhiteSpace(request.LocalTeste) ? null : request.LocalTeste.Trim(),
-                Departamento = string.IsNullOrWhiteSpace(request.Departamento) ? null : request.Departamento.Trim(),
-                OrdemServico = string.IsNullOrWhiteSpace(request.OrdemServico) ? null : request.OrdemServico.Trim(),
                 DataCriacao = agora,
                 DataAtualizacao = agora
             };
 
-            _context.Ensaios.Add(ensaio);
+            _context.EnsaioEtapas.Add(etapa);
+
+            // O ensaio volta a "em andamento" mesmo que já estivesse aguardando aceite
+            // (caso de repetição de uma câmara depois das duas terem rodado).
+            ensaio.Status = StatusEnsaio.EmAndamento;
+            ensaio.DataInicio ??= agora;
+            ensaio.DataAtualizacao = agora;
+
             await _context.SaveChangesAsync();
 
-            // Executa comandos Modbus para iniciar o ensaio
-            var errosModbus = new List<string>();
+            // Comandos Modbus de partida. Falha na SELEÇÃO DA CÂMARA é fatal: sem garantia
+            // de qual câmara está pressurizada, o dado não vale — a etapa é removida.
+            var inicio = await IniciarRegistroNoClpAsync(camara, request.PressaoCarga, request.TempoCarga);
 
-            try
+            if (!inicio.Ok)
             {
-                // 1. Seleciona a câmara (Avança para Câmara A, Recua para Câmara B).
-                //    Desliga o botão OPOSTO antes de ligar o escolhido — se o operador deixou
-                //    o outro coil retido pela IHM, os dois ficariam ligados ao mesmo tempo.
-                //    Depois relê os dois coils para confirmar o estado no CLP (double-check).
-                var nomeBotaoCamara = camara == "A" ? "BOTAO_AVANCA_IHM" : "BOTAO_RECUA_IHM";
-                var nomeBotaoOposto = camara == "A" ? "BOTAO_RECUA_IHM" : "BOTAO_AVANCA_IHM";
+                _context.EnsaioEtapas.Remove(etapa);
+                await _context.SaveChangesAsync();
 
-                var botaoCamara = await _context.ModbusConfigs
-                    .FirstOrDefaultAsync(m => m.Nome == nomeBotaoCamara && m.Ativo);
-                var botaoOposto = await _context.ModbusConfigs
-                    .FirstOrDefaultAsync(m => m.Nome == nomeBotaoOposto && m.Ativo);
+                _logger.LogError("Etapa da câmara {Camara} abortada no ensaio {EnsaioId}: {Motivo}",
+                    camara, ensaio.Id, inicio.Falha);
 
-                if (botaoCamara == null)
+                return StatusCode(500, new
                 {
-                    return await AbortarEnsaioPorFalhaCamaraAsync(ensaio, botaoCamara, botaoOposto,
-                        $"Registro '{nomeBotaoCamara}' não encontrado no cadastro Modbus.");
-                }
-
-                // 1a. Desliga o botão oposto primeiro
-                if (botaoOposto != null)
-                {
-                    var opostoDesligado = await _modbusService.EscreverRegistroAsync(ConfigParaEscrita(botaoOposto), false);
-                    if (!opostoDesligado)
-                    {
-                        return await AbortarEnsaioPorFalhaCamaraAsync(ensaio, botaoCamara, botaoOposto,
-                            $"Não foi possível desligar {nomeBotaoOposto} antes de ativar a câmara {camara}.");
-                    }
-                }
-                else
-                {
-                    errosModbus.Add($"Registro '{nomeBotaoOposto}' não encontrado — não foi possível garantir que o botão oposto está desligado");
-                }
-
-                // 1b. Liga o botão da câmara escolhida
-                var camaraAtivada = await _modbusService.EscreverRegistroAsync(ConfigParaEscrita(botaoCamara), true);
-                if (!camaraAtivada)
-                {
-                    return await AbortarEnsaioPorFalhaCamaraAsync(ensaio, botaoCamara, botaoOposto,
-                        $"Não foi possível ativar {nomeBotaoCamara}.");
-                }
-
-                // 1c. Double-check: relê os dois coils e confirma escolhido=ON, oposto=OFF.
-                //     Se não bater, reaplica os comandos e confere mais uma vez.
-                bool confirmado = false;
-                bool? estadoCamara = null, estadoOposto = null;
-
-                for (int tentativa = 1; tentativa <= 2 && !confirmado; tentativa++)
-                {
-                    await Task.Delay(200);
-                    estadoCamara = await LerCoilAsync(botaoCamara.Id);
-                    estadoOposto = botaoOposto != null ? await LerCoilAsync(botaoOposto.Id) : false;
-
-                    if (estadoCamara == true && estadoOposto != true)
-                    {
-                        confirmado = true;
-                    }
-                    else if (tentativa < 2)
-                    {
-                        _logger.LogWarning(
-                            "Estado dos botões de câmara divergente ({BotaoCamara}={EstadoCamara}, {BotaoOposto}={EstadoOposto}), reaplicando comandos",
-                            nomeBotaoCamara, estadoCamara, nomeBotaoOposto, estadoOposto);
-
-                        if (botaoOposto != null && estadoOposto == true)
-                            await _modbusService.EscreverRegistroAsync(ConfigParaEscrita(botaoOposto), false);
-                        if (estadoCamara != true)
-                            await _modbusService.EscreverRegistroAsync(ConfigParaEscrita(botaoCamara), true);
-                    }
-                }
-
-                if (!confirmado)
-                {
-                    return await AbortarEnsaioPorFalhaCamaraAsync(ensaio, botaoCamara, botaoOposto,
-                        $"Estado dos botões de câmara não confirmado após reaplicar: {nomeBotaoCamara}={FormatarEstadoCoil(estadoCamara)}, {nomeBotaoOposto}={FormatarEstadoCoil(estadoOposto)} (esperado: ligado / desligado). Verifique se o botão Avança/Recua não está pressionado na tela.");
-                }
-
-                _logger.LogInformation("Câmara {Camara} ({Botao}) ativada e confirmada por leitura ({Oposto} desligado)",
-                    camara, nomeBotaoCamara, nomeBotaoOposto);
-
-                // 2. Escreve Pressão de Carga
-                var pressaoRegistro = await _context.ModbusConfigs
-                    .FirstOrDefaultAsync(m => m.Nome == "PRESSAO_CARGA" && m.Ativo);
-
-                if (pressaoRegistro != null)
-                {
-                    string funcaoEscrita = pressaoRegistro.TipoDado == "Boolean" || pressaoRegistro.FuncaoModbus == "ReadCoils" 
-                        ? "WriteSingleCoil" 
-                        : "WriteSingleRegister";
-
-                    var configTemp = new ModbusConfig
-                    {
-                        Id = pressaoRegistro.Id,
-                        Nome = pressaoRegistro.Nome,
-                        IpAddress = pressaoRegistro.IpAddress,
-                        Port = pressaoRegistro.Port,
-                        SlaveId = pressaoRegistro.SlaveId,
-                        FuncaoModbus = funcaoEscrita,
-                        EnderecoRegistro = pressaoRegistro.EnderecoRegistro,
-                        QuantidadeRegistros = pressaoRegistro.QuantidadeRegistros,
-                        TipoDado = pressaoRegistro.TipoDado,
-                        Ativo = pressaoRegistro.Ativo
-                    };
-
-                    object valorPressao = funcaoEscrita == "WriteSingleRegister" 
-                        ? (ushort)Math.Round(request.PressaoCarga) 
-                        : (object)(request.PressaoCarga > 0);
-
-                    var pressaoEscrita = await _modbusService.EscreverRegistroAsync(configTemp, valorPressao);
-                    if (!pressaoEscrita)
-                    {
-                        errosModbus.Add("Erro ao escrever PRESSAO_CARGA");
-                    }
-                    else
-                    {
-                        _logger.LogInformation("Pressão de carga {Pressao} escrita com sucesso", request.PressaoCarga);
-                    }
-                }
-                else
-                {
-                    errosModbus.Add("Registro 'PRESSAO_CARGA' não encontrado");
-                }
-
-                // 3. Escreve Tempo de Carga
-                var tempoRegistro = await _context.ModbusConfigs
-                    .FirstOrDefaultAsync(m => m.Nome == "TEMPO_CARGA" && m.Ativo);
-
-                if (tempoRegistro != null)
-                {
-                    string funcaoEscrita = tempoRegistro.TipoDado == "Boolean" || tempoRegistro.FuncaoModbus == "ReadCoils" 
-                        ? "WriteSingleCoil" 
-                        : "WriteSingleRegister";
-
-                    var configTemp = new ModbusConfig
-                    {
-                        Id = tempoRegistro.Id,
-                        Nome = tempoRegistro.Nome,
-                        IpAddress = tempoRegistro.IpAddress,
-                        Port = tempoRegistro.Port,
-                        SlaveId = tempoRegistro.SlaveId,
-                        FuncaoModbus = funcaoEscrita,
-                        EnderecoRegistro = tempoRegistro.EnderecoRegistro,
-                        QuantidadeRegistros = tempoRegistro.QuantidadeRegistros,
-                        TipoDado = tempoRegistro.TipoDado,
-                        Ativo = tempoRegistro.Ativo
-                    };
-
-                    object valorTempo = funcaoEscrita == "WriteSingleRegister" 
-                        ? (ushort)Math.Round(request.TempoCarga) 
-                        : (object)(request.TempoCarga > 0);
-
-                    var tempoEscrito = await _modbusService.EscreverRegistroAsync(configTemp, valorTempo);
-                    if (!tempoEscrito)
-                    {
-                        errosModbus.Add("Erro ao escrever TEMPO_CARGA");
-                    }
-                    else
-                    {
-                        _logger.LogInformation("Tempo de carga {Tempo} escrito com sucesso", request.TempoCarga);
-                    }
-                }
-                else
-                {
-                    errosModbus.Add("Registro 'TEMPO_CARGA' não encontrado");
-                }
-
-                // 4. Inicia o registro e verifica se está rodando (seguindo o padrão do motor)
-                var iniciaRegistro = await _context.ModbusConfigs
-                    .FirstOrDefaultAsync(m => m.Nome == "INICIA_REGISTRO" && m.Ativo);
-
-                var registroRodando = await _context.ModbusConfigs
-                    .FirstOrDefaultAsync(m => m.Nome == "REGISTRO_RODANDO" && m.Ativo && m.FuncaoModbus == "ReadInputs");
-
-                if (iniciaRegistro != null && registroRodando != null)
-                {
-                    string funcaoEscrita = iniciaRegistro.TipoDado == "Boolean" || iniciaRegistro.FuncaoModbus == "ReadCoils" 
-                        ? "WriteSingleCoil" 
-                        : "WriteSingleRegister";
-
-                    var configTemp = new ModbusConfig
-                    {
-                        Id = iniciaRegistro.Id,
-                        Nome = iniciaRegistro.Nome,
-                        IpAddress = iniciaRegistro.IpAddress,
-                        Port = iniciaRegistro.Port,
-                        SlaveId = iniciaRegistro.SlaveId,
-                        FuncaoModbus = funcaoEscrita,
-                        EnderecoRegistro = iniciaRegistro.EnderecoRegistro,
-                        QuantidadeRegistros = iniciaRegistro.QuantidadeRegistros,
-                        TipoDado = iniciaRegistro.TipoDado,
-                        Ativo = iniciaRegistro.Ativo
-                    };
-
-                    // 1. Ativa o botão (mantém ativado até receber confirmação)
-                    var iniciado = await _modbusService.EscreverRegistroAsync(configTemp, true);
-                    if (!iniciado)
-                    {
-                        errosModbus.Add("Erro ao ativar INICIA_REGISTRO");
-                    }
-                    else
-                    {
-                        // 2. Aguarda um tempo inicial para o CLP processar o comando
-                        await Task.Delay(300);
-
-                        // 3. Verifica se o status mudou (aguarda confirmação via REGISTRO_RODANDO)
-                        // O botão permanece ativado enquanto aguarda a confirmação
-                        var timeout = TimeSpan.FromSeconds(2);
-                        var intervalo = TimeSpan.FromMilliseconds(200);
-                        var inicioVerificacao = DateTime.UtcNow;
-                        bool rodando = false;
-                        int tentativasLeitura = 0;
-
-                        while (DateTime.UtcNow - inicioVerificacao < timeout)
-                        {
-                            await Task.Delay(intervalo);
-                            tentativasLeitura++;
-
-                            try
-                            {
-                                var status = await _modbusService.LerRegistroAsync(registroRodando.Id);
-                                bool statusBool = status is bool boolVal ? boolVal : (status?.ToString() == "1" || status?.ToString() == "True");
-                                
-                                if (statusBool)
-                                {
-                                    rodando = true;
-                                    _logger.LogInformation("REGISTRO_RODANDO confirmado após {Tentativas} tentativas", tentativasLeitura);
-                                    break;
-                                }
-                            }
-                            catch (Exception exLeitura)
-                            {
-                                _logger.LogWarning(exLeitura, "Erro ao ler REGISTRO_RODANDO na tentativa {Tentativa}", tentativasLeitura);
-                            }
-                        }
-
-                        // INICIA_REGISTRO agora é um coil de NÍVEL (não pulso): permanece LIGADO
-                        // durante todo o registro. Só será desligado ao interromper/cancelar o ensaio.
-                        if (!rodando)
-                        {
-                            errosModbus.Add("Registro não iniciou após 2 segundos. Verifique REGISTRO_RODANDO.");
-                        }
-                    }
-                }
-                else
-                {
-                    if (iniciaRegistro == null)
-                        errosModbus.Add("Registro 'INICIA_REGISTRO' não encontrado");
-                    if (registroRodando == null)
-                        errosModbus.Add("Registro 'REGISTRO_RODANDO' (ReadInputs) não encontrado");
-                }
-            }
-            catch (Exception exModbus)
-            {
-                _logger.LogError(exModbus, "Erro ao executar comandos Modbus ao iniciar ensaio");
-                errosModbus.Add($"Erro ao executar comandos Modbus: {exModbus.Message}");
+                    message = $"Etapa abortada: {inicio.Falha}",
+                    abortado = true
+                });
             }
 
-            // Retorna resposta com avisos se houver erros Modbus, mas o ensaio foi criado
-            var resposta = new
-            {
-                id = ensaio.Id,
-                numero = ensaio.Numero,
-                status = ensaio.Status,
-                dataInicio = ensaio.DataInicio,
-                avisosModbus = errosModbus.Any() ? errosModbus : null
-            };
+            await _context.Entry(ensaio).Collection(e => e.Etapas).LoadAsync();
 
-            if (errosModbus.Any())
+            return Ok(new
             {
-                _logger.LogWarning("Ensaio {EnsaioId} criado, mas com avisos Modbus: {Avisos}", ensaio.Id, string.Join(", ", errosModbus));
-                return Ok(resposta);
-            }
-
-            return Ok(resposta);
+                ensaio = MontarDto(ensaio),
+                etapaId = etapa.Id,
+                avisosModbus = inicio.Avisos.Any() ? inicio.Avisos : null
+            });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Erro ao iniciar ensaio");
-            return StatusCode(500, new { message = "Erro ao iniciar ensaio", error = ex.Message });
+            _logger.LogError(ex, "Erro ao iniciar etapa do ensaio {EnsaioId}", id);
+            return StatusCode(500, new { message = "Erro ao iniciar etapa", error = ex.Message });
         }
     }
 
-    [HttpPost("interromper/{id:int}")]
+    /// <summary>
+    /// Encerra a etapa em execução. <paramref name="salvar"/> = false descarta a corrida
+    /// e apaga as leituras dela no InfluxDB; a tentativa anterior da mesma câmara,
+    /// se houver, permanece valendo.
+    /// </summary>
+    [HttpPost("etapa/{etapaId:int}/encerrar")]
     [Authorize(Roles = "Admin,Operador")]
-    public async Task<IActionResult> InterromperEnsaio(int id)
+    public async Task<IActionResult> EncerrarEtapa(int etapaId, [FromQuery] bool salvar = true)
     {
         try
         {
-            var ensaio = await _context.Ensaios.FindAsync(id);
+            var etapa = await _context.EnsaioEtapas
+                .Include(e => e.Ensaio)
+                    .ThenInclude(en => en.Etapas)
+                .FirstOrDefaultAsync(e => e.Id == etapaId);
+
+            if (etapa == null)
+            {
+                return NotFound(new { message = "Etapa não encontrada" });
+            }
+
+            if (etapa.Status != StatusEtapa.EmExecucao)
+            {
+                return Ok(new
+                {
+                    message = "Etapa já encerrada",
+                    status = etapa.Status,
+                    ensaio = MontarDto(etapa.Ensaio)
+                });
+            }
+
+            await PararRegistroNoClpAsync($"encerrar a etapa {etapaId}");
+
+            var agora = DateTime.UtcNow;
+            etapa.DataFim = agora;
+            etapa.Status = salvar ? StatusEtapa.Concluida : StatusEtapa.Descartada;
+            etapa.DataAtualizacao = agora;
+
+            if (salvar)
+            {
+                // A tentativa nova substitui as anteriores da mesma câmara.
+                foreach (var anterior in etapa.Ensaio.Etapas.Where(e =>
+                             e.Id != etapa.Id &&
+                             e.Camara == etapa.Camara &&
+                             e.Status == StatusEtapa.Concluida))
+                {
+                    anterior.Status = StatusEtapa.Repetida;
+                    anterior.DataAtualizacao = agora;
+                }
+            }
+
+            AtualizarStatusEnsaio(etapa.Ensaio, agora);
+            await _context.SaveChangesAsync();
+
+            if (!salvar)
+            {
+                // Descartada: as leituras dessa janela não podem sobrar no Influx,
+                // senão contaminariam o gráfico e o veredito da tentativa válida.
+                try
+                {
+                    await RemoverLeiturasInfluxAsync(etapa.EnsaioId, etapa.DataInicio, agora);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Erro ao remover leituras da etapa {EtapaId} no InfluxDB", etapaId);
+                }
+            }
+
+            _logger.LogInformation("Etapa {EtapaId} (câmara {Camara}) do ensaio {EnsaioId} encerrada como {Status}",
+                etapaId, etapa.Camara, etapa.EnsaioId, etapa.Status);
+
+            return Ok(new
+            {
+                message = salvar ? "Etapa salva" : "Etapa descartada",
+                status = etapa.Status,
+                ensaio = MontarDto(etapa.Ensaio)
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Erro ao encerrar etapa {EtapaId}", etapaId);
+            return StatusCode(500, new { message = "Erro ao encerrar etapa", error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Aceita o ensaio e gera o relatório. Exige as duas câmaras concluídas —
+    /// é aqui que o número REH-MPR é queimado, não antes.
+    /// </summary>
+    [HttpPost("{id:int}/aceitar")]
+    [Authorize(Roles = "Admin,Operador")]
+    public async Task<IActionResult> AceitarEnsaio(int id)
+    {
+        try
+        {
+            var ensaio = await _context.Ensaios
+                .Include(e => e.Etapas)
+                .Include(e => e.Relatorios)
+                .FirstOrDefaultAsync(e => e.Id == id);
+
             if (ensaio == null)
             {
                 return NotFound(new { message = "Ensaio não encontrado" });
             }
 
-            if (ensaio.Status == "Concluido" || ensaio.Status == "Cancelado")
+            // Idempotência: aceitar duas vezes devolve o mesmo laudo, não gera outro número.
+            if (ensaio.Status == StatusEnsaio.Aceito)
             {
+                var existente = ensaio.Relatorios.OrderByDescending(r => r.DataCriacao).FirstOrDefault();
                 return Ok(new
                 {
-                    message = "Ensaio já finalizado",
-                    status = ensaio.Status,
-                    dataFim = ensaio.DataFim
+                    message = "Ensaio já aceito",
+                    relatorioId = existente?.Id,
+                    relatorioNumero = existente?.Numero,
+                    jaExistia = true
                 });
             }
 
-            // Desliga INICIA_REGISTRO no CLP — esse coil define "parar" na unidade hidráulica.
-            var desligou = await SetIniciaRegistroAsync(false);
-            if (!desligou)
+            if (ensaio.Status == StatusEnsaio.Cancelado)
             {
-                _logger.LogWarning("Não foi possível desligar INICIA_REGISTRO ao interromper o ensaio {EnsaioId}", id);
+                return BadRequest(new { message = "Ensaio cancelado não pode ser aceito." });
             }
 
-            // Desliga explicitamente os dois botões de câmara da IHM (avança e recua),
-            // independente da câmara testada, para não deixar coil retido no CLP.
-            var falhasBotoes = await DesligarBotoesCamaraAsync();
-            if (falhasBotoes.Any())
+            if (ensaio.Etapas.Any(e => e.Status == StatusEtapa.EmExecucao))
             {
-                _logger.LogWarning("Falhas ao desligar botões de câmara ao interromper o ensaio {EnsaioId}: {Falhas}",
-                    id, string.Join(", ", falhasBotoes));
+                return BadRequest(new { message = "Há uma câmara ainda rodando. Encerre-a antes de aceitar o ensaio." });
             }
 
-            // Finaliza ensaio
-            ensaio.Status = "Concluido";
-            ensaio.DataFim = DateTime.UtcNow;
-            ensaio.DataAtualizacao = DateTime.UtcNow;
+            var faltando = new[] { "A", "B" }
+                .Where(c => !ensaio.Etapas.Any(e => e.Camara == c && e.Status == StatusEtapa.Concluida))
+                .ToList();
 
-            // Cria relatório vinculado ao ensaio
-            var dataRelatorio = ensaio.DataFim ?? DateTime.UtcNow;
-            var numeroRelatorio = $"REL-{ensaio.Numero}";
+            if (faltando.Any())
+            {
+                return BadRequest(new
+                {
+                    message = $"Faltam câmaras concluídas: {string.Join(" e ", faltando)}. O ensaio só vira laudo com as duas."
+                });
+            }
+
+            var agora = DateTime.UtcNow;
+            var dataRelatorio = ensaio.Etapas
+                .Where(e => e.Status == StatusEtapa.Concluida && e.DataFim.HasValue)
+                .Max(e => e.DataFim!.Value);
+
+            var numeroRelatorio = await NumeroRelatorioService.GerarProximoAsync(_context, dataRelatorio);
 
             var relatorio = new Relatorio
             {
                 Numero = numeroRelatorio,
                 Data = dataRelatorio,
-                Observacoes = $"Relatório gerado automaticamente a partir do ensaio {ensaio.Numero}.",
+                Observacoes = $"Relatório gerado a partir do ensaio {ensaio.Numero} (câmaras A e B).",
                 ClienteId = ensaio.ClienteId,
                 CilindroId = ensaio.CilindroId,
                 EnsaioId = ensaio.Id,
-                DataCriacao = DateTime.UtcNow,
-                DataAtualizacao = DateTime.UtcNow
+                DataCriacao = agora,
+                DataAtualizacao = agora
             };
 
             _context.Relatorios.Add(relatorio);
 
+            ensaio.Status = StatusEnsaio.Aceito;
+            ensaio.DataFim = dataRelatorio;
+            ensaio.DataAtualizacao = agora;
+
             await _context.SaveChangesAsync();
+
+            _logger.LogInformation("Ensaio {EnsaioId} aceito; relatório {Numero} gerado", ensaio.Id, relatorio.Numero);
 
             return Ok(new
             {
-                message = "Ensaio interrompido e relatório gerado com sucesso",
-                status = ensaio.Status,
-                dataFim = ensaio.DataFim,
-                relatorio = new
-                {
-                    relatorio.Id,
-                    relatorio.Numero,
-                    relatorio.Data,
-                    relatorio.ClienteId,
-                    relatorio.CilindroId,
-                    relatorio.EnsaioId
-                }
+                message = "Ensaio aceito e relatório gerado",
+                relatorioId = relatorio.Id,
+                relatorioNumero = relatorio.Numero,
+                jaExistia = false
             });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Erro ao interromper ensaio {EnsaioId}", id);
-            return StatusCode(500, new { message = "Erro ao interromper ensaio", error = ex.Message });
+            _logger.LogError(ex, "Erro ao aceitar ensaio {EnsaioId}", id);
+            return StatusCode(500, new { message = "Erro ao aceitar ensaio", error = ex.Message });
         }
     }
 
-    [HttpPost("cancelar/{id:int}")]
+    /// <summary>
+    /// Cancela o ensaio inteiro: para o CLP, descarta a etapa em execução e apaga
+    /// as leituras do ensaio no InfluxDB. Não gera laudo nem consome número.
+    /// </summary>
+    [HttpPost("{id:int}/cancelar")]
     [Authorize(Roles = "Admin,Operador")]
     public async Task<IActionResult> CancelarEnsaio(int id)
     {
         try
         {
-            var ensaio = await _context.Ensaios.FindAsync(id);
+            var ensaio = await _context.Ensaios
+                .Include(e => e.Etapas)
+                .FirstOrDefaultAsync(e => e.Id == id);
+
             if (ensaio == null)
             {
                 return NotFound(new { message = "Ensaio não encontrado" });
             }
 
-            // Desliga INICIA_REGISTRO no CLP — parar o registro na unidade hidráulica.
-            var desligou = await SetIniciaRegistroAsync(false);
-            if (!desligou)
+            if (ensaio.Status == StatusEnsaio.Aceito)
             {
-                _logger.LogWarning("Não foi possível desligar INICIA_REGISTRO ao cancelar o ensaio {EnsaioId}", id);
+                return BadRequest(new { message = "Ensaio já aceito não pode ser cancelado — o laudo já existe." });
             }
 
-            // Desliga explicitamente os dois botões de câmara da IHM (avança e recua),
-            // independente da câmara testada, para não deixar coil retido no CLP.
-            var falhasBotoes = await DesligarBotoesCamaraAsync();
-            if (falhasBotoes.Any())
+            await PararRegistroNoClpAsync($"cancelar o ensaio {id}");
+
+            var agora = DateTime.UtcNow;
+
+            foreach (var etapa in ensaio.Etapas.Where(e => e.Status == StatusEtapa.EmExecucao))
             {
-                _logger.LogWarning("Falhas ao desligar botões de câmara ao cancelar o ensaio {EnsaioId}: {Falhas}",
-                    id, string.Join(", ", falhasBotoes));
+                etapa.Status = StatusEtapa.Descartada;
+                etapa.DataFim = agora;
+                etapa.DataAtualizacao = agora;
             }
 
-            // Marca como cancelado (não salvo pelo usuário)
-            ensaio.Status = "Cancelado";
-            ensaio.DataFim = DateTime.UtcNow;
-            ensaio.DataAtualizacao = DateTime.UtcNow;
+            ensaio.Status = StatusEnsaio.Cancelado;
+            ensaio.DataFim = agora;
+            ensaio.DataAtualizacao = agora;
 
             await _context.SaveChangesAsync();
 
-            // Remove as leituras desse ensaio no InfluxDB (período do ensaio)
             try
             {
-                await RemoverLeiturasInfluxAsync(ensaio);
+                var inicio = ensaio.DataInicio ?? ensaio.DataCriacao;
+                await RemoverLeiturasInfluxAsync(ensaio.Id, inicio, agora);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Erro ao remover leituras do ensaio {EnsaioId} no InfluxDB", id);
             }
 
-            return Ok(new
-            {
-                message = "Ensaio cancelado (não salvo)",
-                status = ensaio.Status,
-                dataFim = ensaio.DataFim
-            });
+            return Ok(new { message = "Ensaio cancelado (não salvo)", status = ensaio.Status });
         }
         catch (Exception ex)
         {
@@ -597,113 +560,50 @@ namespace DataMais.Controllers;
         }
     }
 
+    // ── Coleta ──────────────────────────────────────────────────────────────
+
     /// <summary>
-    /// Lê as pressões A e B via Modbus, grava no InfluxDB e retorna os pontos para o frontend.
-    /// Sempre lê e salva ambas as pressões, independente da câmara selecionada.
+    /// Lê as pressões A e B via Modbus, grava no InfluxDB e devolve o ponto para o gráfico.
+    /// Sempre lê as DUAS — é o vazamento para a câmara oposta que decide o veredito.
     /// </summary>
     [HttpGet("{id:int}/pressao-atual")]
     public async Task<IActionResult> LerPressaoAtual(int id)
     {
         try
         {
-            var ensaio = await _context.Ensaios.FindAsync(id);
+            var ensaio = await _context.Ensaios
+                .Include(e => e.Etapas)
+                .FirstOrDefaultAsync(e => e.Id == id);
+
             if (ensaio == null)
             {
                 return NotFound(new { message = "Ensaio não encontrado" });
             }
 
-            if (ensaio.Status != "EmExecucao")
+            var etapaAtiva = ensaio.Etapas.FirstOrDefault(e => e.Status == StatusEtapa.EmExecucao);
+            if (etapaAtiva == null)
             {
-                return BadRequest(new { message = $"Ensaio não está em execução (status atual: {ensaio.Status})" });
+                return BadRequest(new { message = "Nenhuma câmara em execução neste ensaio." });
             }
 
-            // Busca registros Modbus para pressão A e B
-            var pressaoARegistro = await _context.ModbusConfigs
-                .Where(m => m.Ativo && m.Nome == "PRESSAO_A_CONV")
-                .FirstOrDefaultAsync();
+            var pressaoARegistro = await BuscarRegistroPressaoAsync("PRESSAO_A_CONV", "PRESSAO_A");
+            var pressaoBRegistro = await BuscarRegistroPressaoAsync("PRESSAO_B_CONV", "PRESSAO_B");
 
-            var pressaoBRegistro = await _context.ModbusConfigs
-                .Where(m => m.Ativo && m.Nome == "PRESSAO_B_CONV")
-                .FirstOrDefaultAsync();
+            var pressaoA = await LerPressaoAsync(pressaoARegistro, "A", id);
+            var pressaoB = await LerPressaoAsync(pressaoBRegistro, "B", id);
 
-            // Se não encontrar os registros específicos, tenta alternativas
-            if (pressaoARegistro == null)
-            {
-                pressaoARegistro = await _context.ModbusConfigs
-                    .Where(m => m.Ativo && (m.Nome == "PRESSAO_A" || m.Nome == "PRESSAO_GERAL_CONV" || m.Nome == "PRESSAO_GERAL"))
-                    .FirstOrDefaultAsync();
-            }
-
-            if (pressaoBRegistro == null)
-            {
-                pressaoBRegistro = await _context.ModbusConfigs
-                    .Where(m => m.Ativo && (m.Nome == "PRESSAO_B" || m.Nome == "PRESSAO_GERAL_CONV" || m.Nome == "PRESSAO_GERAL"))
-                    .FirstOrDefaultAsync();
-            }
-
-            double? pressaoA = null;
-            double? pressaoB = null;
-
-            // Lê pressão A
-            if (pressaoARegistro != null)
-            {
-                try
-                {
-                    var valorAObj = await _modbusService.LerRegistroAsync(pressaoARegistro.Id);
-                    if (valorAObj != null)
-                    {
-                        var valorA = Convert.ToDouble(valorAObj);
-                        if (!double.IsNaN(valorA) && !double.IsInfinity(valorA))
-                        {
-                            pressaoA = Math.Max(0, Math.Min(1000, valorA));
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Erro ao ler pressão A do Modbus para ensaio {EnsaioId}", id);
-                }
-            }
-
-            // Lê pressão B
-            if (pressaoBRegistro != null)
-            {
-                try
-                {
-                    var valorBObj = await _modbusService.LerRegistroAsync(pressaoBRegistro.Id);
-                    if (valorBObj != null)
-                    {
-                        var valorB = Convert.ToDouble(valorBObj);
-                        if (!double.IsNaN(valorB) && !double.IsInfinity(valorB))
-                        {
-                            pressaoB = Math.Max(0, Math.Min(1000, valorB));
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Erro ao ler pressão B do Modbus para ensaio {EnsaioId}", id);
-                }
-            }
-
-            // Se não conseguiu ler nenhuma pressão, retorna erro
             if (!pressaoA.HasValue && !pressaoB.HasValue)
             {
                 return StatusCode(500, new { message = "Falha ao ler pressões A e B do Modbus" });
             }
 
             var timestamp = DateTime.UtcNow;
-            var timeLabel = DateTime.Now.ToString("HH:mm:ss");
 
-            // Grava ambas as pressões no InfluxDB
             try
             {
                 var appConfig = _configService.GetConfig();
 
-                if (!string.IsNullOrWhiteSpace(appConfig.Influx.Url) &&
-                    !string.IsNullOrWhiteSpace(appConfig.Influx.Token) &&
-                    !string.IsNullOrWhiteSpace(appConfig.Influx.Organization) &&
-                    !string.IsNullOrWhiteSpace(appConfig.Influx.Bucket))
+                if (InfluxConfigurado(appConfig))
                 {
                     using var influxClient = new InfluxDBClient(appConfig.Influx.Url, appConfig.Influx.Token);
                     var writeApi = influxClient.GetWriteApiAsync();
@@ -715,23 +615,14 @@ namespace DataMais.Controllers;
                         .Tag("cilindroId", ensaio.CilindroId.ToString())
                         .Timestamp(timestamp, WritePrecision.Ns);
 
-                    // Adiciona campo pressaoA se disponível
-                    if (pressaoA.HasValue)
-                    {
-                        point = point.Field("pressaoA", pressaoA.Value);
-                    }
-
-                    // Adiciona campo pressaoB se disponível
-                    if (pressaoB.HasValue)
-                    {
-                        point = point.Field("pressaoB", pressaoB.Value);
-                    }
+                    if (pressaoA.HasValue) point = point.Field("pressaoA", pressaoA.Value);
+                    if (pressaoB.HasValue) point = point.Field("pressaoB", pressaoB.Value);
 
                     await writeApi.WritePointAsync(point, appConfig.Influx.Bucket, appConfig.Influx.Organization);
                 }
                 else
                 {
-                    _logger.LogWarning("Configuração do InfluxDB incompleta. Leituras de ensaio não serão persistidas no InfluxDB.");
+                    _logger.LogWarning("Configuração do InfluxDB incompleta. Leituras de ensaio não serão persistidas.");
                 }
             }
             catch (Exception ex)
@@ -742,9 +633,11 @@ namespace DataMais.Controllers;
 
             return Ok(new
             {
-                time = timeLabel,
-                pressaoA = pressaoA,
-                pressaoB = pressaoB
+                time = DateTime.Now.ToString("HH:mm:ss"),
+                pressaoA,
+                pressaoB,
+                etapaId = etapaAtiva.Id,
+                camara = etapaAtiva.Camara
             });
         }
         catch (Exception ex)
@@ -755,15 +648,18 @@ namespace DataMais.Controllers;
     }
 
     /// <summary>
-    /// Retorna o histórico de pressões (A e B) do ensaio a partir do InfluxDB,
-    /// para RECONSTRUIR o gráfico ao reentrar na tela (sair e voltar não perde os dados).
+    /// Histórico de pressões do InfluxDB para reconstruir o gráfico ao reentrar na tela.
+    /// Com <paramref name="etapaId"/>, recorta só a janela daquela câmara.
     /// </summary>
     [HttpGet("{id:int}/historico")]
-    public async Task<IActionResult> GetHistoricoPressao(int id)
+    public async Task<IActionResult> GetHistoricoPressao(int id, [FromQuery] int? etapaId = null)
     {
         try
         {
-            var ensaio = await _context.Ensaios.FindAsync(id);
+            var ensaio = await _context.Ensaios
+                .Include(e => e.Etapas)
+                .FirstOrDefaultAsync(e => e.Id == id);
+
             if (ensaio == null)
             {
                 return NotFound(new { message = "Ensaio não encontrado" });
@@ -771,55 +667,33 @@ namespace DataMais.Controllers;
 
             var appConfig = _configService.GetConfig();
 
-            if (string.IsNullOrWhiteSpace(appConfig.Influx.Url) ||
-                string.IsNullOrWhiteSpace(appConfig.Influx.Token) ||
-                string.IsNullOrWhiteSpace(appConfig.Influx.Organization) ||
-                string.IsNullOrWhiteSpace(appConfig.Influx.Bucket))
+            if (!InfluxConfigurado(appConfig))
             {
                 _logger.LogWarning("Configuração do InfluxDB incompleta. Não será possível reconstruir o histórico do ensaio {EnsaioId}.", id);
                 return Ok(new { dados = Array.Empty<object>(), totalPontos = 0 });
             }
 
-            var from = (ensaio.DataInicio ?? ensaio.DataCriacao).ToUniversalTime().AddMinutes(-1);
-            var to = (ensaio.DataFim ?? DateTime.UtcNow).ToUniversalTime().AddMinutes(1);
+            DateTime de;
+            DateTime ate;
 
-            var flux = $@"from(bucket: ""{appConfig.Influx.Bucket}"")
-  |> range(start: {from:o}, stop: {to:o})
-  |> filter(fn: (r) => r._measurement == ""ensaio_pressao"" and r.ensaioId == ""{ensaio.Id}"" and (r._field == ""pressaoA"" or r._field == ""pressaoB""))
-  |> sort(columns: [""_time""])
-  |> keep(columns: [""_time"", ""_value"", ""_field""])";
-
-            using var influxClient = new InfluxDBClient(appConfig.Influx.Url, appConfig.Influx.Token);
-            var queryApi = influxClient.GetQueryApi();
-            var tables = await queryApi.QueryAsync(flux, appConfig.Influx.Organization);
-
-            // Agrupa por timestamp (preserva cada leitura), combinando A e B do mesmo instante
-            var pontos = new SortedDictionary<DateTime, Dictionary<string, double>>();
-            foreach (var table in tables)
+            if (etapaId.HasValue)
             {
-                foreach (var record in table.Records)
+                var etapa = ensaio.Etapas.FirstOrDefault(e => e.Id == etapaId.Value);
+                if (etapa == null)
                 {
-                    var time = record.GetTime();
-                    var field = record.GetField();
-                    var value = record.GetValue();
-                    if (time == null || field == null || !(value is IConvertible)) continue;
-
-                    try
-                    {
-                        var dt = time.Value.ToDateTimeUtc();
-                        if (!pontos.ContainsKey(dt)) pontos[dt] = new Dictionary<string, double>();
-                        pontos[dt][field] = Convert.ToDouble(value);
-                    }
-                    catch { }
+                    return NotFound(new { message = "Etapa não encontrada neste ensaio" });
                 }
+
+                de = etapa.DataInicio;
+                ate = etapa.DataFim ?? DateTime.UtcNow;
+            }
+            else
+            {
+                de = ensaio.DataInicio ?? ensaio.DataCriacao;
+                ate = ensaio.DataFim ?? DateTime.UtcNow;
             }
 
-            var dados = pontos.Select(kv => new
-            {
-                time = kv.Key.ToLocalTime().ToString("HH:mm:ss"),
-                pressaoA = kv.Value.ContainsKey("pressaoA") ? (double?)Math.Round(kv.Value["pressaoA"], 2) : null,
-                pressaoB = kv.Value.ContainsKey("pressaoB") ? (double?)Math.Round(kv.Value["pressaoB"], 2) : null
-            }).ToList();
+            var dados = await BuscarSeriesInfluxAsync(appConfig, ensaio.Id, de, ate);
 
             return Ok(new { dados, totalPontos = dados.Count });
         }
@@ -830,10 +704,294 @@ namespace DataMais.Controllers;
         }
     }
 
+    // ── Helpers de domínio ──────────────────────────────────────────────────
+
+    private Task<Ensaio?> CarregarEnsaioAbertoAsync() =>
+        _context.Ensaios
+            .Include(e => e.Cliente)
+            .Include(e => e.Cilindro)
+            .Include(e => e.Etapas)
+            .Where(e => e.Status == StatusEnsaio.EmAndamento || e.Status == StatusEnsaio.AguardandoAceite)
+            .OrderByDescending(e => e.DataCriacao)
+            .FirstOrDefaultAsync();
+
     /// <summary>
-    /// Liga/desliga o coil INICIA_REGISTRO no CLP. Esse coil é de NÍVEL e define
-    /// "começar" (true) e "parar" (false) o registro na unidade hidráulica.
+    /// Move o ensaio para AguardandoAceite quando as duas câmaras têm etapa concluída,
+    /// ou de volta para EmAndamento se ainda falta alguma.
     /// </summary>
+    private static void AtualizarStatusEnsaio(Ensaio ensaio, DateTime agora)
+    {
+        if (ensaio.Status == StatusEnsaio.Aceito || ensaio.Status == StatusEnsaio.Cancelado)
+        {
+            return;
+        }
+
+        var completo = new[] { "A", "B" }
+            .All(c => ensaio.Etapas.Any(e => e.Camara == c && e.Status == StatusEtapa.Concluida));
+
+        ensaio.Status = completo ? StatusEnsaio.AguardandoAceite : StatusEnsaio.EmAndamento;
+        ensaio.DataAtualizacao = agora;
+    }
+
+    private static object MontarDto(Ensaio ensaio)
+    {
+        var etapas = ensaio.Etapas
+            .OrderBy(e => e.Camara)
+            .ThenBy(e => e.Tentativa)
+            .Select(e => new
+            {
+                id = e.Id,
+                camara = e.Camara,
+                tentativa = e.Tentativa,
+                status = e.Status,
+                dataInicio = e.DataInicio,
+                dataFim = e.DataFim,
+                pressaoCargaConfigurada = e.PressaoCargaConfigurada,
+                tempoCargaConfigurado = e.TempoCargaConfigurado
+            })
+            .ToList();
+
+        var podeAceitar = new[] { "A", "B" }
+            .All(c => ensaio.Etapas.Any(e => e.Camara == c && e.Status == StatusEtapa.Concluida));
+
+        var emExecucao = ensaio.Etapas.FirstOrDefault(e => e.Status == StatusEtapa.EmExecucao);
+
+        return new
+        {
+            id = ensaio.Id,
+            numero = ensaio.Numero,
+            status = ensaio.Status,
+            dataInicio = ensaio.DataInicio,
+            dataFim = ensaio.DataFim,
+            dataCriacao = ensaio.DataCriacao,
+            vessel = ensaio.Vessel,
+            localTeste = ensaio.LocalTeste,
+            departamento = ensaio.Departamento,
+            ordemServico = ensaio.OrdemServico,
+            clienteId = ensaio.ClienteId,
+            clienteNome = ensaio.Cliente?.Nome,
+            cilindroId = ensaio.CilindroId,
+            cilindroNome = ensaio.Cilindro?.Nome,
+            etapas,
+            etapaEmExecucaoId = emExecucao?.Id,
+            podeAceitar = podeAceitar && emExecucao == null
+        };
+    }
+
+    private static string? Limpar(string? valor) =>
+        string.IsNullOrWhiteSpace(valor) ? null : valor.Trim();
+
+    // ── Modbus ──────────────────────────────────────────────────────────────
+
+    private sealed record ResultadoInicioClp(bool Ok, string? Falha, List<string> Avisos);
+
+    /// <summary>
+    /// Sequência de partida no CLP: seleciona a câmara (com double-check), escreve
+    /// pressão e tempo de carga e liga INICIA_REGISTRO confirmando REGISTRO_RODANDO.
+    /// Falha na seleção da câmara é FATAL (retorna Ok=false); o resto vira aviso.
+    /// </summary>
+    private async Task<ResultadoInicioClp> IniciarRegistroNoClpAsync(string camara, decimal pressaoCarga, decimal tempoCarga)
+    {
+        var avisos = new List<string>();
+
+        try
+        {
+            // 1. Seleciona a câmara (Avança para A, Recua para B). Desliga o botão OPOSTO
+            //    antes de ligar o escolhido — se o operador deixou o outro coil retido pela
+            //    IHM, os dois ficariam ligados ao mesmo tempo. Depois relê os dois para confirmar.
+            var nomeBotaoCamara = camara == "A" ? "BOTAO_AVANCA_IHM" : "BOTAO_RECUA_IHM";
+            var nomeBotaoOposto = camara == "A" ? "BOTAO_RECUA_IHM" : "BOTAO_AVANCA_IHM";
+
+            var botaoCamara = await _context.ModbusConfigs.FirstOrDefaultAsync(m => m.Nome == nomeBotaoCamara && m.Ativo);
+            var botaoOposto = await _context.ModbusConfigs.FirstOrDefaultAsync(m => m.Nome == nomeBotaoOposto && m.Ativo);
+
+            if (botaoCamara == null)
+            {
+                return await AbortarPorFalhaCamaraAsync(botaoCamara, botaoOposto,
+                    $"Registro '{nomeBotaoCamara}' não encontrado no cadastro Modbus.");
+            }
+
+            if (botaoOposto != null)
+            {
+                var opostoDesligado = await _modbusService.EscreverRegistroAsync(ConfigParaEscrita(botaoOposto), false);
+                if (!opostoDesligado)
+                {
+                    return await AbortarPorFalhaCamaraAsync(botaoCamara, botaoOposto,
+                        $"Não foi possível desligar {nomeBotaoOposto} antes de ativar a câmara {camara}.");
+                }
+            }
+            else
+            {
+                avisos.Add($"Registro '{nomeBotaoOposto}' não encontrado — não foi possível garantir que o botão oposto está desligado");
+            }
+
+            var camaraAtivada = await _modbusService.EscreverRegistroAsync(ConfigParaEscrita(botaoCamara), true);
+            if (!camaraAtivada)
+            {
+                return await AbortarPorFalhaCamaraAsync(botaoCamara, botaoOposto, $"Não foi possível ativar {nomeBotaoCamara}.");
+            }
+
+            // Double-check: relê os dois coils e confirma escolhido=ON, oposto=OFF.
+            // Se não bater, reaplica os comandos e confere mais uma vez.
+            bool confirmado = false;
+            bool? estadoCamara = null, estadoOposto = null;
+
+            for (int tentativa = 1; tentativa <= 2 && !confirmado; tentativa++)
+            {
+                await Task.Delay(200);
+                estadoCamara = await LerCoilAsync(botaoCamara.Id);
+                estadoOposto = botaoOposto != null ? await LerCoilAsync(botaoOposto.Id) : false;
+
+                if (estadoCamara == true && estadoOposto != true)
+                {
+                    confirmado = true;
+                }
+                else if (tentativa < 2)
+                {
+                    _logger.LogWarning(
+                        "Estado dos botões de câmara divergente ({BotaoCamara}={EstadoCamara}, {BotaoOposto}={EstadoOposto}), reaplicando comandos",
+                        nomeBotaoCamara, estadoCamara, nomeBotaoOposto, estadoOposto);
+
+                    if (botaoOposto != null && estadoOposto == true)
+                        await _modbusService.EscreverRegistroAsync(ConfigParaEscrita(botaoOposto), false);
+                    if (estadoCamara != true)
+                        await _modbusService.EscreverRegistroAsync(ConfigParaEscrita(botaoCamara), true);
+                }
+            }
+
+            if (!confirmado)
+            {
+                return await AbortarPorFalhaCamaraAsync(botaoCamara, botaoOposto,
+                    $"Estado dos botões de câmara não confirmado após reaplicar: {nomeBotaoCamara}={FormatarEstadoCoil(estadoCamara)}, {nomeBotaoOposto}={FormatarEstadoCoil(estadoOposto)} (esperado: ligado / desligado). Verifique se o botão Avança/Recua não está pressionado na tela.");
+            }
+
+            _logger.LogInformation("Câmara {Camara} ({Botao}) ativada e confirmada por leitura ({Oposto} desligado)",
+                camara, nomeBotaoCamara, nomeBotaoOposto);
+
+            // 2. Pressão de carga
+            await EscreverParametroAsync("PRESSAO_CARGA", pressaoCarga, avisos);
+
+            // 3. Tempo de carga
+            await EscreverParametroAsync("TEMPO_CARGA", tempoCarga, avisos);
+
+            // 4. Inicia o registro e confirma por REGISTRO_RODANDO
+            await LigarIniciaRegistroAsync(avisos);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Erro ao executar comandos Modbus ao iniciar etapa");
+            avisos.Add($"Erro ao executar comandos Modbus: {ex.Message}");
+        }
+
+        return new ResultadoInicioClp(true, null, avisos);
+    }
+
+    private async Task EscreverParametroAsync(string nome, decimal valor, List<string> avisos)
+    {
+        var registro = await _context.ModbusConfigs.FirstOrDefaultAsync(m => m.Nome == nome && m.Ativo);
+
+        if (registro == null)
+        {
+            avisos.Add($"Registro '{nome}' não encontrado");
+            return;
+        }
+
+        var configTemp = ConfigParaEscrita(registro);
+
+        object v = configTemp.FuncaoModbus == "WriteSingleRegister"
+            ? (ushort)Math.Round(valor)
+            : (object)(valor > 0);
+
+        if (await _modbusService.EscreverRegistroAsync(configTemp, v))
+        {
+            _logger.LogInformation("{Nome} = {Valor} escrito com sucesso", nome, valor);
+        }
+        else
+        {
+            avisos.Add($"Erro ao escrever {nome}");
+        }
+    }
+
+    private async Task LigarIniciaRegistroAsync(List<string> avisos)
+    {
+        var iniciaRegistro = await _context.ModbusConfigs
+            .FirstOrDefaultAsync(m => m.Nome == "INICIA_REGISTRO" && m.Ativo);
+
+        var registroRodando = await _context.ModbusConfigs
+            .FirstOrDefaultAsync(m => m.Nome == "REGISTRO_RODANDO" && m.Ativo && m.FuncaoModbus == "ReadInputs");
+
+        if (iniciaRegistro == null)
+        {
+            avisos.Add("Registro 'INICIA_REGISTRO' não encontrado");
+        }
+
+        if (registroRodando == null)
+        {
+            avisos.Add("Registro 'REGISTRO_RODANDO' (ReadInputs) não encontrado");
+        }
+
+        if (iniciaRegistro == null || registroRodando == null)
+        {
+            return;
+        }
+
+        // INICIA_REGISTRO é coil de NÍVEL (não pulso): permanece LIGADO durante todo o
+        // registro e só é desligado ao encerrar a etapa ou cancelar o ensaio.
+        if (!await _modbusService.EscreverRegistroAsync(ConfigParaEscrita(iniciaRegistro), true))
+        {
+            avisos.Add("Erro ao ativar INICIA_REGISTRO");
+            return;
+        }
+
+        await Task.Delay(300);
+
+        var timeout = TimeSpan.FromSeconds(2);
+        var inicioVerificacao = DateTime.UtcNow;
+        var tentativas = 0;
+
+        while (DateTime.UtcNow - inicioVerificacao < timeout)
+        {
+            await Task.Delay(200);
+            tentativas++;
+
+            try
+            {
+                var status = await _modbusService.LerRegistroAsync(registroRodando.Id);
+                bool rodando = status is bool b ? b : (status?.ToString() == "1" || status?.ToString() == "True");
+
+                if (rodando)
+                {
+                    _logger.LogInformation("REGISTRO_RODANDO confirmado após {Tentativas} tentativas", tentativas);
+                    return;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Erro ao ler REGISTRO_RODANDO na tentativa {Tentativa}", tentativas);
+            }
+        }
+
+        avisos.Add("Registro não iniciou após 2 segundos. Verifique REGISTRO_RODANDO.");
+    }
+
+    /// <summary>
+    /// Desliga INICIA_REGISTRO e os DOIS botões de câmara da IHM. Best-effort:
+    /// falhas viram log, não impedem o encerramento no banco.
+    /// </summary>
+    private async Task PararRegistroNoClpAsync(string contexto)
+    {
+        if (!await SetIniciaRegistroAsync(false))
+        {
+            _logger.LogWarning("Não foi possível desligar INICIA_REGISTRO ao {Contexto}", contexto);
+        }
+
+        var falhas = await DesligarBotoesCamaraAsync();
+        if (falhas.Any())
+        {
+            _logger.LogWarning("Falhas ao desligar botões de câmara ao {Contexto}: {Falhas}", contexto, string.Join(", ", falhas));
+        }
+    }
+
     private async Task<bool> SetIniciaRegistroAsync(bool valor)
     {
         var iniciaRegistro = await _context.ModbusConfigs
@@ -848,7 +1006,7 @@ namespace DataMais.Controllers;
         var configTemp = ConfigParaEscrita(iniciaRegistro);
 
         object v = configTemp.FuncaoModbus == "WriteSingleCoil"
-            ? (object)valor
+            ? valor
             : (object)(ushort)(valor ? 1 : 0);
 
         return await _modbusService.EscreverRegistroAsync(configTemp, v);
@@ -880,17 +1038,12 @@ namespace DataMais.Controllers;
         };
     }
 
-    /// <summary>
-    /// Lê o estado atual de um coil pelo registro cadastrado (ReadCoils).
-    /// Retorna null se a leitura falhar.
-    /// </summary>
     private async Task<bool?> LerCoilAsync(int registroId)
     {
         try
         {
             var valor = await _modbusService.LerRegistroAsync(registroId);
-            if (valor == null)
-                return null;
+            if (valor == null) return null;
             return valor is bool b ? b : valor.ToString() == "1" || valor.ToString() == "True";
         }
         catch (Exception ex)
@@ -903,12 +1056,6 @@ namespace DataMais.Controllers;
     private static string FormatarEstadoCoil(bool? estado) =>
         estado == null ? "leitura falhou" : (estado.Value ? "ligado" : "desligado");
 
-    /// <summary>
-    /// Desliga explicitamente os DOIS botões de câmara da IHM (BOTAO_AVANCA_IHM e
-    /// BOTAO_RECUA_IHM) no CLP, independente da câmara do ensaio. Usado ao parar o
-    /// ensaio (interromper/cancelar) para não deixar nenhum coil retido. Best-effort:
-    /// falhas são logadas e devolvidas na lista, sem lançar exceção.
-    /// </summary>
     private async Task<List<string>> DesligarBotoesCamaraAsync()
     {
         var falhas = new List<string>();
@@ -917,8 +1064,7 @@ namespace DataMais.Controllers;
         {
             try
             {
-                var botao = await _context.ModbusConfigs
-                    .FirstOrDefaultAsync(m => m.Nome == nome && m.Ativo);
+                var botao = await _context.ModbusConfigs.FirstOrDefaultAsync(m => m.Nome == nome && m.Ativo);
 
                 if (botao == null)
                 {
@@ -927,19 +1073,18 @@ namespace DataMais.Controllers;
                     continue;
                 }
 
-                var desligado = await _modbusService.EscreverRegistroAsync(ConfigParaEscrita(botao), false);
-                if (!desligado)
+                if (await _modbusService.EscreverRegistroAsync(ConfigParaEscrita(botao), false))
                 {
-                    falhas.Add($"Erro ao desligar {nome}");
+                    _logger.LogInformation("{Nome} desligado ao parar o registro", nome);
                 }
                 else
                 {
-                    _logger.LogInformation("{Nome} desligado ao parar o ensaio", nome);
+                    falhas.Add($"Erro ao desligar {nome}");
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Erro ao desligar {Nome} ao parar o ensaio", nome);
+                _logger.LogWarning(ex, "Erro ao desligar {Nome} ao parar o registro", nome);
                 falhas.Add($"Erro ao desligar {nome}: {ex.Message}");
             }
         }
@@ -948,15 +1093,12 @@ namespace DataMais.Controllers;
     }
 
     /// <summary>
-    /// Aborta o início do ensaio quando a seleção da câmara não pôde ser garantida:
-    /// desliga os dois botões por segurança (best-effort), remove o ensaio recém-criado
-    /// do banco e devolve erro 500 com a causa (o frontend exibe a message no alert).
+    /// Desliga os dois botões por segurança e devolve a falha fatal — sem certeza de
+    /// qual câmara está pressurizada, a corrida não vale.
     /// </summary>
-    private async Task<IActionResult> AbortarEnsaioPorFalhaCamaraAsync(
-        Ensaio ensaio, ModbusConfig? botaoCamara, ModbusConfig? botaoOposto, string motivo)
+    private async Task<ResultadoInicioClp> AbortarPorFalhaCamaraAsync(
+        ModbusConfig? botaoCamara, ModbusConfig? botaoOposto, string motivo)
     {
-        _logger.LogError("Abortando início do ensaio {EnsaioId}: {Motivo}", ensaio.Id, motivo);
-
         foreach (var botao in new[] { botaoCamara, botaoOposto })
         {
             if (botao == null) continue;
@@ -966,81 +1108,150 @@ namespace DataMais.Controllers;
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Falha ao desligar {Botao} durante aborto do ensaio {EnsaioId}", botao.Nome, ensaio.Id);
+                _logger.LogWarning(ex, "Falha ao desligar {Botao} durante aborto da etapa", botao.Nome);
             }
         }
 
+        return new ResultadoInicioClp(false, motivo, new List<string>());
+    }
+
+    private async Task<ModbusConfig?> BuscarRegistroPressaoAsync(string nomePreferido, string nomeAlternativo)
+    {
+        return await _context.ModbusConfigs.FirstOrDefaultAsync(m => m.Ativo && m.Nome == nomePreferido)
+            ?? await _context.ModbusConfigs.FirstOrDefaultAsync(m => m.Ativo &&
+                (m.Nome == nomeAlternativo || m.Nome == "PRESSAO_GERAL_CONV" || m.Nome == "PRESSAO_GERAL"));
+    }
+
+    private async Task<double?> LerPressaoAsync(ModbusConfig? registro, string camara, int ensaioId)
+    {
+        if (registro == null) return null;
+
         try
         {
-            _context.Ensaios.Remove(ensaio);
-            await _context.SaveChangesAsync();
+            var valorObj = await _modbusService.LerRegistroAsync(registro.Id);
+            if (valorObj == null) return null;
+
+            var valor = Convert.ToDouble(valorObj);
+            if (double.IsNaN(valor) || double.IsInfinity(valor)) return null;
+
+            return Math.Max(0, Math.Min(1000, valor));
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Falha ao remover ensaio {EnsaioId} abortado do banco", ensaio.Id);
+            _logger.LogWarning(ex, "Erro ao ler pressão {Camara} do Modbus para ensaio {EnsaioId}", camara, ensaioId);
+            return null;
+        }
+    }
+
+    // ── InfluxDB ────────────────────────────────────────────────────────────
+
+    private static bool InfluxConfigurado(Configuration.AppConfig appConfig) =>
+        !string.IsNullOrWhiteSpace(appConfig.Influx.Url) &&
+        !string.IsNullOrWhiteSpace(appConfig.Influx.Token) &&
+        !string.IsNullOrWhiteSpace(appConfig.Influx.Organization) &&
+        !string.IsNullOrWhiteSpace(appConfig.Influx.Bucket);
+
+    private async Task<List<object>> BuscarSeriesInfluxAsync(
+        Configuration.AppConfig appConfig, int ensaioId, DateTime de, DateTime ate)
+    {
+        var from = de.ToUniversalTime().AddMinutes(-1);
+        var to = ate.ToUniversalTime().AddMinutes(1);
+
+        var flux = $@"from(bucket: ""{appConfig.Influx.Bucket}"")
+  |> range(start: {from:o}, stop: {to:o})
+  |> filter(fn: (r) => r._measurement == ""ensaio_pressao"" and r.ensaioId == ""{ensaioId}"" and (r._field == ""pressaoA"" or r._field == ""pressaoB""))
+  |> sort(columns: [""_time""])
+  |> keep(columns: [""_time"", ""_value"", ""_field""])";
+
+        using var influxClient = new InfluxDBClient(appConfig.Influx.Url, appConfig.Influx.Token);
+        var queryApi = influxClient.GetQueryApi();
+        var tables = await queryApi.QueryAsync(flux, appConfig.Influx.Organization);
+
+        // Agrupa por timestamp, combinando A e B do mesmo instante
+        var pontos = new SortedDictionary<DateTime, Dictionary<string, double>>();
+
+        foreach (var table in tables)
+        {
+            foreach (var record in table.Records)
+            {
+                var time = record.GetTime();
+                var field = record.GetField();
+                var value = record.GetValue();
+                if (time == null || field == null || value is not IConvertible) continue;
+
+                try
+                {
+                    var dt = time.Value.ToDateTimeUtc();
+                    if (!pontos.ContainsKey(dt)) pontos[dt] = new Dictionary<string, double>();
+                    pontos[dt][field] = Convert.ToDouble(value);
+                }
+                catch { }
+            }
         }
 
-        return StatusCode(500, new
+        return pontos.Select(kv => (object)new
         {
-            message = $"Ensaio abortado: {motivo}",
-            abortado = true
-        });
+            time = kv.Key.ToLocalTime().ToString("HH:mm:ss"),
+            pressaoA = kv.Value.ContainsKey("pressaoA") ? (double?)Math.Round(kv.Value["pressaoA"], 2) : null,
+            pressaoB = kv.Value.ContainsKey("pressaoB") ? (double?)Math.Round(kv.Value["pressaoB"], 2) : null
+        }).ToList();
     }
 
     /// <summary>
-    /// Remove do InfluxDB todas as leituras de pressão associadas a um ensaio cancelado.
+    /// Remove do InfluxDB as leituras de um ensaio numa janela de tempo — usado ao
+    /// descartar uma etapa (só a janela dela) ou cancelar o ensaio (janela inteira).
     /// </summary>
-    private async Task RemoverLeiturasInfluxAsync(Ensaio ensaio)
+    private async Task RemoverLeiturasInfluxAsync(int ensaioId, DateTime de, DateTime ate)
     {
         var appConfig = _configService.GetConfig();
 
-        if (string.IsNullOrWhiteSpace(appConfig.Influx.Url) ||
-            string.IsNullOrWhiteSpace(appConfig.Influx.Token) ||
-            string.IsNullOrWhiteSpace(appConfig.Influx.Organization) ||
-            string.IsNullOrWhiteSpace(appConfig.Influx.Bucket))
+        if (!InfluxConfigurado(appConfig))
         {
-            _logger.LogWarning("Configuração do InfluxDB incompleta. Não será possível remover leituras do ensaio {EnsaioId}.", ensaio.Id);
+            _logger.LogWarning("Configuração do InfluxDB incompleta. Não será possível remover leituras do ensaio {EnsaioId}.", ensaioId);
             return;
         }
 
-        // Define intervalo de tempo para remoção (do início ao fim do ensaio, com pequena margem)
-        var from = (ensaio.DataInicio ?? DateTime.UtcNow.AddHours(-1)).ToUniversalTime().AddMinutes(-1);
-        var to = (ensaio.DataFim ?? DateTime.UtcNow).ToUniversalTime().AddMinutes(1);
-
-        var predicate = $"_measurement=\"ensaio_pressao\" AND ensaioId=\"{ensaio.Id}\"";
+        var from = de.ToUniversalTime().AddMinutes(-1);
+        var to = ate.ToUniversalTime().AddMinutes(1);
+        var predicate = $"_measurement=\"ensaio_pressao\" AND ensaioId=\"{ensaioId}\"";
 
         using var influxClient = new InfluxDBClient(appConfig.Influx.Url, appConfig.Influx.Token);
         var deleteApi = influxClient.GetDeleteApi();
 
         await deleteApi.Delete(from, to, predicate, appConfig.Influx.Bucket, appConfig.Influx.Organization);
 
-        _logger.LogInformation("Leituras do ensaio {EnsaioId} removidas do InfluxDB no intervalo {From} - {To}", ensaio.Id, from, to);
+        _logger.LogInformation("Leituras do ensaio {EnsaioId} removidas do InfluxDB no intervalo {From} - {To}", ensaioId, from, to);
     }
 }
 
-public class IniciarEnsaioRequest
+// ── DTOs ────────────────────────────────────────────────────────────────────
+
+public class CriarEnsaioRequest
 {
-    /// <summary>
-    /// Câmara a ser testada: "A" (avança) ou "B" (recua)
-    /// </summary>
+    /// <summary>Embarcação / unidade testada (ex.: MV29 / Frota).</summary>
+    public string? Vessel { get; set; }
+
+    /// <summary>Local do teste (ex.: Macaé).</summary>
+    public string? LocalTeste { get; set; }
+
+    /// <summary>Departamento responsável (ex.: ONSHORE PRESERVATION).</summary>
+    public string? Departamento { get; set; }
+
+    /// <summary>Ordem de Serviço / Work Order.</summary>
+    public string? OrdemServico { get; set; }
+}
+
+public class IniciarEtapaRequest
+{
+    /// <summary>Câmara a pressurizar: "A" (avança) ou "B" (recua).</summary>
     [Required]
     public string Camara { get; set; } = string.Empty;
 
-    /// <summary>
-    /// Pressão de carga configurada para o ensaio (bar)
-    /// </summary>
+    /// <summary>Pressão de carga desta câmara (bar).</summary>
     [Range(0.01, double.MaxValue, ErrorMessage = "Pressão de carga deve ser maior que zero.")]
     public decimal PressaoCarga { get; set; }
 
-    /// <summary>
-    /// Tempo de carga configurado para o ensaio (minutos)
-    /// </summary>
+    /// <summary>Tempo de carga desta câmara (minutos).</summary>
     [Range(0.01, double.MaxValue, ErrorMessage = "Tempo de carga deve ser maior que zero.")]
     public decimal TempoCarga { get; set; }
-
-    // Identificação do documento (relatório rev02) — opcionais, preenchidos no setup.
-    public string? Vessel { get; set; }
-    public string? LocalTeste { get; set; }
-    public string? Departamento { get; set; }
-    public string? OrdemServico { get; set; }
 }

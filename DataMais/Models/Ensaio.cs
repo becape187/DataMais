@@ -12,8 +12,9 @@ public class Ensaio
     [MaxLength(100)]
     public string Numero { get; set; } = string.Empty;
 
+    /// <summary>Ver <see cref="StatusEnsaio"/>.</summary>
     [MaxLength(50)]
-    public string Status { get; set; } = "Pendente"; // Pendente, EmExecucao, Concluido, Cancelado
+    public string Status { get; set; } = StatusEnsaio.EmAndamento;
 
     public DateTime? DataInicio { get; set; }
     public DateTime? DataFim { get; set; }
@@ -38,21 +39,20 @@ public class Ensaio
     [MaxLength(100)]
     public string? OrdemServico { get; set; }
 
-    /// <summary>
-    /// Câmara testada no ensaio (ex: "A" / "B").
-    /// </summary>
+    // ── Depreciados: parâmetros migraram para EnsaioEtapa ───────────────────
+    // Mantidos apenas porque os ensaios anteriores ao modelo de duas câmaras
+    // gravaram aqui; o backfill copiou tudo para a primeira etapa. Código novo
+    // deve ler de Etapas, nunca destes campos.
+
+    /// <summary>Obsoleto — ver <see cref="EnsaioEtapa.Camara"/>.</summary>
     [MaxLength(20)]
     public string? CamaraTestada { get; set; }
 
-    /// <summary>
-    /// Pressão de carga configurada para o ensaio (bar).
-    /// </summary>
+    /// <summary>Obsoleto — ver <see cref="EnsaioEtapa.PressaoCargaConfigurada"/>.</summary>
     [Column(TypeName = "decimal(10,2)")]
     public decimal? PressaoCargaConfigurada { get; set; }
 
-    /// <summary>
-    /// Tempo de carga configurado para o ensaio (segundos).
-    /// </summary>
+    /// <summary>Obsoleto — ver <see cref="EnsaioEtapa.TempoCargaConfigurado"/>.</summary>
     [Column(TypeName = "decimal(10,2)")]
     public decimal? TempoCargaConfigurado { get; set; }
 
@@ -67,6 +67,25 @@ public class Ensaio
 
     public virtual ICollection<Relatorio> Relatorios { get; set; } = new List<Relatorio>();
 
+    /// <summary>Uma corrida por câmara (e por repetição). Ver <see cref="EnsaioEtapa"/>.</summary>
+    public virtual ICollection<EnsaioEtapa> Etapas { get; set; } = new List<EnsaioEtapa>();
+
     public DateTime DataCriacao { get; set; } = DateTime.UtcNow;
     public DateTime? DataAtualizacao { get; set; }
+}
+
+/// <summary>Estados do <see cref="Ensaio"/> (o cabeçalho do teste completo).</summary>
+public static class StatusEnsaio
+{
+    /// <summary>Aberto; ainda falta rodar ou repetir alguma câmara.</summary>
+    public const string EmAndamento = "EmAndamento";
+
+    /// <summary>As duas câmaras concluídas; esperando o operador aceitar.</summary>
+    public const string AguardandoAceite = "AguardandoAceite";
+
+    /// <summary>Aceito pelo operador — relatório gerado.</summary>
+    public const string Aceito = "Aceito";
+
+    /// <summary>Descartado; não vira laudo.</summary>
+    public const string Cancelado = "Cancelado";
 }

@@ -1,8 +1,9 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import api from '../config/api'
 import { useAuth } from '../contexts/AuthContext'
+import { formatarDuracao } from '../utils/tempo'
 import './Ensaio.css'
 
 interface DataPoint {
@@ -18,315 +19,351 @@ interface LogEvento {
   comentarios: number
 }
 
+type Camara = 'A' | 'B'
+
+interface Etapa {
+  id: number
+  camara: Camara
+  tentativa: number
+  status: 'EmExecucao' | 'Concluida' | 'Descartada' | 'Repetida'
+  dataInicio: string
+  dataFim: string | null
+  pressaoCargaConfigurada: number
+  tempoCargaConfigurado: number
+}
+
+interface EnsaioAberto {
+  id: number
+  numero: string
+  status: 'EmAndamento' | 'AguardandoAceite' | 'Aceito' | 'Cancelado'
+  dataCriacao: string
+  vessel: string | null
+  localTeste: string | null
+  departamento: string | null
+  ordemServico: string | null
+  clienteNome: string | null
+  cilindroNome: string | null
+  etapas: Etapa[]
+  etapaEmExecucaoId: number | null
+  podeAceitar: boolean
+}
+
+const CAMARAS: Camara[] = ['A', 'B']
+
+/** Etapa que vale para o laudo: última tentativa concluída da câmara. */
+const etapaValida = (ensaio: EnsaioAberto | null, camara: Camara): Etapa | null => {
+  if (!ensaio) return null
+  const concluidas = ensaio.etapas.filter(e => e.camara === camara && e.status === 'Concluida')
+  return concluidas.length > 0
+    ? concluidas.reduce((a, b) => (b.tentativa > a.tentativa ? b : a))
+    : null
+}
+
 const Ensaio = () => {
   const navigate = useNavigate()
   const { podeOperar } = useAuth()
-  const [ensaioAtivo, setEnsaioAtivo] = useState(false)
-  const [ensaioId, setEnsaioId] = useState<number | null>(null)
-  const [ensaioDataInicio, setEnsaioDataInicio] = useState<Date | null>(null)
+
+  const [ensaio, setEnsaio] = useState<EnsaioAberto | null>(null)
+  const [pendentes, setPendentes] = useState<EnsaioAberto[]>([])
+  const [carregando, setCarregando] = useState(true)
+  const [erro, setErro] = useState<string | null>(null)
+
+  // Identificação do documento — preenchida uma vez, no passo 1
+  const [vessel, setVessel] = useState('')
+  const [localTeste, setLocalTeste] = useState('')
+  const [departamento, setDepartamento] = useState('')
+  const [ordemServico, setOrdemServico] = useState('')
+
+  // Parâmetros por câmara (o operador confirma antes de cada corrida)
+  const [parametros, setParametros] = useState<Record<Camara, { pressao: string; tempo: string }>>({
+    A: { pressao: '', tempo: '' },
+    B: { pressao: '', tempo: '' },
+  })
+
   const [dados, setDados] = useState<DataPoint[]>([])
-  const [logEventos, setLogEventos] = useState<LogEvento[]>([])
-  const [camara, setCamara] = useState<'A' | 'B' | ''>('')
-  const [pressaoCarga, setPressaoCarga] = useState<string>('')
-  const [tempoCarga, setTempoCarga] = useState<string>('')
-  // Identificação do documento (relatório rev02)
-  const [vessel, setVessel] = useState<string>('')
-  const [localTeste, setLocalTeste] = useState<string>('')
-  const [departamento, setDepartamento] = useState<string>('')
-  const [ordemServico, setOrdemServico] = useState<string>('')
-  const [registroRodando, setRegistroRodando] = useState<boolean | null>(null)
   const [totalPontosColetados, setTotalPontosColetados] = useState(0)
+  const [logEventos, setLogEventos] = useState<LogEvento[]>([])
   const [tempoAtual, setTempoAtual] = useState(Date.now())
 
-  // Ao abrir a tela, retoma o ensaio em execução (backend é a fonte da verdade).
-  // Idempotente: reentrar não cria outro ensaio, apenas reidrata o que está rodando,
-  // recuperando o cronômetro, os dados e o botão de Encerrar.
+  const [modalEncerrar, setModalEncerrar] = useState<Etapa | null>(null)
+  const [modalCancelar, setModalCancelar] = useState(false)
+  const [ocupado, setOcupado] = useState(false)
+
+  const etapaAtiva = ensaio?.etapas.find(e => e.id === ensaio.etapaEmExecucaoId) ?? null
+  const etapaAtivaAnteriorRef = useRef<number | null>(null)
+
+  const registrarLog = useCallback((texto: string, tipo: 'normal' | 'desvio' = 'normal') => {
+    setLogEventos(prev => [
+      { id: Date.now() + Math.floor(Math.random() * 1000), texto: `[${new Date().toLocaleTimeString('pt-BR')}] ${texto}`, tipo, comentarios: 0 },
+      ...prev,
+    ])
+  }, [])
+
+  const mensagemDeErro = (err: any, padrao: string) =>
+    err?.response?.data?.message || padrao
+
+  // ── Carga inicial: o backend é a fonte da verdade do que está aberto ──────
+  const carregarPendentes = useCallback(async () => {
+    try {
+      const { data } = await api.get('/ensaio/pendentes')
+      setPendentes(Array.isArray(data) ? data : [])
+    } catch (err) {
+      console.error('Erro ao listar ensaios pendentes:', err)
+    }
+  }, [])
+
   useEffect(() => {
-    const retomarEnsaioAtivo = async () => {
+    const carregar = async () => {
       try {
         const { data } = await api.get('/ensaio/ativo')
-        if (data && data.ativo) {
-          setEnsaioId(data.id)
-          setEnsaioAtivo(true)
-          setEnsaioDataInicio(data.dataInicio ? new Date(data.dataInicio) : new Date())
-          setTempoAtual(Date.now())
-          if (data.camara) setCamara(data.camara)
-          if (data.pressaoCarga != null) setPressaoCarga(String(data.pressaoCarga))
-          if (data.tempoCarga != null) setTempoCarga(String(data.tempoCarga))
-          setLogEventos([{
-            id: Date.now(),
-            texto: `[${new Date().toLocaleTimeString('pt-BR')}] Registro em andamento retomado (ID ${data.id})`,
-            tipo: 'normal',
-            comentarios: 0,
-          }])
-
-          // Reconstrói o gráfico com o histórico já coletado (InfluxDB), para sair/voltar não perder a curva
-          try {
-            const hist = await api.get(`/ensaio/${data.id}/historico`)
-            const pontos: DataPoint[] = (hist.data?.dados ?? []).map((p: any) => ({
-              time: p.time,
-              pressaoA: p.pressaoA,
-              pressaoB: p.pressaoB,
-            }))
-            setTotalPontosColetados(pontos.length)
-            // Mantém só os últimos 100 no gráfico (mesma regra da coleta em tempo real)
-            setDados(pontos.slice(-100))
-          } catch (errHist) {
-            console.error('Erro ao reconstruir histórico do ensaio:', errHist)
-          }
+        if (data?.ativo && data.ensaio) {
+          setEnsaio(data.ensaio)
+          registrarLog(`Ensaio ${data.ensaio.numero} retomado`)
+        } else {
+          await carregarPendentes()
         }
       } catch (err) {
         console.error('Erro ao retomar ensaio ativo:', err)
+        setErro('Não foi possível carregar o ensaio em andamento.')
+      } finally {
+        setCarregando(false)
       }
     }
 
-    retomarEnsaioAtivo()
-  }, [])
+    carregar()
+  }, [carregarPendentes, registrarLog])
 
-  // Verifica REGISTRO_RODANDO ao carregar a página
+  // Reconstrói o gráfico da etapa em execução ao reentrar na tela
   useEffect(() => {
-    const verificarRegistroRodando = async () => {
+    if (!ensaio || !etapaAtiva) return
+    if (etapaAtivaAnteriorRef.current === etapaAtiva.id) return
+
+    etapaAtivaAnteriorRef.current = etapaAtiva.id
+
+    const reconstruir = async () => {
       try {
-        const response = await api.get('/ModbusConfig/registro/rodando')
-        setRegistroRodando(response.data.rodando)
-        
-        if (response.data.rodando) {
-          const evento: LogEvento = {
-            id: Date.now(),
-            texto: `[${new Date().toLocaleTimeString('pt-BR')}] Registro está rodando`,
-            tipo: 'normal',
-            comentarios: 0,
-          }
-          setLogEventos(prev => [evento, ...prev])
-        }
-      } catch (err: any) {
-        console.error('Erro ao verificar REGISTRO_RODANDO:', err)
-        setRegistroRodando(null)
+        const { data } = await api.get(`/ensaio/${ensaio.id}/historico`, {
+          params: { etapaId: etapaAtiva.id },
+        })
+        const pontos: DataPoint[] = data?.dados ?? []
+        setTotalPontosColetados(pontos.length)
+        setDados(pontos.slice(-100))
+      } catch (err) {
+        console.error('Erro ao reconstruir histórico da etapa:', err)
       }
     }
 
-    verificarRegistroRodando()
-    
-    // Verifica periodicamente a cada 5 segundos (quando não há ensaio ativo)
-    if (!ensaioAtivo) {
-      const interval = setInterval(verificarRegistroRodando, 5000)
-      return () => clearInterval(interval)
-    }
-  }, [ensaioAtivo])
+    reconstruir()
+  }, [ensaio, etapaAtiva])
 
-  // Refs para rastrear estado sem causar re-renders
-  const registroAnteriorRef = useRef<boolean | null>(null)
-  const dialogAbertoRef = useRef(false)
-
-  // Verifica periodicamente REGISTRO_RODANDO quando ensaio está ativo
-  // Detecta se o CLP encerrou o ensaio
+  // ── Coleta ao vivo (1 Hz) ────────────────────────────────────────────────
   useEffect(() => {
-    if (!ensaioAtivo || !ensaioId) {
-      registroAnteriorRef.current = null
-      dialogAbertoRef.current = false
-      return
-    }
-
-    const verificarRegistroRodando = async () => {
-      try {
-        const response = await api.get('/ModbusConfig/registro/rodando')
-        const rodandoAtual = response.data.rodando
-        
-        // Inicializa o estado anterior na primeira verificação
-        if (registroAnteriorRef.current === null) {
-          registroAnteriorRef.current = rodandoAtual
-          setRegistroRodando(rodandoAtual)
-          return
-        }
-        
-        // Detecta se o registro parou de rodar (CLP concluiu o ensaio).
-        // A conclusão e a geração do relatório são feitas AUTOMATICAMENTE pelo backend
-        // (monitor de REGISTRO_RODANDO); aqui apenas refletimos na tela.
-        if (registroAnteriorRef.current === true && rodandoAtual === false && !dialogAbertoRef.current) {
-          dialogAbertoRef.current = true
-
-          const evento: LogEvento = {
-            id: Date.now(),
-            texto: `[${new Date().toLocaleTimeString('pt-BR')}] CLP concluiu o ensaio — relatório gerado automaticamente`,
-            tipo: 'normal',
-            comentarios: 0,
-          }
-          setLogEventos(prev => [evento, ...prev])
-
-          setEnsaioAtivo(false)
-          setEnsaioDataInicio(null)
-          setRegistroRodando(rodandoAtual)
-          registroAnteriorRef.current = rodandoAtual
-          dialogAbertoRef.current = false
-        } else {
-          setRegistroRodando(rodandoAtual)
-          registroAnteriorRef.current = rodandoAtual
-        }
-      } catch (err: any) {
-        console.error('Erro ao verificar REGISTRO_RODANDO:', err)
-      }
-    }
-
-    // Verifica a cada 2 segundos quando o ensaio está ativo
-    const interval = setInterval(verificarRegistroRodando, 2000)
-    
-    return () => clearInterval(interval)
-  }, [ensaioAtivo, ensaioId])
-
-  // Atualiza o tempo decorrido a cada segundo quando o ensaio está ativo
-  useEffect(() => {
-    if (!ensaioAtivo || !ensaioDataInicio) return
-
-    const interval = setInterval(() => {
-      setTempoAtual(Date.now()) // Força re-render para atualizar o tempo decorrido
-    }, 1000)
-
-    return () => clearInterval(interval)
-  }, [ensaioAtivo, ensaioDataInicio])
-
-  useEffect(() => {
-    if (!ensaioAtivo || !ensaioId) return
+    if (!ensaio || !etapaAtiva) return
 
     const abortController = new AbortController()
-    let isMounted = true
-    let requestInProgress = false
+    let montado = true
+    let emVoo = false
 
     const interval = setInterval(async () => {
-      // Evita requisições simultâneas
-      if (requestInProgress) {
-        return
-      }
+      if (emVoo) return
+      emVoo = true
 
-      requestInProgress = true
       try {
-        const response = await api.get(`/ensaio/${ensaioId}/pressao-atual`, {
-          signal: abortController.signal
+        const { data } = await api.get(`/ensaio/${ensaio.id}/pressao-atual`, {
+          signal: abortController.signal,
         })
-        
-        if (isMounted) {
-          const ponto: DataPoint = {
-            time: response.data.time,
-            pressaoA: response.data.pressaoA,
-            pressaoB: response.data.pressaoB,
-          }
 
-          setDados(prev => {
-            const novos = [...prev, ponto]
-            // Mantém apenas os últimos 100 pontos para o gráfico (performance)
-            return novos.slice(-100)
-          })
-          
-          // Incrementa contador total de pontos (sem limite)
+        if (montado) {
+          setDados(prev => [...prev, { time: data.time, pressaoA: data.pressaoA, pressaoB: data.pressaoB }].slice(-100))
           setTotalPontosColetados(prev => prev + 1)
         }
       } catch (err: any) {
-        if (err.name !== 'CanceledError' && err.code !== 'ERR_CANCELED' && isMounted) {
+        if (err.name !== 'CanceledError' && err.code !== 'ERR_CANCELED' && montado) {
           console.error('Erro ao ler pressão atual do ensaio:', err)
         }
       } finally {
-        requestInProgress = false
+        emVoo = false
       }
-    }, 1000) // leitura a cada 1 segundo
+    }, 1000)
 
     return () => {
-      isMounted = false
+      montado = false
       abortController.abort()
       clearInterval(interval)
     }
-  }, [ensaioAtivo, ensaioId])
+  }, [ensaio, etapaAtiva])
 
-  const iniciarEnsaio = async () => {
+  // Cronômetro da etapa em execução
+  useEffect(() => {
+    if (!etapaAtiva) return
+    const interval = setInterval(() => setTempoAtual(Date.now()), 1000)
+    return () => clearInterval(interval)
+  }, [etapaAtiva])
+
+  // ── Sincronização com o CLP ──────────────────────────────────────────────
+  // O backend fecha a etapa sozinho quando o REGISTRO_RODANDO cai; aqui só
+  // observamos a mudança de estado do ensaio e refletimos na tela.
+  useEffect(() => {
+    if (!ensaio || !etapaAtiva) return
+
+    const interval = setInterval(async () => {
+      try {
+        const { data } = await api.get('/ensaio/ativo')
+        if (!data?.ativo || !data.ensaio) return
+
+        const atualizado: EnsaioAberto = data.ensaio
+        if (atualizado.etapaEmExecucaoId === null && etapaAtiva) {
+          registrarLog(`CLP concluiu a câmara ${etapaAtiva.camara}`)
+        }
+        setEnsaio(atualizado)
+      } catch (err) {
+        console.error('Erro ao sincronizar estado do ensaio:', err)
+      }
+    }, 3000)
+
+    return () => clearInterval(interval)
+  }, [ensaio, etapaAtiva, registrarLog])
+
+  // ── Ações ────────────────────────────────────────────────────────────────
+  const criarEnsaio = async () => {
+    setErro(null)
+    setOcupado(true)
+
     try {
-      const pressaoVal = Number(pressaoCarga.replace(',', '.'))
-      const tempoVal = Number(tempoCarga.replace(',', '.'))
-
-      if (!camara) {
-        alert('Selecione a câmara a ser testada (A ou B).')
-        return
-      }
-
-      if (!pressaoCarga || isNaN(pressaoVal) || pressaoVal <= 0) {
-        alert('Informe uma Pressão de Carga válida (maior que 0).')
-        return
-      }
-
-      if (!tempoCarga || isNaN(tempoVal) || tempoVal <= 0) {
-        alert('Informe um Tempo de Carga válido (maior que 0).')
-        return
-      }
-
-      const response = await api.post('/ensaio/iniciar', {
-        camara,
-        pressaoCarga: pressaoVal,
-        tempoCarga: tempoVal,
+      const { data } = await api.post('/ensaio', {
         vessel: vessel || null,
         localTeste: localTeste || null,
         departamento: departamento || null,
         ordemServico: ordemServico || null,
       })
-      const id = response.data.id as number
-      const dataInicio = response.data.dataInicio 
-        ? new Date(response.data.dataInicio) 
-        : new Date()
 
-      setEnsaioId(id)
-      setEnsaioAtivo(true)
-      setEnsaioDataInicio(dataInicio)
-      setTempoAtual(Date.now())
+      setEnsaio(data.ensaio)
       setDados([])
       setTotalPontosColetados(0)
-      setLogEventos([])
-
-      // Verifica avisos Modbus se houver
-      if (response.data.avisosModbus && response.data.avisosModbus.length > 0) {
-        const avisos = response.data.avisosModbus.join('\n')
-        alert(`Ensaio iniciado, mas com avisos:\n${avisos}`)
-      }
-
-      // Atualiza status do registro rodando
-      if (response.data.registroRodando !== undefined) {
-        setRegistroRodando(response.data.registroRodando)
-      }
-
-      const evento: LogEvento = {
-        id: Date.now(),
-        texto: `[${new Date().toLocaleTimeString('pt-BR')}] Ensaio iniciado (ID ${id}) - Câmara ${camara}, Pressão de Carga ${pressaoVal} bar, Tempo de Carga ${tempoVal} min`,
-        tipo: 'normal',
-        comentarios: 0,
-      }
-      setLogEventos([evento])
+      registrarLog(`Ensaio ${data.ensaio.numero} criado — escolha por qual câmara começar`)
     } catch (err: any) {
-      console.error('Erro ao iniciar ensaio:', err)
-      const msg = err?.response?.data?.message || 'Erro ao iniciar ensaio'
-      alert(msg)
+      console.error('Erro ao criar ensaio:', err)
+      setErro(mensagemDeErro(err, 'Erro ao criar ensaio'))
+    } finally {
+      setOcupado(false)
     }
   }
 
-  const interromperEnsaio = async () => {
-    if (!ensaioAtivo) return
+  const retomarPendente = (pendente: EnsaioAberto) => {
+    setEnsaio(pendente)
+    setPendentes([])
+    setDados([])
+    setTotalPontosColetados(0)
+    registrarLog(`Ensaio ${pendente.numero} retomado`)
+  }
 
-    const salvar = window.confirm('Deseja salvar este ensaio?')
+  const iniciarEtapa = async (camara: Camara) => {
+    if (!ensaio) return
+
+    setErro(null)
+
+    const pressao = Number(parametros[camara].pressao.replace(',', '.'))
+    const tempo = Number(parametros[camara].tempo.replace(',', '.'))
+
+    if (!parametros[camara].pressao || isNaN(pressao) || pressao <= 0) {
+      setErro(`Informe uma pressão de carga válida para a câmara ${camara}.`)
+      return
+    }
+
+    if (!parametros[camara].tempo || isNaN(tempo) || tempo <= 0) {
+      setErro(`Informe um tempo de carga válido para a câmara ${camara}.`)
+      return
+    }
+
+    setOcupado(true)
 
     try {
-      if (ensaioId) {
-        if (salvar) {
-          await api.post(`/ensaio/interromper/${ensaioId}`)
-        } else {
-          await api.post(`/ensaio/cancelar/${ensaioId}`)
-        }
+      const { data } = await api.post(`/ensaio/${ensaio.id}/etapa`, {
+        camara,
+        pressaoCarga: pressao,
+        tempoCarga: tempo,
+      })
+
+      setEnsaio(data.ensaio)
+      setDados([])
+      setTotalPontosColetados(0)
+      registrarLog(`Câmara ${camara} iniciada — ${pressao} bar por ${tempo} min`)
+
+      if (data.avisosModbus?.length) {
+        setErro(`Câmara iniciada com avisos: ${data.avisosModbus.join(' · ')}`)
+        data.avisosModbus.forEach((aviso: string) => registrarLog(aviso, 'desvio'))
       }
-    } catch (err) {
-      console.error('Erro ao interromper/cancelar ensaio:', err)
+    } catch (err: any) {
+      console.error('Erro ao iniciar etapa:', err)
+      const msg = mensagemDeErro(err, 'Erro ao iniciar a câmara')
+      setErro(msg)
+      registrarLog(msg, 'desvio')
     } finally {
-      setEnsaioAtivo(false)
-      setEnsaioDataInicio(null)
-      const evento: LogEvento = {
-        id: Date.now(),
-        texto: `[${new Date().toLocaleTimeString('pt-BR')}] Ensaio ${salvar ? 'salvo' : 'descartado (não salvo)'}`,
-        tipo: 'normal',
-        comentarios: 0,
-      }
-      setLogEventos(prev => [evento, ...prev])
+      setOcupado(false)
+    }
+  }
+
+  const encerrarEtapa = async (salvar: boolean) => {
+    const etapa = modalEncerrar
+    if (!etapa) return
+
+    setModalEncerrar(null)
+    setOcupado(true)
+    setErro(null)
+
+    try {
+      const { data } = await api.post(`/ensaio/etapa/${etapa.id}/encerrar`, null, {
+        params: { salvar },
+      })
+
+      setEnsaio(data.ensaio)
+      registrarLog(`Câmara ${etapa.camara} ${salvar ? 'salva' : 'descartada'}`)
+    } catch (err: any) {
+      console.error('Erro ao encerrar etapa:', err)
+      setErro(mensagemDeErro(err, 'Erro ao encerrar a câmara'))
+    } finally {
+      setOcupado(false)
+    }
+  }
+
+  const aceitarEnsaio = async () => {
+    if (!ensaio) return
+
+    setOcupado(true)
+    setErro(null)
+
+    try {
+      const { data } = await api.post(`/ensaio/${ensaio.id}/aceitar`)
+      registrarLog(`Ensaio aceito — relatório ${data.relatorioNumero} gerado`)
+      navigate(`/relatorios/${data.relatorioId}`)
+    } catch (err: any) {
+      console.error('Erro ao aceitar ensaio:', err)
+      setErro(mensagemDeErro(err, 'Erro ao aceitar o ensaio'))
+    } finally {
+      setOcupado(false)
+    }
+  }
+
+  const cancelarEnsaio = async () => {
+    if (!ensaio) return
+
+    setModalCancelar(false)
+    setOcupado(true)
+    setErro(null)
+
+    try {
+      await api.post(`/ensaio/${ensaio.id}/cancelar`)
+      registrarLog(`Ensaio ${ensaio.numero} cancelado — nenhum relatório gerado`)
+      setEnsaio(null)
+      setDados([])
+      setTotalPontosColetados(0)
+      etapaAtivaAnteriorRef.current = null
+      await carregarPendentes()
+    } catch (err: any) {
+      console.error('Erro ao cancelar ensaio:', err)
+      setErro(mensagemDeErro(err, 'Erro ao cancelar o ensaio'))
+    } finally {
+      setOcupado(false)
     }
   }
 
@@ -334,230 +371,432 @@ const Ensaio = () => {
     navigate(`/ensaio/comentarios/${eventoId}`)
   }
 
+  // ── Render ───────────────────────────────────────────────────────────────
+  const ultimaLeitura = dados.length > 0 ? dados[dados.length - 1] : null
+  const decorrido = etapaAtiva
+    ? (tempoAtual - new Date(etapaAtiva.dataInicio).getTime()) / 1000
+    : 0
+
+  if (carregando) {
+    return (
+      <div className="ensaio">
+        <div className="page-header">
+          <h1>Ensaio</h1>
+        </div>
+        <div className="ensaio-vazio">Carregando…</div>
+      </div>
+    )
+  }
+
   return (
     <div className="ensaio">
       <div className="page-header">
         <div>
-          <h1>Ensaio em Tempo Real</h1>
-          <p className="page-subtitle">Monitoramento da curva de pressão</p>
+          <h1>Ensaio Hidráulico</h1>
+          <p className="page-subtitle">
+            {ensaio
+              ? `${ensaio.numero} · ${ensaio.cilindroNome ?? 'cilindro'} · ${ensaio.clienteNome ?? ''}`
+              : 'Cada ensaio testa as duas câmaras e gera um único relatório'}
+          </p>
         </div>
-        {podeOperar && (
-        <div className="ensaio-controls">
-          <div className="ensaio-config">
-            <div className="config-field">
-              <label>Câmara</label>
-              <select
-                value={camara}
-                onChange={(e) => setCamara(e.target.value as 'A' | 'B' | '')}
-                disabled={ensaioAtivo}
-              >
-                <option value="">Selecione...</option>
-                <option value="A">Câmara A (Avança)</option>
-                <option value="B">Câmara B (Recua)</option>
-              </select>
-            </div>
-            <div className="config-field">
-              <label>Pressão de Carga (bar)</label>
-              <input
-                type="number"
-                step="0.01"
-                value={pressaoCarga}
-                onChange={(e) => setPressaoCarga(e.target.value)}
-                disabled={ensaioAtivo}
-              />
-            </div>
-            <div className="config-field">
-              <label>Tempo de Carga (min)</label>
-              <input
-                type="number"
-                step="0.01"
-                value={tempoCarga}
-                onChange={(e) => setTempoCarga(e.target.value)}
-                disabled={ensaioAtivo}
-              />
-            </div>
-            <div className="config-field">
-              <label>Vessel / Frota</label>
-              <input
-                type="text"
-                placeholder="Ex.: MV29"
-                value={vessel}
-                onChange={(e) => setVessel(e.target.value)}
-                disabled={ensaioAtivo}
-              />
-            </div>
-            <div className="config-field">
-              <label>Local do Teste</label>
-              <input
-                type="text"
-                placeholder="Ex.: Macaé"
-                value={localTeste}
-                onChange={(e) => setLocalTeste(e.target.value)}
-                disabled={ensaioAtivo}
-              />
-            </div>
-            <div className="config-field">
-              <label>Departamento</label>
-              <input
-                type="text"
-                value={departamento}
-                onChange={(e) => setDepartamento(e.target.value)}
-                disabled={ensaioAtivo}
-              />
-            </div>
-            <div className="config-field">
-              <label>Ordem de Serviço</label>
-              <input
-                type="text"
-                value={ordemServico}
-                onChange={(e) => setOrdemServico(e.target.value)}
-                disabled={ensaioAtivo}
-              />
-            </div>
-          </div>
-          <button 
-            className={`btn ${ensaioAtivo ? 'btn-danger' : 'btn-primary'}`}
-            onClick={ensaioAtivo ? interromperEnsaio : iniciarEnsaio}
-          >
-            {ensaioAtivo ? '⏹️ Interromper Ensaio' : '▶️ Iniciar Ensaio'}
+        {ensaio && podeOperar && (
+          <button className="btn btn-outline-danger" onClick={() => setModalCancelar(true)} disabled={ocupado}>
+            Cancelar ensaio
           </button>
-        </div>
         )}
       </div>
 
-      <div className="ensaio-stats">
-        <div className="stat-mini">
-          <span className="stat-mini-label">Pressão A</span>
-          <span className="stat-mini-value">
-            {dados.length > 0 && dados[dados.length - 1].pressaoA != null 
-              ? Math.round(dados[dados.length - 1].pressaoA!)
-              : 0} bar
-          </span>
+      {erro && (
+        <div className="ensaio-aviso" role="alert">
+          <span>{erro}</span>
+          <button className="ensaio-aviso-fechar" onClick={() => setErro(null)} aria-label="Fechar aviso">×</button>
         </div>
-        <div className="stat-mini">
-          <span className="stat-mini-label">Pressão B</span>
-          <span className="stat-mini-value">
-            {dados.length > 0 && dados[dados.length - 1].pressaoB != null 
-              ? Math.round(dados[dados.length - 1].pressaoB!)
-              : 0} bar
-          </span>
-        </div>
-        <div className="stat-mini">
-          <span className="stat-mini-label">Tempo Decorrido</span>
-          <span className="stat-mini-value">
-            {ensaioDataInicio 
-              ? Math.floor((tempoAtual - ensaioDataInicio.getTime()) / 1000)
-              : 0}s
-          </span>
-        </div>
-        <div className="stat-mini">
-          <span className="stat-mini-label">Pontos Coletados</span>
-          <span className="stat-mini-value">{totalPontosColetados}</span>
-        </div>
-        <div className="stat-mini">
-          <span className="stat-mini-label">Status</span>
-          <span className={`stat-mini-value ${ensaioAtivo ? 'status-active' : 'status-inactive'}`}>
-            {ensaioAtivo ? '● Ativo' : '○ Inativo'}
-          </span>
-        </div>
-        <div className="stat-mini">
-          <span className="stat-mini-label">Registro</span>
-          <span className={`stat-mini-value ${registroRodando ? 'status-active' : registroRodando === false ? 'status-inactive' : ''}`}>
-            {registroRodando === null ? '○ Verificando...' : registroRodando ? '● Rodando' : '○ Parado'}
-          </span>
-        </div>
-      </div>
+      )}
 
-      <div className="ensaio-main-content">
-        <div className="grafico-container">
-          <div className="grafico-card">
-            <h2>Curva de Pressão em Tempo Real</h2>
-            <ResponsiveContainer width="100%" height={280}>
-              <LineChart data={dados}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#E0E0E0" />
-                <XAxis 
-                  dataKey="time" 
-                  stroke="#666"
-                  tick={{ fill: '#666', fontSize: 11 }}
-                />
-                <YAxis 
-                  stroke="#666"
-                  tick={{ fill: '#666', fontSize: 11 }}
-                  label={{ value: 'Pressão (bar)', angle: -90, position: 'insideLeft', style: { fontSize: 12 } }}
-                  domain={[0, 350]}
-                />
-                <Tooltip 
-                  contentStyle={{ 
-                    backgroundColor: 'rgba(255, 255, 255, 0.95)',
-                    border: '1px solid #E0E0E0',
-                    borderRadius: '8px'
-                  }}
-                  formatter={(value: number | undefined, name: string | undefined) => {
-                    const nameStr = name || 'Pressão'
-                    if (value === undefined || value === null) return ['N/A', nameStr]
-                    return [`${value.toFixed(2)} bar`, nameStr]
-                  }}
-                />
-                <Legend />
-                <Line 
-                  type="monotone" 
-                  dataKey="pressaoA" 
-                  stroke="#dc3545" 
-                  strokeWidth={3}
-                  dot={false}
-                  name="Pressão A (bar)"
-                  animationDuration={300}
-                />
-                <Line 
-                  type="monotone" 
-                  dataKey="pressaoB" 
-                  stroke="#007bff" 
-                  strokeWidth={3}
-                  dot={false}
-                  name="Pressão B (bar)"
-                  animationDuration={300}
-                />
-              </LineChart>
-            </ResponsiveContainer>
+      {/* Passo 1 — identificação, só enquanto não existe ensaio aberto */}
+      {!ensaio && podeOperar && (
+        <div className="ensaio-card">
+          <h2>Identificação do ensaio</h2>
+          <p className="ensaio-card-hint">
+            Preenchido uma vez e válido para as duas câmaras.
+          </p>
+          <div className="ensaio-form-grid">
+            <div className="config-field">
+              <label htmlFor="vessel">Vessel / Frota</label>
+              <input id="vessel" type="text" value={vessel} onChange={e => setVessel(e.target.value)} />
+            </div>
+            <div className="config-field">
+              <label htmlFor="localTeste">Local do teste</label>
+              <input id="localTeste" type="text" value={localTeste} onChange={e => setLocalTeste(e.target.value)} />
+            </div>
+            <div className="config-field">
+              <label htmlFor="departamento">Departamento</label>
+              <input id="departamento" type="text" value={departamento} onChange={e => setDepartamento(e.target.value)} />
+            </div>
+            <div className="config-field">
+              <label htmlFor="ordemServico">Ordem de serviço</label>
+              <input id="ordemServico" type="text" value={ordemServico} onChange={e => setOrdemServico(e.target.value)} />
+            </div>
           </div>
+          <button className="btn btn-primary" onClick={criarEnsaio} disabled={ocupado}>
+            Criar ensaio
+          </button>
         </div>
+      )}
 
-        <div className="log-container">
-          <div className="log-card">
-            <h2>Log de Eventos e Desvios</h2>
-            <div className="log-content">
-              {logEventos.length === 0 ? (
-                <div className="log-empty">Nenhum evento registrado</div>
-              ) : (
-                logEventos.map((evento) => (
-                  <div key={evento.id} className={`log-entry ${evento.tipo === 'desvio' ? 'log-desvio' : ''}`}>
-                    <span className="log-texto">{evento.texto}</span>
-                    {evento.tipo === 'desvio' && (
-                      <button 
-                        className="log-comentario-btn"
-                        onClick={() => abrirComentarios(evento.id)}
-                        title="Adicionar comentário sobre o desvio"
-                      >
-                        {evento.comentarios > 0 ? (
-                          <>
-                            <span className="comentario-icon">💬</span>
-                            <span className="comentario-badge">{evento.comentarios}</span>
-                          </>
-                        ) : (
-                          <span className="comentario-icon-empty">💬</span>
-                        )}
-                      </button>
-                    )}
+      {/* Ensaios que ficaram pela metade */}
+      {!ensaio && pendentes.length > 0 && (
+        <div className="ensaio-card">
+          <h2>Ensaios pendentes</h2>
+          <p className="ensaio-card-hint">Ficaram sem uma câmara ou sem o aceite.</p>
+          <ul className="pendentes-lista">
+            {pendentes.map(p => (
+              <li key={p.id} className="pendente-item">
+                <div>
+                  <strong>{p.numero}</strong>
+                  <span className="pendente-detalhe">
+                    {p.cilindroNome ?? 'cilindro'} · {p.ordemServico ? `OS ${p.ordemServico}` : 'sem OS'} ·{' '}
+                    {p.status === 'AguardandoAceite'
+                      ? 'aguardando aceite'
+                      : `falta câmara ${CAMARAS.filter(c => !etapaValida(p, c)).join(' e ')}`}
+                  </span>
+                </div>
+                {podeOperar && (
+                  <button className="btn btn-secondary" onClick={() => retomarPendente(p)}>
+                    Retomar
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {!ensaio && !podeOperar && pendentes.length === 0 && (
+        <div className="ensaio-vazio">Nenhum ensaio em andamento.</div>
+      )}
+
+      {/* Ensaio aberto */}
+      {ensaio && (
+        <>
+          <div className="ensaio-identificacao">
+            {[
+              ['Vessel / Frota', ensaio.vessel],
+              ['Local', ensaio.localTeste],
+              ['Departamento', ensaio.departamento],
+              ['Ordem de serviço', ensaio.ordemServico],
+            ].map(([rotulo, valor]) => (
+              <div key={rotulo as string} className="identificacao-item">
+                <span className="identificacao-label">{rotulo}</span>
+                <span className="identificacao-valor">{valor || '—'}</span>
+              </div>
+            ))}
+          </div>
+
+          <div className="camaras-grid">
+            {CAMARAS.map(camara => {
+              const rodando = etapaAtiva?.camara === camara
+              const concluida = etapaValida(ensaio, camara)
+              const outraRodando = etapaAtiva != null && !rodando
+
+              return (
+                <div
+                  key={camara}
+                  className={`camara-card ${rodando ? 'camara-rodando' : concluida ? 'camara-concluida' : ''}`}
+                >
+                  <div className="camara-header">
+                    <h2>Câmara {camara}</h2>
+                    <span className="camara-estado">
+                      {rodando ? '● Rodando' : concluida ? '✔ Concluída' : '○ Não iniciada'}
+                    </span>
                   </div>
-                ))
+
+                  {rodando && etapaAtiva && (
+                    <>
+                      <dl className="camara-dados">
+                        <div>
+                          <dt>Setpoint</dt>
+                          <dd>{etapaAtiva.pressaoCargaConfigurada} bar</dd>
+                        </div>
+                        <div>
+                          <dt>Tempo de carga</dt>
+                          <dd>{etapaAtiva.tempoCargaConfigurado} min</dd>
+                        </div>
+                        <div>
+                          <dt>Decorrido</dt>
+                          <dd>{formatarDuracao(decorrido)}</dd>
+                        </div>
+                      </dl>
+                      {podeOperar && (
+                        <button
+                          className="btn btn-danger"
+                          onClick={() => setModalEncerrar(etapaAtiva)}
+                          disabled={ocupado}
+                        >
+                          Encerrar câmara {camara}
+                        </button>
+                      )}
+                    </>
+                  )}
+
+                  {!rodando && concluida && (
+                    <>
+                      <dl className="camara-dados">
+                        <div>
+                          <dt>Setpoint</dt>
+                          <dd>{concluida.pressaoCargaConfigurada} bar</dd>
+                        </div>
+                        <div>
+                          <dt>Duração</dt>
+                          <dd>
+                            {concluida.dataFim
+                              ? formatarDuracao(
+                                  (new Date(concluida.dataFim).getTime() - new Date(concluida.dataInicio).getTime()) / 1000
+                                )
+                              : '—'}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Tentativa</dt>
+                          <dd>{concluida.tentativa}</dd>
+                        </div>
+                      </dl>
+                      {podeOperar && (
+                        <button
+                          className="btn btn-secondary"
+                          onClick={() => iniciarEtapa(camara)}
+                          disabled={ocupado || outraRodando}
+                          title={outraRodando ? 'Encerre a outra câmara antes' : undefined}
+                        >
+                          Repetir câmara {camara}
+                        </button>
+                      )}
+                    </>
+                  )}
+
+                  {!rodando && !concluida && (
+                    <>
+                      <div className="camara-parametros">
+                        <div className="config-field">
+                          <label htmlFor={`pressao-${camara}`}>Pressão de carga (bar)</label>
+                          <input
+                            id={`pressao-${camara}`}
+                            type="number"
+                            step="0.01"
+                            value={parametros[camara].pressao}
+                            onChange={e =>
+                              setParametros(prev => ({ ...prev, [camara]: { ...prev[camara], pressao: e.target.value } }))
+                            }
+                            disabled={!podeOperar}
+                          />
+                        </div>
+                        <div className="config-field">
+                          <label htmlFor={`tempo-${camara}`}>Tempo de carga (min)</label>
+                          <input
+                            id={`tempo-${camara}`}
+                            type="number"
+                            step="0.01"
+                            value={parametros[camara].tempo}
+                            onChange={e =>
+                              setParametros(prev => ({ ...prev, [camara]: { ...prev[camara], tempo: e.target.value } }))
+                            }
+                            disabled={!podeOperar}
+                          />
+                        </div>
+                      </div>
+                      {podeOperar && (
+                        <button
+                          className="btn btn-primary"
+                          onClick={() => iniciarEtapa(camara)}
+                          disabled={ocupado || outraRodando}
+                          title={outraRodando ? 'Encerre a outra câmara antes' : undefined}
+                        >
+                          ▶ Iniciar câmara {camara}
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+
+          {podeOperar && (
+            <div className="ensaio-aceite">
+              <button
+                className="btn btn-primary btn-aceite"
+                onClick={aceitarEnsaio}
+                disabled={!ensaio.podeAceitar || ocupado}
+              >
+                Aceitar ensaio e gerar relatório
+              </button>
+              {!ensaio.podeAceitar && (
+                <span className="ensaio-aceite-hint">
+                  {etapaAtiva
+                    ? 'Encerre a câmara em execução para poder aceitar.'
+                    : `Falta concluir a câmara ${CAMARAS.filter(c => !etapaValida(ensaio, c)).join(' e ')}.`}
+                </span>
               )}
+            </div>
+          )}
+
+          <div className="ensaio-stats">
+            <div className="stat-mini">
+              <span className="stat-mini-label">Pressão A</span>
+              <span className="stat-mini-value">
+                {ultimaLeitura?.pressaoA != null ? Math.round(ultimaLeitura.pressaoA) : 0} bar
+              </span>
+            </div>
+            <div className="stat-mini">
+              <span className="stat-mini-label">Pressão B</span>
+              <span className="stat-mini-value">
+                {ultimaLeitura?.pressaoB != null ? Math.round(ultimaLeitura.pressaoB) : 0} bar
+              </span>
+            </div>
+            <div className="stat-mini">
+              <span className="stat-mini-label">Tempo Decorrido</span>
+              <span className="stat-mini-value">{formatarDuracao(decorrido)}</span>
+            </div>
+            <div className="stat-mini">
+              <span className="stat-mini-label">Pontos Coletados</span>
+              <span className="stat-mini-value">{totalPontosColetados}</span>
+            </div>
+            <div className="stat-mini">
+              <span className="stat-mini-label">Registro</span>
+              <span className={`stat-mini-value ${etapaAtiva ? 'status-active' : 'status-inactive'}`}>
+                {etapaAtiva ? `● Câmara ${etapaAtiva.camara}` : '○ Parado'}
+              </span>
+            </div>
+          </div>
+
+          <div className="ensaio-main-content">
+            <div className="grafico-container">
+              <div className="grafico-card">
+                <h2>
+                  {etapaAtiva
+                    ? `Curva de Pressão — Câmara ${etapaAtiva.camara} em tempo real`
+                    : 'Curva de Pressão'}
+                </h2>
+                <ResponsiveContainer width="100%" height={280}>
+                  <LineChart data={dados}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#E0E0E0" />
+                    <XAxis dataKey="time" stroke="#666" tick={{ fill: '#666', fontSize: 11 }} />
+                    <YAxis
+                      stroke="#666"
+                      tick={{ fill: '#666', fontSize: 11 }}
+                      label={{ value: 'Pressão (bar)', angle: -90, position: 'insideLeft', style: { fontSize: 12 } }}
+                      domain={[0, 350]}
+                    />
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: 'rgba(255, 255, 255, 0.95)',
+                        border: '1px solid #E0E0E0',
+                        borderRadius: '8px',
+                      }}
+                      formatter={(value: number | undefined, name: string | undefined) => {
+                        const nameStr = name || 'Pressão'
+                        if (value === undefined || value === null) return ['N/A', nameStr]
+                        return [`${value.toFixed(2)} bar`, nameStr]
+                      }}
+                    />
+                    <Legend />
+                    <Line
+                      type="monotone"
+                      dataKey="pressaoA"
+                      stroke="#dc3545"
+                      strokeWidth={3}
+                      dot={false}
+                      name="Pressão A (bar)"
+                      animationDuration={300}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="pressaoB"
+                      stroke="#007bff"
+                      strokeWidth={3}
+                      dot={false}
+                      name="Pressão B (bar)"
+                      animationDuration={300}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            <div className="log-container">
+              <div className="log-card">
+                <h2>Log de Eventos e Desvios</h2>
+                <div className="log-content">
+                  {logEventos.length === 0 ? (
+                    <div className="log-empty">Nenhum evento registrado</div>
+                  ) : (
+                    logEventos.map(evento => (
+                      <div key={evento.id} className={`log-entry ${evento.tipo === 'desvio' ? 'log-desvio' : ''}`}>
+                        <span className="log-texto">{evento.texto}</span>
+                        {evento.tipo === 'desvio' && (
+                          <button
+                            className="log-comentario-btn"
+                            onClick={() => abrirComentarios(evento.id)}
+                            title="Adicionar comentário sobre o desvio"
+                          >
+                            <span className="comentario-icon-empty">💬</span>
+                          </button>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Encerrar câmara — três saídas explícitas, inclusive voltar sem fazer nada */}
+      {modalEncerrar && (
+        <div className="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="titulo-encerrar">
+          <div className="modal-card">
+            <h2 id="titulo-encerrar">Encerrar a câmara {modalEncerrar.camara}?</h2>
+            <p>
+              O registro no CLP será desligado. Salvar mantém esta corrida para o laudo;
+              descartar apaga as leituras dela.
+            </p>
+            <div className="modal-acoes">
+              <button className="btn btn-primary" onClick={() => encerrarEtapa(true)}>
+                Salvar etapa
+              </button>
+              <button className="btn btn-outline-danger" onClick={() => encerrarEtapa(false)}>
+                Descartar etapa
+              </button>
+              <button className="btn btn-link" onClick={() => setModalEncerrar(null)}>
+                Voltar ao ensaio
+              </button>
             </div>
           </div>
         </div>
-      </div>
+      )}
+
+      {modalCancelar && ensaio && (
+        <div className="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="titulo-cancelar">
+          <div className="modal-card">
+            <h2 id="titulo-cancelar">Cancelar o ensaio {ensaio.numero}?</h2>
+            <p>
+              As duas câmaras são descartadas e as leituras apagadas. Nenhum relatório é gerado
+              e nenhum número é consumido.
+            </p>
+            <div className="modal-acoes">
+              <button className="btn btn-outline-danger" onClick={cancelarEnsaio}>
+                Cancelar ensaio
+              </button>
+              <button className="btn btn-link" onClick={() => setModalCancelar(false)}>
+                Voltar ao ensaio
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
 
 export default Ensaio
-

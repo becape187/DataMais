@@ -10,3 +10,6 @@ node_modules/
 publish/
 dist/
 *.tar.gz
+
+# Dumps do banco gerados por Scripts/migrar-local.sh
+db/backups/
