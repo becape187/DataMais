@@ -11,6 +11,32 @@ namespace DataMais.Services;
 
 public class ModbusService
 {
+    /// <summary>
+    /// Interpreta a leitura de um registro como sinal ligado/desligado.
+    /// Coil/input volta como <c>bool</c>; holding/input register volta como número
+    /// (com fator e offset já aplicados), e aí qualquer valor diferente de zero é
+    /// "ligado" — comparar o texto com "1" erra em 1,0, 255 ou 65280.
+    /// </summary>
+    public static bool InterpretarComoLigado(object? leitura)
+    {
+        if (leitura is bool b) return b;
+        if (leitura is null) return false;
+
+        if (leitura is IConvertible)
+        {
+            try
+            {
+                return Math.Abs(Convert.ToDouble(leitura, System.Globalization.CultureInfo.InvariantCulture)) > 1e-9;
+            }
+            catch (FormatException) { /* não é numérico: cai no texto abaixo */ }
+            catch (InvalidCastException) { }
+            catch (OverflowException) { return true; }
+        }
+
+        var texto = leitura.ToString()?.Trim();
+        return string.Equals(texto, "true", StringComparison.OrdinalIgnoreCase) || texto == "1";
+    }
+
     private readonly IServiceScopeFactory _serviceScopeFactory;
     private readonly ILogger<ModbusService> _logger;
     private readonly Dictionary<string, IModbusMaster> _connections = new();

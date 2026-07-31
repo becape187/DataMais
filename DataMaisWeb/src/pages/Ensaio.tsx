@@ -739,17 +739,6 @@ const Ensaio = () => {
             ))}
           </div>
 
-          {/* Bancada pressurizada: avisa antes de o operador tentar iniciar */}
-          {pressoesBancada && !pressoesBancada.podeIniciar && (
-            <div className="ensaio-aviso" role="status">
-              <span>
-                {pressoesBancada.impedimento ??
-                  `Cilindro pressurizado — as duas câmaras precisam estar abaixo de ${pressoesBancada.limite} bar.`}
-                {' '}(A: {formatarBar(pressoesBancada.pressaoA)} · B: {formatarBar(pressoesBancada.pressaoB)})
-              </span>
-            </div>
-          )}
-
           <div className="camaras-grid">
             {CAMARAS.map(camara => {
               const rodando = etapaAtiva?.camara === camara
@@ -786,16 +775,17 @@ const Ensaio = () => {
                           <dd>{etapaAtiva.tempoCargaConfigurado} min</dd>
                         </div>
                         <div>
-                          <dt>Decorrido</dt>
-                          <dd>{formatarDuracao(decorrido)}</dd>
-                        </div>
-                        <div>
-                          <dt>Contagem (CLP)</dt>
+                          {/* O tempo do teste só corre com o INICIA_CONTAGEM ligado */}
+                          <dt>Tempo de teste</dt>
                           <dd>
                             {etapaAtiva.dataInicioContagem
                               ? formatarDuracao(decorridoContagem)
-                              : 'aguardando'}
+                              : 'aguardando INICIA_CONTAGEM'}
                           </dd>
+                        </div>
+                        <div>
+                          <dt>Desde a partida</dt>
+                          <dd className="camara-dado-secundario">{formatarDuracao(decorrido)}</dd>
                         </div>
                       </dl>
                       {podeOperar && (
@@ -937,8 +927,10 @@ const Ensaio = () => {
               </span>
             </div>
             <div className="stat-mini">
-              <span className="stat-mini-label">Tempo Decorrido</span>
-              <span className="stat-mini-value">{formatarDuracao(decorrido)}</span>
+              <span className="stat-mini-label">Tempo de Teste</span>
+              <span className="stat-mini-value">
+                {etapaAtiva?.dataInicioContagem ? formatarDuracao(decorridoContagem) : '—'}
+              </span>
             </div>
             <div className="stat-mini">
               <span className="stat-mini-label">Pontos Coletados</span>

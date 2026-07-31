@@ -359,6 +359,12 @@
   align-items: center;
 }
 
+/* Tempo desde o clique: informativo, não é o tempo do teste */
+.camara-dado-secundario {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
 /* Espera pela confirmação do CLP na partida da câmara */
 .spinner {
   display: inline-block;

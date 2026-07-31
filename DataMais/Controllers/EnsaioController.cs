@@ -750,6 +750,91 @@ public class EnsaioController : ControllerBase
     }
 
     /// <summary>
+    /// Diagnóstico dos sinais que comandam o ciclo (REGISTRO_RODANDO e INICIA_CONTAGEM):
+    /// o que está cadastrado, o valor bruto lido agora e como ele foi interpretado.
+    /// Serve para responder "por que a contagem não começou / por que a etapa não fechou"
+    /// sem precisar de journalctl na VM.
+    /// </summary>
+    [HttpGet("sinais-clp")]
+    public async Task<IActionResult> DiagnosticarSinaisDoClp()
+    {
+        try
+        {
+            return Ok(new
+            {
+                registroRodando = await DiagnosticarSinalAsync("REGISTRO_RODANDO"),
+                iniciaContagem = await DiagnosticarSinalAsync("INICIA_CONTAGEM")
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Erro ao diagnosticar sinais do CLP");
+            return StatusCode(500, new { message = "Erro ao diagnosticar sinais do CLP", error = ex.Message });
+        }
+    }
+
+    private async Task<object> DiagnosticarSinalAsync(string nome)
+    {
+        var registro = await _context.ModbusConfigs.FirstOrDefaultAsync(m => m.Nome == nome && m.Ativo);
+
+        if (registro == null)
+        {
+            var inativo = await _context.ModbusConfigs.AnyAsync(m => m.Nome == nome);
+
+            return new
+            {
+                nome,
+                cadastrado = inativo,
+                ativo = false,
+                problema = inativo
+                    ? $"'{nome}' existe no cadastro Modbus mas está INATIVO."
+                    : $"'{nome}' não está cadastrado em Registros Modbus."
+            };
+        }
+
+        object? valorBruto = null;
+        string? erro = null;
+
+        try
+        {
+            valorBruto = await _modbusService.LerRegistroAsync(registro.Id);
+        }
+        catch (Exception ex)
+        {
+            var raiz = ex is AggregateException ae ? ae.InnerException ?? ex : ex;
+            erro = $"{raiz.GetType().Name}: {raiz.Message}";
+        }
+
+        // Ler só é possível com função de leitura; cadastro com função de escrita
+        // lança NotSupportedException lá no ModbusService.
+        var funcaoDeLeitura = registro.FuncaoModbus is "ReadCoils" or "ReadInputs"
+            or "ReadHoldingRegisters" or "ReadInputRegisters";
+
+        return new
+        {
+            nome,
+            cadastrado = true,
+            ativo = true,
+            registroId = registro.Id,
+            funcaoModbus = registro.FuncaoModbus,
+            funcaoDeLeitura,
+            enderecoRegistro = registro.EnderecoRegistro,
+            slaveId = registro.SlaveId,
+            tipoDado = registro.TipoDado,
+            ip = $"{registro.IpAddress}:{registro.Port}",
+            valorBruto = valorBruto?.ToString(),
+            tipoRetorno = valorBruto?.GetType().Name,
+            ligado = erro == null ? ModbusService.InterpretarComoLigado(valorBruto) : (bool?)null,
+            erro,
+            problema = !funcaoDeLeitura
+                ? $"'{nome}' está cadastrado com a função {registro.FuncaoModbus}, que é de ESCRITA — não dá para ler o estado dele. Use ReadCoils ou ReadInputs."
+                : erro != null
+                    ? $"A leitura de '{nome}' falhou. Confira endereço, slaveId e função no cadastro."
+                    : null
+        };
+    }
+
+    /// <summary>
     /// Histórico de pressões do InfluxDB para reconstruir o gráfico ao reentrar na tela.
     /// Com <paramref name="etapaId"/>, recorta só a janela daquela câmara.
     /// </summary>

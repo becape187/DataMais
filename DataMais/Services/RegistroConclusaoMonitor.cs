@@ -7,11 +7,12 @@ namespace DataMais.Services;
 /// <summary>
 /// Serviço de background que monitora os sinais do CLP durante uma etapa:
 /// <list type="bullet">
-/// <item>REGISTRO_RODANDO — o ciclo está rodando (inclui a rampa).</item>
-/// <item>INICIA_CONTAGEM — o patamar de teste começou; a borda de SUBIDA é o t0 do laudo
-/// e a de descida marca o fim da contagem.</item>
+/// <item>REGISTRO_RODANDO — inicia e para o registro. É o ÚNICO que fecha a etapa:
+/// na borda de descida, o CLP terminou aquela câmara.</item>
+/// <item>INICIA_CONTAGEM — manda só na contagem de tempo: a borda de subida é o t0 do
+/// laudo e a de descida marca o fim do patamar. Não interfere no encerramento.</item>
 /// </list>
-/// A etapa é fechada como Concluida quando os DOIS caem. Não gera relatório — o laudo
+/// A etapa é fechada como Concluida na descida do REGISTRO_RODANDO. Não gera relatório — o laudo
 /// só nasce quando o operador ACEITA o ensaio com as duas câmaras prontas.
 /// Funciona mesmo sem ninguém na tela (backend é a fonte da verdade).
 /// </summary>
@@ -28,9 +29,8 @@ public class RegistroConclusaoMonitor : BackgroundService
     private bool? _registroAnterior;
     private bool? _contagemAnterior;
 
-    // Ciclos com o REGISTRO_RODANDO já parado mas o INICIA_CONTAGEM ainda ligado.
-    // Se o CLP deixar esse coil retido, a etapa nunca fecha sozinha — vira log.
-    private int _ciclosParadoComContagemLigada;
+    // Ciclos consecutivos em que a leitura do INICIA_CONTAGEM falhou (log throttled).
+    private int _ciclosComFalhaNaContagem;
 
     public RegistroConclusaoMonitor(
         IServiceScopeFactory scopeFactory,
@@ -102,22 +102,40 @@ public class RegistroConclusaoMonitor : BackgroundService
             .FirstOrDefaultAsync(m => m.Nome == "INICIA_CONTAGEM" && m.Ativo, ct);
 
         bool rodando;
-        bool? contando = null;
 
         try
         {
             rodando = await LerSinalAsync(registroConfig.Id);
-
-            if (contagemConfig != null)
-            {
-                contando = await LerSinalAsync(contagemConfig.Id);
-            }
         }
         catch (Exception ex)
         {
             // CLP indisponível: não conclui por engano, apenas tenta de novo no próximo ciclo
-            _logger.LogWarning(ex, "Falha ao ler sinais do CLP no monitor");
+            _logger.LogWarning(ex, "Falha ao ler REGISTRO_RODANDO no monitor");
             return;
+        }
+
+        // O INICIA_CONTAGEM manda SÓ na contagem de tempo: ele marca o t0 e o fim do
+        // patamar, e não opina sobre o fim do ensaio. Quem inicia e para o registro é o
+        // REGISTRO_RODANDO, sozinho. Por isso uma falha de leitura aqui nunca trava o
+        // encerramento — no máximo o laudo cai na regra antiga do setpoint.
+        bool? contando = null;
+
+        if (contagemConfig != null)
+        {
+            try
+            {
+                contando = await LerSinalAsync(contagemConfig.Id);
+                _ciclosComFalhaNaContagem = 0;
+            }
+            catch (Exception ex)
+            {
+                if (_ciclosComFalhaNaContagem++ % 30 == 0)
+                {
+                    _logger.LogError(ex,
+                        "Não foi possível ler INICIA_CONTAGEM (registro {RegistroId}, função {Funcao}, endereço {Endereco}). O t0 do laudo cai na regra do setpoint e o encerramento passa a depender só do REGISTRO_RODANDO.",
+                        contagemConfig.Id, contagemConfig.FuncaoModbus, contagemConfig.EnderecoRegistro);
+                }
+            }
         }
 
         // Bordas do INICIA_CONTAGEM carimbam a janela de contagem, mesmo na primeira
@@ -135,34 +153,13 @@ public class RegistroConclusaoMonitor : BackgroundService
             return;
         }
 
-        // Fim do ciclo: os DOIS sinais desligados, tendo pelo menos um estado ligado
-        // no ciclo anterior. Enquanto a contagem estiver ligada, o ensaio continua —
-        // mesmo que o REGISTRO_RODANDO caia antes.
-        var estavaAtivo = _registroAnterior == true || _contagemAnterior == true;
-        var tudoParado = !rodando && contando != true;
-
-        // Diagnóstico: CLP parado mas contagem retida — a etapa fica presa esperando.
-        if (!rodando && contando == true)
-        {
-            _ciclosParadoComContagemLigada++;
-
-            if (_ciclosParadoComContagemLigada % 30 == 0)
-            {
-                _logger.LogWarning(
-                    "REGISTRO_RODANDO parado há {Segundos}s mas INICIA_CONTAGEM continua ligado; a câmara {Camara} do ensaio {EnsaioId} não será concluída enquanto isso. Verifique o coil no CLP ou encerre pela tela.",
-                    _ciclosParadoComContagemLigada * Intervalo.TotalSeconds, etapa.Camara, etapa.EnsaioId);
-            }
-        }
-        else
-        {
-            _ciclosParadoComContagemLigada = 0;
-        }
-
-        if (estavaAtivo && tudoParado)
+        // Borda de descida do REGISTRO_RODANDO = o CLP parou o registro desta câmara.
+        // É o único critério de encerramento.
+        if (_registroAnterior == true && !rodando)
         {
             _logger.LogInformation(
-                "Sinais do CLP caíram (rodando={Rodando}, contando={Contando}): concluindo a câmara {Camara} do ensaio {EnsaioId}.",
-                rodando, contando, etapa.Camara, etapa.EnsaioId);
+                "REGISTRO_RODANDO caiu: concluindo a câmara {Camara} do ensaio {EnsaioId}.",
+                etapa.Camara, etapa.EnsaioId);
 
             await ConcluirEtapaAsync(context, etapa, ct);
         }
@@ -174,7 +171,7 @@ public class RegistroConclusaoMonitor : BackgroundService
     private async Task<bool> LerSinalAsync(int registroId)
     {
         var leitura = await _modbusService.LerRegistroAsync(registroId);
-        return leitura is bool b ? b : (leitura?.ToString() == "1" || leitura?.ToString() == "True");
+        return ModbusService.InterpretarComoLigado(leitura);
     }
 
     /// <summary>
@@ -265,7 +262,6 @@ public class RegistroConclusaoMonitor : BackgroundService
 
         _registroAnterior = false;
         _contagemAnterior = false;
-        _ciclosParadoComContagemLigada = 0;
         _logger.LogInformation(
             "Câmara {Camara} do ensaio {EnsaioId} concluída pelo monitor. Ensaio agora está {Status}.",
             etapa.Camara, ensaio.Id, ensaio.Status);
