@@ -126,3 +126,7 @@ Push na branch `main` dispara deploy via **GitHub Actions** por SSH (`.github/wo
 ## Infra MODEC
 
 `docs/topologia-infra-modec.md` documenta a topologia de rede da instalação (CLP Weidmüller, MK1/MK2, VM, túneis WireGuard) — referência para conectividade do CLP e publicação dos serviços.
+
+## Diário de sessões (contexto entre máquinas)
+
+O desenvolvimento acontece numa máquina e o teste/deploy na VM do cliente — e o Claude Code roda nas duas. **`docs/sessoes/`** guarda o resumo de cada sessão de trabalho (o que foi feito, causa raiz, commits, pendências de bancada). **Ao retomar trabalho em qualquer máquina, leia o arquivo mais recente de `docs/sessoes/` antes de mexer.** Ao concluir uma frente de trabalho: commit + push + `deploy-local.sh` em dia + atualizar o diário — o usuário só testa no cliente, então trabalho não pushado é invisível.
