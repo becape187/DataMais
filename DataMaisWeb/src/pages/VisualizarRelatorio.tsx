@@ -2,11 +2,10 @@ import { useEffect, useState, useRef } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import * as XLSX from 'xlsx'
-import jsPDF from 'jspdf'
-import html2canvas from 'html2canvas'
 import api from '../config/api'
 import { useAuth } from '../contexts/AuthContext'
 import { formatarDuracao } from '../utils/tempo'
+import { gerarRelatorioPdf } from '../utils/relatorioPdf'
 import './VisualizarRelatorio.css'
 
 interface CampoRelatorio {
@@ -366,6 +365,10 @@ const VisualizarRelatorio = () => {
     XLSX.writeFile(wb, `relatorio_${relatorio?.numero || 'dados'}_pontos_coletados.xlsx`)
   }
 
+  // Identificação que vai no rodapé de cada página do PDF
+  const rodapePdf = () =>
+    [relatorio?.numero, relatorio?.cliente].filter(Boolean).join(' · ') || 'Relatório de Ensaio Hidráulico'
+
   // Função para exportar relatório para PDF
   const exportarParaPDF = async () => {
     if (!relatorioContainerRef.current) {
@@ -374,89 +377,11 @@ const VisualizarRelatorio = () => {
     }
 
     try {
-      // Dimensões do PDF A4
-      const pdfWidth = 210 // A4 width in mm
-      const pdfHeight = 297 // A4 height in mm
-      const margin = 10 // Margem em mm
-      const contentWidth = pdfWidth - (margin * 2) // Largura útil: 190mm
-      
-      // Largura fixa para renderização: 1200px
-      const renderWidthPx = 1200
-      
-      const originalElement = relatorioContainerRef.current
-      
-      // Cria um clone do elemento para renderização
-      const clone = originalElement.cloneNode(true) as HTMLElement
-      
-      // Posiciona o clone fora da tela com largura fixa de 1200px
-      clone.style.position = 'absolute'
-      clone.style.left = '-9999px'
-      clone.style.top = '0'
-      clone.style.width = `${renderWidthPx}px`
-      clone.style.maxWidth = `${renderWidthPx}px`
-      clone.style.transform = 'none'
-      clone.style.transformOrigin = 'top left'
-      
-      // Esconde os botões de exportação no clone (apenas para PDF/impressão)
-      const exportButtons = clone.querySelectorAll('.export-button, .export-buttons')
-      exportButtons.forEach(btn => {
-        (btn as HTMLElement).style.display = 'none'
-      })
-      
-      // Adiciona o clone ao body temporariamente
-      document.body.appendChild(clone)
-      
-      // Aguarda um frame para garantir que o layout seja aplicado
-      await new Promise(resolve => requestAnimationFrame(resolve))
-      
-      // Captura o clone como canvas com largura fixa de 1200px
-      const canvas = await html2canvas(clone, {
-        scale: 2, // Qualidade alta
-        useCORS: true,
-        logging: false,
-        backgroundColor: '#ffffff',
-        width: renderWidthPx,
-        windowWidth: renderWidthPx
-      })
-
-      // Remove o clone do DOM
-      document.body.removeChild(clone)
-
-      // Calcula as dimensões da imagem no PDF mantendo proporção
-      // A largura será ajustada à largura útil do PDF (190mm)
-      // A altura será calculada proporcionalmente
-      const imgWidth = contentWidth // 190mm (largura útil do PDF)
-      const imgHeight = (canvas.height * contentWidth) / canvas.width // Altura proporcional
-      
-      // Cria o PDF
-      const pdf = new jsPDF('p', 'mm', 'a4')
-      const pageContentHeight = pdfHeight - (margin * 2) // Altura útil: 277mm
-      let heightLeft = imgHeight
-      let position = margin
-
-      // Adiciona a primeira página
-      const firstPageHeight = Math.min(imgHeight, pageContentHeight)
-      pdf.addImage(canvas.toDataURL('image/png', 1.0), 'PNG', margin, position, imgWidth, firstPageHeight)
-      heightLeft -= firstPageHeight
-
-      // Adiciona páginas adicionais se necessário
-      while (heightLeft > 0) {
-        pdf.addPage()
-        position = margin
-        const pageImgHeight = Math.min(heightLeft, pageContentHeight)
-        pdf.addImage(canvas.toDataURL('image/png', 1.0), 'PNG', margin, position, imgWidth, pageImgHeight)
-        heightLeft -= pageImgHeight
-      }
-
-      // Faz o download
+      const pdf = await gerarRelatorioPdf(relatorioContainerRef.current, rodapePdf())
       pdf.save(`relatorio_${relatorio?.numero || 'relatorio'}.pdf`)
     } catch (error) {
       console.error('Erro ao gerar PDF:', error)
       alert('Erro ao gerar PDF. Tente novamente.')
-      
-      // Garante que o clone seja removido mesmo em caso de erro
-      const clones = document.querySelectorAll('[style*="left: -9999px"]')
-      clones.forEach(clone => clone.remove())
     }
   }
 
@@ -468,85 +393,11 @@ const VisualizarRelatorio = () => {
     }
 
     try {
-      // Dimensões do PDF A4
-      const pdfWidth = 210 // A4 width in mm
-      const pdfHeight = 297 // A4 height in mm
-      const margin = 10 // Margem em mm
-      const contentWidth = pdfWidth - (margin * 2) // Largura útil: 190mm
-      
-      // Largura fixa para renderização: 1200px
-      const renderWidthPx = 1200
-      
-      const originalElement = relatorioContainerRef.current
-      
-      // Cria um clone do elemento para renderização
-      const clone = originalElement.cloneNode(true) as HTMLElement
-      
-      // Posiciona o clone fora da tela com largura fixa de 1200px
-      clone.style.position = 'absolute'
-      clone.style.left = '-9999px'
-      clone.style.top = '0'
-      clone.style.width = `${renderWidthPx}px`
-      clone.style.maxWidth = `${renderWidthPx}px`
-      clone.style.transform = 'none'
-      clone.style.transformOrigin = 'top left'
-      
-      // Esconde os botões de exportação no clone (apenas para PDF/impressão)
-      const exportButtons = clone.querySelectorAll('.export-button, .export-buttons')
-      exportButtons.forEach(btn => {
-        (btn as HTMLElement).style.display = 'none'
-      })
-      
-      // Adiciona o clone ao body temporariamente
-      document.body.appendChild(clone)
-      
-      // Aguarda um frame para garantir que o layout seja aplicado
-      await new Promise(resolve => requestAnimationFrame(resolve))
-      
-      // Captura o clone como canvas com largura fixa de 1200px
-      const canvas = await html2canvas(clone, {
-        scale: 2, // Qualidade alta
-        useCORS: true,
-        logging: false,
-        backgroundColor: '#ffffff',
-        width: renderWidthPx,
-        windowWidth: renderWidthPx
-      })
+      const pdf = await gerarRelatorioPdf(relatorioContainerRef.current, rodapePdf())
 
-      // Remove o clone do DOM
-      document.body.removeChild(clone)
-
-      // Calcula as dimensões da imagem no PDF mantendo proporção
-      // A largura será ajustada à largura útil do PDF (190mm)
-      // A altura será calculada proporcionalmente
-      const imgWidth = contentWidth // 190mm (largura útil do PDF)
-      const imgHeight = (canvas.height * contentWidth) / canvas.width // Altura proporcional
-      
-      // Cria o PDF
-      const pdf = new jsPDF('p', 'mm', 'a4')
-      const pageContentHeight = pdfHeight - (margin * 2) // Altura útil: 277mm
-      let heightLeft = imgHeight
-      let position = margin
-
-      // Adiciona a primeira página
-      const firstPageHeight = Math.min(imgHeight, pageContentHeight)
-      pdf.addImage(canvas.toDataURL('image/png', 1.0), 'PNG', margin, position, imgWidth, firstPageHeight)
-      heightLeft -= firstPageHeight
-
-      // Adiciona páginas adicionais se necessário
-      while (heightLeft > 0) {
-        pdf.addPage()
-        position = margin
-        const pageImgHeight = Math.min(heightLeft, pageContentHeight)
-        pdf.addImage(canvas.toDataURL('image/png', 1.0), 'PNG', margin, position, imgWidth, pageImgHeight)
-        heightLeft -= pageImgHeight
-      }
-
-      // Abre a janela de impressão do PDF
-      const pdfBlob = pdf.output('blob')
-      const pdfUrl = URL.createObjectURL(pdfBlob)
+      const pdfUrl = URL.createObjectURL(pdf.output('blob'))
       const printWindow = window.open(pdfUrl, '_blank')
-      
+
       if (printWindow) {
         printWindow.onload = () => {
           printWindow.print()
@@ -558,10 +409,6 @@ const VisualizarRelatorio = () => {
     } catch (error) {
       console.error('Erro ao preparar impressão:', error)
       alert('Erro ao preparar impressão. Tente novamente.')
-      
-      // Garante que o clone seja removido mesmo em caso de erro
-      const clones = document.querySelectorAll('[style*="left: -9999px"]')
-      clones.forEach(clone => clone.remove())
     }
   }
 
