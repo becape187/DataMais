@@ -1,7 +1,24 @@
 # 2026-07-31 — Ciclo do ensaio: INICIA_CONTAGEM, trava de pressão, encerramento automático
 
-Sessão longa, com testes em bancada no cliente entre os deploys. Estado ao final:
-**tudo commitado e pushado até `8273b1e`, aguardando validação em bancada.**
+Sessão longa, com testes em bancada no cliente entre os deploys.
+
+## DESFECHO — a lição da sessão (ler primeiro)
+
+Teste final de bancada: **encerramento automático OK**; contagem não iniciava.
+Causa: a "máquina de estados" defensiva do INICIA_CONTAGEM (borda obrigatória,
+anti-retenção, reabertura, retalho/vale) — proteções desenhadas para leituras
+não-confiáveis, que deixaram de existir quando a serialização do Modbus entrou.
+O CLP do cliente é comportado: o flag **nunca** está ligado na partida e só liga
+ao atingir a pressão de teste.
+
+Decisão do Bernardo, literal: **"ligou o flag, inicia contagem" — somente isso.**
+A máquina de estados foi REMOVIDA; a regra é por NÍVEL: ligou = t0, desligou =
+fim, janela medida uma vez por etapa, flag religado depois vira só log. Está no
+CLAUDE.md como regra permanente: não readicionar esperteza ali.
+
+Segunda diretriz de fluxo, também permanente: **nenhuma mudança "no escuro"** —
+antes de mexer, explicar o que será mudado e por quê; diagnóstico com prova
+(journalctl/sinais-clp) vem antes de correção.
 
 ## O que foi construído
 
