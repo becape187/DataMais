@@ -48,10 +48,10 @@ interface SerieEtapa {
 interface RelatorioDetalhe {
   id: number
   numero: string
+  /** Vessel/Frota — vem do cadastro (clienteNome); não existe cliente externo. */
   cliente: string
   data: string
   ensaioId?: number | null
-  ensaioNumero?: string | null
   observacoes?: string | null
   duracao?: string | null
   etapas: EtapaRelatorio[]
@@ -63,7 +63,6 @@ interface RelatorioDetalhe {
   concluidoPorNome?: string | null
   dataConclusao?: string | null
   // Identificação do documento
-  ensaioVessel?: string | null
   ensaioLocalTeste?: string | null
   ensaioDepartamento?: string | null
   ensaioOrdemServico?: string | null
@@ -170,7 +169,6 @@ const VisualizarRelatorio = () => {
           cliente: r.clienteNome || 'N/A',
           data: dataStr,
           ensaioId: r.ensaioId ?? null,
-          ensaioNumero: r.ensaioNumero ?? null,
           observacoes: r.observacoes ?? null,
           duracao,
           etapas: Array.isArray(r.etapas) ? r.etapas : [],
@@ -180,7 +178,6 @@ const VisualizarRelatorio = () => {
           versao: r.versao ?? 0,
           concluidoPorNome: r.concluidoPorNome ?? null,
           dataConclusao: r.dataConclusao ?? null,
-          ensaioVessel: r.ensaioVessel ?? null,
           ensaioLocalTeste: r.ensaioLocalTeste ?? null,
           ensaioDepartamento: r.ensaioDepartamento ?? null,
           ensaioOrdemServico: r.ensaioOrdemServico ?? null,
@@ -496,11 +493,7 @@ const VisualizarRelatorio = () => {
         <div>
           <Link to="/relatorios" className="back-link">← Voltar para Relatórios</Link>
           <h1>Relatório {relatorio.numero}</h1>
-          <p className="page-subtitle">
-            {relatorio.ensaioNumero
-              ? <>Ensaio {relatorio.ensaioNumero} - {relatorio.cliente}</>
-              : <>Cliente {relatorio.cliente}</>}
-          </p>
+          <p className="page-subtitle">Vessel/Frota {relatorio.cliente}</p>
         </div>
         <div className="header-actions">
           <span className={`situacao-badge ${concluido ? 'concluido' : 'rascunho'}`}>
@@ -580,15 +573,11 @@ const VisualizarRelatorio = () => {
                 <span className="meta-label">Data:</span>
                 <span className="meta-value">{relatorio.data}</span>
               </div>
+              {/* Vessel/Frota é o cadastro (tabela Clientes) — não existe cliente externo aqui.
+                  O código interno do ensaio não entra no documento: o número oficial é o REH-MPR. */}
               <div className="meta-item">
-                <span className="meta-label">Cliente:</span>
+                <span className="meta-label">Vessel/Frota:</span>
                 <span className="meta-value">{relatorio.cliente}</span>
-              </div>
-              <div className="meta-item">
-                <span className="meta-label">Ensaio:</span>
-                <span className="meta-value">
-                  {relatorio.ensaioNumero || (relatorio.ensaioId ? `#${relatorio.ensaioId}` : '-')}
-                </span>
               </div>
             </div>
           </div>
@@ -597,7 +586,6 @@ const VisualizarRelatorio = () => {
         <div className="relatorio-section">
           <h3>Identificação do Documento</h3>
           <div className="info-grid">
-            <div className="info-card"><span className="info-label">Vessel / Frota</span><span className="info-value">{relatorio.ensaioVessel || '-'}</span></div>
             <div className="info-card"><span className="info-label">Local do Teste</span><span className="info-value">{relatorio.ensaioLocalTeste || '-'}</span></div>
             <div className="info-card"><span className="info-label">Departamento</span><span className="info-value">{relatorio.ensaioDepartamento || '-'}</span></div>
             <div className="info-card"><span className="info-label">Ordem de Serviço</span><span className="info-value">{relatorio.ensaioOrdemServico || '-'}</span></div>

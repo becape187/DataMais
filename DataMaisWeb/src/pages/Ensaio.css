@@ -433,7 +433,41 @@
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 16px;
-  margin-bottom: 24px;
+  margin-bottom: 12px;
+}
+
+/* Sinais do CLP — diagnóstico de bancada, discreto: uma linha só, para não
+   roubar altura do gráfico. */
+.sinais-clp-faixa {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 20px;
+  margin-bottom: 16px;
+  padding: 8px 14px;
+  background: var(--white);
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.sinal-item {
+  white-space: nowrap;
+  color: var(--text-secondary);
+}
+
+.sinal-item.status-active {
+  color: var(--success);
+}
+
+.sinal-item.status-inactive {
+  color: var(--text-secondary);
+}
+
+.sinal-item.sinal-erro {
+  color: var(--danger);
 }
 
 .stat-mini {

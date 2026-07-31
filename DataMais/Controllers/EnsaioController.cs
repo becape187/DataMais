@@ -182,7 +182,7 @@ public class EnsaioController : ControllerBase
 
             if (!clienteId.HasValue || !cilindroId.HasValue)
             {
-                return BadRequest(new { message = "Selecione o cliente e o cilindro do ensaio." });
+                return BadRequest(new { message = "Selecione o vessel/frota e o cilindro do ensaio." });
             }
 
             var cliente = await _context.Clientes.FindAsync(clienteId.Value);
@@ -190,12 +190,12 @@ public class EnsaioController : ControllerBase
 
             if (cliente == null || cilindro == null)
             {
-                return BadRequest(new { message = "Cliente ou cilindro não encontrado no banco de dados." });
+                return BadRequest(new { message = "Vessel/Frota ou cilindro não encontrado no banco de dados." });
             }
 
             if (cilindro.ClienteId != cliente.Id)
             {
-                return BadRequest(new { message = $"O cilindro {cilindro.Nome} não pertence ao cliente {cliente.Nome}." });
+                return BadRequest(new { message = $"O cilindro {cilindro.Nome} não pertence ao vessel/frota {cliente.Nome}." });
             }
 
             var agora = DateTime.UtcNow;
@@ -206,7 +206,8 @@ public class EnsaioController : ControllerBase
                 Status = StatusEnsaio.EmAndamento,
                 ClienteId = cliente.Id,
                 CilindroId = cilindro.Id,
-                Vessel = Limpar(request.Vessel),
+                // Ensaio.Vessel é legado: o Vessel/Frota do laudo é o próprio cadastro
+                // (Cliente.Nome). A coluna fica para os ensaios antigos e não é mais escrita.
                 LocalTeste = Limpar(request.LocalTeste),
                 Departamento = Limpar(request.Departamento),
                 OrdemServico = Limpar(request.OrdemServico),
@@ -562,7 +563,10 @@ public class EnsaioController : ControllerBase
             {
                 Numero = numeroRelatorio,
                 Data = dataRelatorio,
-                Observacoes = $"Relatório gerado a partir do ensaio {ensaio.Numero} (câmaras A e B).",
+                // Pelo ensaio, não pelo código dele: o único número que o cliente reconhece
+                // no documento é o REH-MPR. O horário sai no fuso do servidor, como no laudo.
+                Observacoes = $"Relatório gerado a partir do ensaio de "
+                    + $"{(ensaio.DataInicio ?? ensaio.DataCriacao).ToLocalTime():dd/MM/yyyy HH:mm} (câmaras A e B).",
                 ClienteId = ensaio.ClienteId,
                 CilindroId = ensaio.CilindroId,
                 EnsaioId = ensaio.Id,
@@ -1632,14 +1636,11 @@ public class EnsaioController : ControllerBase
 
 public class CriarEnsaioRequest
 {
-    /// <summary>Cliente dono do cilindro. Se omitido, usa o último ensaio como padrão.</summary>
+    /// <summary>Vessel/Frota dono do cilindro. Se omitido, usa o último ensaio como padrão.</summary>
     public int? ClienteId { get; set; }
 
     /// <summary>Cilindro sob teste. Se omitido, usa o último ensaio como padrão.</summary>
     public int? CilindroId { get; set; }
-
-    /// <summary>Embarcação / unidade testada (ex.: MV29 / Frota).</summary>
-    public string? Vessel { get; set; }
 
     /// <summary>Local do teste (ex.: Macaé).</summary>
     public string? LocalTeste { get; set; }

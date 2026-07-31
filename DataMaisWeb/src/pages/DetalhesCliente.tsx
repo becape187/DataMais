@@ -79,7 +79,7 @@ const DetalhesCliente = () => {
   if (!cliente) {
     return (
       <div className="detalhes-cliente">
-        <p>Cliente não encontrado</p>
+        <p>Vessel/Frota não encontrado</p>
       </div>
     )
   }
@@ -161,7 +161,7 @@ const DetalhesCliente = () => {
               <thead>
                 <tr>
                   <th>Nome</th>
-                  <th>Código Cliente</th>
+                  <th>Tag / ID</th>
                   <th>Código Interno</th>
                   <th>Modelo</th>
                   <th>Fabricante</th>

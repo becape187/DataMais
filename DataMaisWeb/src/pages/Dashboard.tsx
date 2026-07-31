@@ -382,14 +382,14 @@ const Dashboard = () => {
         </div>
       </div>
 
-      {/* Cliente e cilindro do último ensaio — a escolha é feita ao iniciar o ensaio */}
+      {/* Vessel/Frota e cilindro do último ensaio — a escolha é feita ao iniciar o ensaio */}
       {(clienteSelecionado || cilindroSelecionado) && (
         <div className="sistema-card">
           <div className="sistema-content">
             <div className="sistema-item">
               <div className="sistema-icon">🏢</div>
               <div className="sistema-info">
-                <span className="sistema-label">Cliente</span>
+                <span className="sistema-label">Vessel/Frota</span>
                 <span className="sistema-value">{clienteSelecionado?.nome || 'Não selecionado'}</span>
               </div>
             </div>
@@ -497,7 +497,7 @@ const Dashboard = () => {
                 <thead>
                   <tr>
                     <th>Número</th>
-                    <th>Cliente</th>
+                    <th>Vessel/Frota</th>
                     <th>Data</th>
                     <th>Status</th>
                   </tr>

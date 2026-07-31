@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Authorization;
+﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using DataMais.Data;
@@ -41,7 +41,7 @@ public class ClienteController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Erro ao obter clientes");
-            return StatusCode(500, new { message = "Erro ao obter clientes" });
+            return StatusCode(500, new { message = "Erro ao obter os vessels/frotas" });
         }
     }
 
@@ -57,7 +57,7 @@ public class ClienteController : ControllerBase
 
             if (cliente == null)
             {
-                return NotFound(new { message = "Cliente não encontrado" });
+                return NotFound(new { message = "Vessel/Frota não encontrado" });
             }
 
             var result = new
@@ -95,7 +95,7 @@ public class ClienteController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Erro ao obter cliente");
-            return StatusCode(500, new { message = "Erro ao obter cliente" });
+            return StatusCode(500, new { message = "Erro ao obter o vessel/frota" });
         }
     }
 
@@ -150,7 +150,7 @@ public class ClienteController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Erro ao criar cliente");
-            return StatusCode(500, new { message = "Erro ao criar cliente" });
+            return StatusCode(500, new { message = "Erro ao criar o vessel/frota" });
         }
     }
 
@@ -168,7 +168,7 @@ public class ClienteController : ControllerBase
             var cliente = await _context.Clientes.FindAsync(id);
             if (cliente == null)
             {
-                return NotFound(new { message = "Cliente não encontrado" });
+                return NotFound(new { message = "Vessel/Frota não encontrado" });
             }
 
             // Verificar se CNPJ já existe em outro cliente (se fornecido e diferente)
@@ -219,7 +219,7 @@ public class ClienteController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Erro ao atualizar cliente");
-            return StatusCode(500, new { message = "Erro ao atualizar cliente" });
+            return StatusCode(500, new { message = "Erro ao atualizar o vessel/frota" });
         }
     }
 
@@ -232,7 +232,7 @@ public class ClienteController : ControllerBase
             var cliente = await _context.Clientes.FindAsync(id);
             if (cliente == null)
             {
-                return NotFound(new { message = "Cliente não encontrado" });
+                return NotFound(new { message = "Vessel/Frota não encontrado" });
             }
 
             _context.Clientes.Remove(cliente);
@@ -243,7 +243,7 @@ public class ClienteController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Erro ao deletar cliente");
-            return StatusCode(500, new { message = "Erro ao deletar cliente" });
+            return StatusCode(500, new { message = "Erro ao excluir o vessel/frota" });
         }
     }
 }

@@ -78,10 +78,10 @@ const Clientes = () => {
             .join('\n')
           alert(`Erros de validação:\n${errorMessages}`)
         } else {
-          alert(error.response.data?.message || 'Erro ao salvar cliente')
+          alert(error.response.data?.message || 'Erro ao salvar vessel/frota')
         }
       } else {
-        const message = error.response?.data?.message || 'Erro ao salvar cliente'
+        const message = error.response?.data?.message || 'Erro ao salvar vessel/frota'
         alert(message)
       }
     }
@@ -100,7 +100,7 @@ const Clientes = () => {
 
   const handleDelete = async (id: number, e: React.MouseEvent) => {
     e.stopPropagation()
-    if (!confirm('Tem certeza que deseja excluir este cliente?')) {
+    if (!confirm('Tem certeza que deseja excluir este vessel/frota?')) {
       return
     }
 
@@ -109,7 +109,7 @@ const Clientes = () => {
       await loadClientes()
     } catch (error: any) {
       console.error('Erro ao excluir cliente:', error)
-      const message = error.response?.data?.message || 'Erro ao excluir cliente'
+      const message = error.response?.data?.message || 'Erro ao excluir vessel/frota'
       alert(message)
     }
   }
@@ -135,7 +135,7 @@ const Clientes = () => {
     return (
       <div className="clientes">
         <div className="page-header">
-          <h1>Cadastro de Clientes</h1>
+          <h1>Cadastro de Vessel/Frota</h1>
         </div>
         <div className="clientes-card">
           <p>Carregando...</p>
@@ -148,12 +148,12 @@ const Clientes = () => {
     <div className="clientes">
       <div className="page-header">
         <div>
-          <h1>Cadastro de Clientes</h1>
-          <p className="page-subtitle">Gerenciamento de clientes do sistema</p>
+          <h1>Cadastro de Vessel/Frota</h1>
+          <p className="page-subtitle">Gerenciamento dos vessels/frotas do sistema</p>
         </div>
         {isAdmin && (
           <button className="btn btn-primary" onClick={handleNew}>
-            ➕ Novo Cliente
+            ➕ Novo Vessel/Frota
           </button>
         )}
       </div>
@@ -173,7 +173,7 @@ const Clientes = () => {
             <thead>
               <tr>
                 <th>ID</th>
-                <th>Nome</th>
+                <th>Vessel/Frota</th>
                 <th>CNPJ</th>
                 <th>Contato</th>
                 <th>Email</th>
@@ -225,7 +225,7 @@ const Clientes = () => {
         <div className="modal-overlay" onClick={() => setShowModal(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h2>{editingId === null ? 'Novo Cliente' : 'Editar Cliente'}</h2>
+              <h2>{editingId === null ? 'Novo Vessel/Frota' : 'Editar Vessel/Frota'}</h2>
               <button className="modal-close" onClick={() => {
                 setShowModal(false)
                 setEditingId(null)
@@ -233,7 +233,7 @@ const Clientes = () => {
             </div>
             <form onSubmit={handleSubmit} className="modal-form">
               <div className="form-group">
-                <label>Nome da Empresa</label>
+                <label>Nome do Vessel/Frota</label>
                 <input 
                   type="text" 
                   required

@@ -446,7 +446,7 @@ const Layout = ({ children }: LayoutProps) => {
                 className={`nav-item ${isActive('/clientes') ? 'active' : ''}`}
               >
                 <span className="nav-icon">👥</span>
-                Clientes
+                Vessel/Frota
               </Link>
             )}
           {podeOperar && (

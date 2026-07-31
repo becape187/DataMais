@@ -42,7 +42,6 @@ interface EnsaioAberto {
   numero: string
   status: 'EmAndamento' | 'AguardandoAceite' | 'Aceito' | 'Cancelado'
   dataCriacao: string
-  vessel: string | null
   localTeste: string | null
   departamento: string | null
   ordemServico: string | null
@@ -161,8 +160,8 @@ const Ensaio = () => {
   const [clienteId, setClienteId] = useState<number | ''>('')
   const [cilindroId, setCilindroId] = useState<number | ''>('')
 
-  // Identificação do documento — preenchida uma vez, no passo 1
-  const [vessel, setVessel] = useState('')
+  // Identificação do documento — preenchida uma vez, no passo 1.
+  // Vessel/Frota não entra aqui: é o próprio cadastro escolhido acima (tabela Clientes).
   const [localTeste, setLocalTeste] = useState('')
   const [departamento, setDepartamento] = useState('')
   const [ordemServico, setOrdemServico] = useState('')
@@ -457,7 +456,7 @@ const Ensaio = () => {
     setErro(null)
 
     if (clienteId === '' || cilindroId === '') {
-      setErro('Selecione o cliente e o cilindro que serão ensaiados.')
+      setErro('Selecione o vessel/frota e o cilindro que serão ensaiados.')
       return
     }
 
@@ -467,7 +466,6 @@ const Ensaio = () => {
       const { data } = await api.post('/ensaio', {
         clienteId,
         cilindroId,
-        vessel: vessel || null,
         localTeste: localTeste || null,
         departamento: departamento || null,
         ordemServico: ordemServico || null,
@@ -715,13 +713,13 @@ const Ensaio = () => {
           </p>
           <div className="ensaio-form-grid">
             <div className="config-field">
-              <label htmlFor="cliente">Cliente *</label>
+              <label htmlFor="cliente">Vessel/Frota *</label>
               <select
                 id="cliente"
                 value={clienteId}
                 onChange={e => setClienteId(e.target.value ? Number(e.target.value) : '')}
               >
-                <option value="">Selecione o cliente…</option>
+                <option value="">Selecione o vessel/frota…</option>
                 {clientes.map(c => (
                   <option key={c.id} value={c.id}>{c.nome}</option>
                 ))}
@@ -736,7 +734,7 @@ const Ensaio = () => {
                 disabled={clienteId === ''}
               >
                 <option value="">
-                  {clienteId === '' ? 'Escolha o cliente primeiro' : 'Selecione o cilindro…'}
+                  {clienteId === '' ? 'Escolha o vessel/frota primeiro' : 'Selecione o cilindro…'}
                 </option>
                 {cilindros.map(c => (
                   <option key={c.id} value={c.id}>
@@ -744,10 +742,6 @@ const Ensaio = () => {
                   </option>
                 ))}
               </select>
-            </div>
-            <div className="config-field">
-              <label htmlFor="vessel">Vessel / Frota</label>
-              <input id="vessel" type="text" value={vessel} onChange={e => setVessel(e.target.value)} />
             </div>
             <div className="config-field">
               <label htmlFor="localTeste">Local do teste</label>
@@ -810,7 +804,7 @@ const Ensaio = () => {
         <>
           <div className="ensaio-identificacao">
             {[
-              ['Vessel / Frota', ensaio.vessel],
+              ['Vessel/Frota', ensaio.clienteNome],
               ['Local', ensaio.localTeste],
               ['Departamento', ensaio.departamento],
               ['Ordem de serviço', ensaio.ordemServico],
@@ -1019,44 +1013,31 @@ const Ensaio = () => {
               <span className="stat-mini-label">Pontos Coletados</span>
               <span className="stat-mini-value">{totalPontosColetados}</span>
             </div>
-            {/* Estado REAL dos sinais do CLP, lido pelo monitor do backend — é a
-                conferência de que a leitura Modbus está funcionando */}
-            <div className="stat-mini">
-              <span className="stat-mini-label">REGISTRO_RODANDO</span>
-              {(() => {
-                const s = descreverSinal(sinaisClp?.registroRodando, agoraCorrigido)
-                return (
-                  <span
-                    className={`stat-mini-value ${s.classe}`}
-                    title={sinaisClp?.registroRodando?.erro ?? undefined}
-                  >
-                    {s.texto}
+          </div>
+
+          {/* Estado REAL dos sinais do CLP, lido pelo monitor do backend — é a conferência
+              de que a leitura Modbus está funcionando. Fica numa faixa fina: como card
+              grande, empurrava o gráfico para fora da tela. */}
+          <div className="sinais-clp-faixa">
+            {(() => {
+              const rodando = descreverSinal(sinaisClp?.registroRodando, agoraCorrigido)
+              const contagem = descreverSinal(sinaisClp?.iniciaContagem, agoraCorrigido)
+              return (
+                <>
+                  <span className={`sinal-item ${rodando.classe}`} title={sinaisClp?.registroRodando?.erro ?? undefined}>
+                    {rodando.texto} REGISTRO_RODANDO
                   </span>
-                )
-              })()}
-            </div>
-            <div className="stat-mini">
-              <span className="stat-mini-label">INICIA_CONTAGEM</span>
-              {(() => {
-                const s = descreverSinal(sinaisClp?.iniciaContagem, agoraCorrigido)
-                return (
-                  <span
-                    className={`stat-mini-value ${s.classe}`}
-                    title={sinaisClp?.iniciaContagem?.erro ?? undefined}
-                  >
-                    {s.texto}
+                  <span className={`sinal-item ${contagem.classe}`} title={sinaisClp?.iniciaContagem?.erro ?? undefined}>
+                    {contagem.texto} INICIA_CONTAGEM
                   </span>
-                )
-              })()}
-            </div>
-            <div className="stat-mini">
-              <span className="stat-mini-label">Registro</span>
-              <span className={`stat-mini-value ${etapaAtiva ? 'status-active' : 'status-inactive'}`}>
-                {etapaAtiva
-                  ? `● Câmara ${etapaAtiva.camara} · ${contando ? 'contando' : 'rampa'}`
-                  : '○ Parado'}
-              </span>
-            </div>
+                  <span className={`sinal-item ${etapaAtiva ? 'status-active' : 'status-inactive'}`}>
+                    {etapaAtiva
+                      ? `● Câmara ${etapaAtiva.camara} · ${contando ? 'contando' : 'rampa'}`
+                      : '○ Registro parado'}
+                  </span>
+                </>
+              )
+            })()}
           </div>
 
           <div className="ensaio-main-content">

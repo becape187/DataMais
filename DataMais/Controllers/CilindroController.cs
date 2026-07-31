@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Authorization;
+﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System.ComponentModel.DataAnnotations;
@@ -44,7 +44,7 @@ public class CilindroController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Erro ao obter cilindros do cliente");
-            return StatusCode(500, new { message = "Erro ao obter cilindros do cliente" });
+            return StatusCode(500, new { message = "Erro ao obter cilindros do vessel/frota" });
         }
     }
 
@@ -153,7 +153,7 @@ public class CilindroController : ControllerBase
             if (dto.ClienteId == 0)
             {
                 _logger.LogWarning("ClienteId é zero ou não foi fornecido");
-                return BadRequest(new { message = "ClienteId é obrigatório e deve ser um valor válido" });
+                return BadRequest(new { message = "O vessel/frota é obrigatório e deve ser um valor válido" });
             }
 
             // Verificar se cliente existe
@@ -162,7 +162,7 @@ public class CilindroController : ControllerBase
             
             if (!clienteExiste)
             {
-                return BadRequest(new { message = $"Cliente com ID {dto.ClienteId} não encontrado" });
+                return BadRequest(new { message = $"Vessel/Frota com ID {dto.ClienteId} não encontrado" });
             }
 
             // Verificar se código interno já existe
@@ -181,7 +181,7 @@ public class CilindroController : ControllerBase
             
             if (codigoClienteExiste)
             {
-                return Conflict(new { message = "Código cliente já cadastrado para este cliente" });
+                return Conflict(new { message = "Tag / ID já cadastrada para este vessel/frota" });
             }
 
             // Criar o objeto Cilindro a partir do DTO
@@ -297,7 +297,7 @@ public class CilindroController : ControllerBase
                 
                 if (codigoClienteExiste)
                 {
-                    return Conflict(new { message = "Código cliente já cadastrado para este cliente" });
+                    return Conflict(new { message = "Tag / ID já cadastrada para este vessel/frota" });
                 }
             }
 
@@ -309,7 +309,7 @@ public class CilindroController : ControllerBase
                 
                 if (!clienteExiste)
                 {
-                    return BadRequest(new { message = "Cliente não encontrado" });
+                    return BadRequest(new { message = "Vessel/Frota não encontrado" });
                 }
             }
 

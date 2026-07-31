@@ -10,7 +10,6 @@ interface Relatorio {
   clienteId: number
   data: string
   ensaioId: number | null
-  ensaioNumero?: string | null
   cilindroId: number | null
   cilindroNome: string
   status: 'gerado' | 'pendente'
@@ -110,7 +109,6 @@ const Relatorios = () => {
             clienteId: r.clienteId,
             data: new Date(r.data).toLocaleString('pt-BR'),
             ensaioId: r.ensaioId ?? null,
-            ensaioNumero: r.ensaioNumero ?? null,
             cilindroId: r.cilindroId,
             cilindroNome: r.cilindroNome || '',
             status: 'gerado',
@@ -131,7 +129,6 @@ const Relatorios = () => {
             clienteId: r.clienteId,
             data: new Date(r.data).toLocaleString('pt-BR'),
             ensaioId: r.ensaioId ?? null,
-            ensaioNumero: r.ensaioNumero ?? null,
             cilindroId: r.cilindroId,
             cilindroNome: r.cilindroNome || '',
             status: 'gerado',
@@ -165,7 +162,6 @@ const Relatorios = () => {
             clienteId: r.clienteId,
             data: new Date(r.data).toLocaleString('pt-BR'),
             ensaioId: r.ensaioId ?? null,
-            ensaioNumero: r.ensaioNumero ?? null,
             cilindroId: r.cilindroId,
             cilindroNome: r.cilindroNome || '',
             status: 'gerado',
@@ -179,7 +175,6 @@ const Relatorios = () => {
             clienteId: r.clienteId,
             data: new Date(r.data).toLocaleString('pt-BR'),
             ensaioId: r.ensaioId ?? null,
-            ensaioNumero: r.ensaioNumero ?? null,
             cilindroId: r.cilindroId,
             cilindroNome: r.cilindroNome || '',
             status: 'gerado',
@@ -218,7 +213,7 @@ const Relatorios = () => {
       <div className="page-header">
         <div>
           <h1>Repositório de Relatórios</h1>
-          <p className="page-subtitle">Acesse e visualize os relatórios de ensaios por cliente</p>
+          <p className="page-subtitle">Acesse e visualize os relatórios de ensaios por vessel/frota</p>
         </div>
       </div>
 
@@ -227,7 +222,7 @@ const Relatorios = () => {
         <h3 style={{ marginTop: 0, marginBottom: '16px' }}>Filtros</h3>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
           <div>
-            <label style={{ display: 'block', marginBottom: '4px', fontSize: '14px', fontWeight: 500 }}>Cliente</label>
+            <label style={{ display: 'block', marginBottom: '4px', fontSize: '14px', fontWeight: 500 }}>Vessel/Frota</label>
             <select
               value={filtroCliente || ''}
               onChange={(e) => {
@@ -304,8 +299,7 @@ const Relatorios = () => {
               <thead>
                 <tr>
                   <th>Número</th>
-                  <th>Cliente</th>
-                  <th>Ensaio</th>
+                  <th>Vessel/Frota</th>
                   <th>Data</th>
                   <th>Status</th>
                   <th>Ações</th>
@@ -314,13 +308,13 @@ const Relatorios = () => {
               <tbody>
                 {loading ? (
                   <tr>
-                    <td colSpan={6} style={{ textAlign: 'center', padding: '16px' }}>
+                    <td colSpan={5} style={{ textAlign: 'center', padding: '16px' }}>
                       Carregando relatórios...
                     </td>
                   </tr>
                 ) : relatorios.length === 0 ? (
                   <tr>
-                    <td colSpan={6} style={{ textAlign: 'center', padding: '16px' }}>
+                    <td colSpan={5} style={{ textAlign: 'center', padding: '16px' }}>
                       Nenhum relatório encontrado
                     </td>
                   </tr>
@@ -331,11 +325,6 @@ const Relatorios = () => {
                         <strong>{relatorio.numero}</strong>
                       </td>
                       <td>{relatorio.cliente}</td>
-                      <td>
-                        <span className="ensaio-badge">
-                          {relatorio.ensaioNumero || (relatorio.ensaioId ? `#${relatorio.ensaioId}` : '-')}
-                        </span>
-                      </td>
                       <td>{relatorio.data}</td>
                       <td>
                         <span className={`status-badge ${relatorio.status}`}>
@@ -382,7 +371,7 @@ const Relatorios = () => {
         </div>
 
         <div className="relatorios-por-cliente">
-          <h2>Relatórios por Cliente</h2>
+          <h2>Relatórios por Vessel/Frota</h2>
           <div className="clientes-grid">
             {clientesUnicos.map((cliente) => {
               const rels = relatoriosPorCliente[cliente]

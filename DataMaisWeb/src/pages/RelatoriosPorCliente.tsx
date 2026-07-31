@@ -10,7 +10,6 @@ interface Relatorio {
   clienteId: number
   data: string
   ensaioId: number | null
-  ensaioNumero?: string | null
   cilindroId: number | null
   cilindroNome: string
   status: 'gerado' | 'pendente'
@@ -109,7 +108,6 @@ const RelatoriosPorCliente = () => {
             clienteId: r.clienteId,
             data: new Date(r.data).toLocaleString('pt-BR'),
             ensaioId: r.ensaioId ?? null,
-            ensaioNumero: r.ensaioNumero ?? null,
             cilindroId: r.cilindroId,
             cilindroNome: r.cilindroNome || '',
             status: 'gerado',
@@ -153,7 +151,7 @@ const RelatoriosPorCliente = () => {
         <div>
           <Link to="/relatorios" className="back-link">← Voltar para Relatórios</Link>
           <h1>Relatórios - {cliente.nome}</h1>
-          <p className="page-subtitle">Visualize todos os relatórios deste cliente</p>
+          <p className="page-subtitle">Visualize todos os relatórios deste vessel/frota</p>
         </div>
       </div>
 
@@ -215,14 +213,13 @@ const RelatoriosPorCliente = () => {
 
       <div className="relatorios-content">
         <div className="relatorios-recentes">
-          <h2>Relatórios do Cliente</h2>
+          <h2>Relatórios do Vessel/Frota</h2>
           <div className="relatorios-table-container">
             <table className="relatorios-table">
               <thead>
                 <tr>
                   <th>Número</th>
                   <th>Cilindro</th>
-                  <th>Ensaio</th>
                   <th>Data</th>
                   <th>Status</th>
                   <th>Ações</th>
@@ -231,13 +228,13 @@ const RelatoriosPorCliente = () => {
               <tbody>
                 {loading ? (
                   <tr>
-                    <td colSpan={6} style={{ textAlign: 'center', padding: '16px' }}>
+                    <td colSpan={5} style={{ textAlign: 'center', padding: '16px' }}>
                       Carregando relatórios...
                     </td>
                   </tr>
                 ) : relatorios.length === 0 ? (
                   <tr>
-                    <td colSpan={6} style={{ textAlign: 'center', padding: '16px' }}>
+                    <td colSpan={5} style={{ textAlign: 'center', padding: '16px' }}>
                       Nenhum relatório encontrado
                     </td>
                   </tr>
@@ -248,11 +245,6 @@ const RelatoriosPorCliente = () => {
                         <strong>{relatorio.numero}</strong>
                       </td>
                       <td>{relatorio.cilindroNome || '-'}</td>
-                      <td>
-                        <span className="ensaio-badge">
-                          {relatorio.ensaioNumero || (relatorio.ensaioId ? `#${relatorio.ensaioId}` : '-')}
-                        </span>
-                      </td>
                       <td>{relatorio.data}</td>
                       <td>
                         <span className={`status-badge ${relatorio.status}`}>

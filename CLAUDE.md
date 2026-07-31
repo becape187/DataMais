@@ -105,8 +105,10 @@ Onde fica:
 
 `Cliente` 1—N `Cilindro` 1—N `Ensaio` 1—N `EnsaioEtapa`, e `Ensaio` 1—1 `Relatorio` (na prática: um laudo por ensaio aceito). Resumo dos centrais:
 
+> **`Cliente` é o Vessel/Frota.** A MODEC não tem clientes externos — na interface inteira (menu, telas, laudo) a entidade se chama **Vessel/Frota**; "cliente" sobrevive só em tabela, FK, rota e campo JSON. Ao mexer em texto visível, use Vessel/Frota; ao mexer em código, `Cliente` continua sendo o nome.
+
 - **Cilindro** — equipamento sob teste. Tem duas câmaras (A/B) com parâmetros próprios de ensaio: `MaximaPressaoA/B`, `PreCargaA/B`, `CargaNominalA/B`, tempos de rampa/duração, e percentuais de processo: `PercentualVariacaoAlarmeA/B`, `HistereseAlarmeA/B`, `PercentualVariacaoDesligaProcessoA/B` (estes regem alarme/desligamento durante o ensaio, distintos do critério de 5% do laudo).
-- **Ensaio** — cabeçalho do teste num cilindro: identificação do documento (`Vessel`, `LocalTeste`, `Departamento`, `OrdemServico`) e `Status`. Ver seção de ciclo de vida acima.
+- **Ensaio** — cabeçalho do teste num cilindro: identificação do documento (`LocalTeste`, `Departamento`, `OrdemServico`) e `Status`. Ver seção de ciclo de vida acima. `Ensaio.Vessel` está **depreciado** (texto livre que duplicava o cadastro): a coluna fica para os ensaios antigos, não é mais escrita nem exibida. `Ensaio.Numero` (`ENSAIO-20260731-163555`) é identificador interno — **não aparece em tela nem no laudo**; o número do documento é o REH-MPR.
 - **EnsaioEtapa** — uma corrida numa câmara: `Camara` (A/B), `Tentativa`, `Status`, janela `DataInicio`/`DataFim`, `PressaoCargaConfigurada` (setpoint) e `TempoCargaConfigurado`. Único por `(EnsaioId, Camara, Tentativa)`.
 - **Relatorio** — laudo de um ensaio, criado no aceite. Numeração `REH-MPR-0000001-2026` via `NumeroRelatorioService` (UPSERT atômico em `ContadorRelatorio`, sequencial reinicia a cada ano). Tem `RespostaCampoRelatorio` (respostas a `CampoRelatorio`, campos configuráveis tipo "SimOuNao" etc.) — o checklist é **do ensaio**, respondido uma vez e valendo para as duas câmaras.
 - **Sensor** / **ModbusConfig** — ver seções acima.

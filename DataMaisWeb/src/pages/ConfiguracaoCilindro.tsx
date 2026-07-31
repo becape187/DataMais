@@ -111,7 +111,7 @@ const ConfiguracaoCilindro = () => {
         return
       }
       if (!formData.codigoCliente || !formData.codigoCliente.trim()) {
-        alert('O campo Código Cliente é obrigatório')
+        alert('O campo Tag / ID é obrigatório')
         return
       }
       if (!formData.codigoInterno || !formData.codigoInterno.trim()) {
@@ -127,13 +127,13 @@ const ConfiguracaoCilindro = () => {
         return
       }
       if (!clienteId) {
-        alert('Cliente não identificado')
+        alert('Vessel/Frota não identificado')
         return
       }
 
       const clienteIdNum = Number(clienteId)
       if (isNaN(clienteIdNum) || clienteIdNum === 0) {
-        alert('Erro: Cliente ID inválido. Por favor, recarregue a página e tente novamente.')
+        alert('Erro: vessel/frota inválido. Por favor, recarregue a página e tente novamente.')
         return
       }
 
