@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, useNavigate, Link } from 'react-router-dom'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import * as XLSX from 'xlsx'
 import jsPDF from 'jspdf'
@@ -98,7 +98,8 @@ interface DataPoint {
 
 const VisualizarRelatorio = () => {
   const { id } = useParams<{ id: string }>()
-  const { podeOperar } = useAuth()
+  const navigate = useNavigate()
+  const { podeOperar, isAdmin } = useAuth()
   const [relatorio, setRelatorio] = useState<RelatorioDetalhe | null>(null)
   const [loading, setLoading] = useState(true)
   const [seriesEtapas, setSeriesEtapas] = useState<SerieEtapa[]>([])
@@ -106,6 +107,8 @@ const VisualizarRelatorio = () => {
   const [respostasCampos, setRespostasCampos] = useState<Record<number, string>>({})
   const [versoes, setVersoes] = useState<VersaoHistorico[]>([])
   const [concluindo, setConcluindo] = useState(false)
+  const [modalExcluir, setModalExcluir] = useState(false)
+  const [excluindo, setExcluindo] = useState(false)
   const relatorioContainerRef = useRef<HTMLDivElement>(null)
 
   const concluido = relatorio?.situacao === 'Concluido'
@@ -278,6 +281,21 @@ const VisualizarRelatorio = () => {
       alert(err.response?.data?.message || 'Erro ao concluir relatório')
     } finally {
       setConcluindo(false)
+    }
+  }
+
+  const excluirRelatorio = async () => {
+    if (!id) return
+
+    setExcluindo(true)
+
+    try {
+      await api.delete(`/Relatorio/${id}`)
+      navigate('/relatorios', { replace: true })
+    } catch (err: any) {
+      alert(err.response?.data?.message || 'Erro ao excluir o laudo')
+      setExcluindo(false)
+      setModalExcluir(false)
     }
   }
 
@@ -662,8 +680,42 @@ const VisualizarRelatorio = () => {
           >
             🖨️ Imprimir
           </button>
+          {/* Exclusão: só Admin e só rascunho — laudo assinado é documento emitido */}
+          {isAdmin && !concluido && (
+            <button
+              className="btn btn-excluir"
+              onClick={() => setModalExcluir(true)}
+              disabled={excluindo}
+            >
+              🗑 Excluir laudo
+            </button>
+          )}
         </div>
       </div>
+
+      {modalExcluir && relatorio && (
+        <div className="rel-modal-overlay" role="alertdialog" aria-modal="true" aria-labelledby="titulo-excluir-laudo">
+          <div className="rel-modal-card">
+            <h2 id="titulo-excluir-laudo">Excluir o laudo {relatorio.numero}?</h2>
+            <p>
+              O laudo e as respostas do checklist são apagados, o ensaio que o gerou é
+              descartado e as leituras de pressão dele saem do banco de dados. Não tem volta.
+            </p>
+            <p>
+              O número <strong>{relatorio.numero}</strong> não volta para o contador — a
+              sequência do ano fica com um buraco.
+            </p>
+            <div className="rel-modal-acoes">
+              <button className="btn btn-excluir" onClick={excluirRelatorio} disabled={excluindo}>
+                {excluindo ? 'Excluindo…' : 'Excluir laudo e descartar ensaio'}
+              </button>
+              <button className="btn btn-secondary" onClick={() => setModalExcluir(false)} disabled={excluindo}>
+                Voltar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="relatorio-container" ref={relatorioContainerRef}>
         <div className="relatorio-header-card">

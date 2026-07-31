@@ -78,8 +78,11 @@ GET  /ensaio/ativo · /ensaio/pendentes
 
 Pontos que não são óbvios pelo código:
 
-- **O laudo só nasce no aceite.** `RegistroConclusaoMonitor` (borda de descida do `REGISTRO_RODANDO`) fecha a **etapa**, não gera relatório. Ensaio descartado não consome número.
-- **Todas as etapas compartilham a tag `ensaioId` no Influx** — o que separa uma câmara da outra é a janela `[DataInicio, DataFim]` da etapa. Toda query de análise recorta por essa janela.
+- **O laudo só nasce no aceite.** `RegistroConclusaoMonitor` fecha a **etapa**, não gera relatório. Ensaio descartado não consome número.
+- **Três marcos de tempo, não um.** `DataInicio` é o clique do operador; `DataInicioContagem`/`DataFimContagem` são as bordas do `INICIA_CONTAGEM` lido do CLP (o patamar de teste, depois da rampa) e é essa a janela que o laudo analisa; `DataFim` é quando o monitor viu `REGISTRO_RODANDO` **e** `INICIA_CONTAGEM` desligados — só com os dois parados a etapa fecha.
+- **A partida é bloqueante.** `IniciarEtapa` só devolve sucesso depois de confirmar por leitura que o `REGISTRO_RODANDO` subiu (5 s de timeout); não subindo, a etapa é removida e os coils desligados. Antes disso, ainda bloqueia se qualquer câmara estiver com pressão residual ≥ 3 bar.
+- **Excluir laudo é `DELETE /relatorio/{id}`, só Admin e só em Rascunho.** Laudo `Concluido` (assinado) não pode ser excluído. A exclusão leva junto o ensaio (vai para `Cancelado`) e as leituras dele no Influx; o número REH-MPR **não** volta para o contador — a sequência do ano fica com um buraco, de propósito.
+- **Todas as etapas compartilham a tag `ensaioId` no Influx** — o que separa uma câmara da outra é a janela de tempo da etapa. Toda query de análise recorta por ela.
 - **Só a última tentativa concluída de cada câmara entra no laudo** (`EtapasValidas`); as anteriores ficam como histórico `Repetida`.
 - `Ensaio.CamaraTestada`/`PressaoCargaConfigurada`/`TempoCargaConfigurado` estão **depreciados** — existem só para os ensaios anteriores a este modelo, cujo backfill os copiou para a primeira etapa.
 
@@ -87,7 +90,7 @@ Pontos que não são óbvios pelo código:
 
 O veredito é **calculado on-the-fly** ao abrir o relatório — **não é persistido** em coluna (só no snapshot da versão assinada).
 
-Regra, por câmara: a partir do instante em que a câmara pressurizada **atinge o setpoint** (`EnsaioEtapa.PressaoCargaConfigurada`) pela primeira vez, mede-se o **pico da câmara OPOSTA**. Se esse pico ultrapassar `Cilindro.LimitePassagemCamaraA/B` (default 1 bar), o cilindro está dando passagem → **Reprovado**. As estatísticas da própria câmara (min/máx/média) são informativas: a pressão dela cai por vários motivos e não serve como critério.
+Regra, por câmara: a análise recorta a **janela de contagem do CLP** — `[EnsaioEtapa.DataInicioContagem, DataFimContagem]`, carimbada pelas bordas do sinal `INICIA_CONTAGEM` — e nela mede-se o **pico da câmara OPOSTA**. Ensaios anteriores a esse registro (sem `DataInicioContagem`) caem na regra antiga: t0 = primeiro instante em que a câmara pressurizada **atinge o setpoint** (`EnsaioEtapa.PressaoCargaConfigurada`). Se esse pico ultrapassar `Cilindro.LimitePassagemCamaraA/B` (default 1 bar), o cilindro está dando passagem → **Reprovado**. As estatísticas da própria câmara (min/máx/média) são informativas: a pressão dela cai por vários motivos e não serve como critério.
 
 Combinação: **uma câmara reprovada reprova o ensaio inteiro**; se nenhuma reprovou mas alguma não pôde ser avaliada, o resultado fica nulo (`-`). Qualquer campo de checklist `ReprovaSeSim` respondido "Sim" **sobrepõe tudo** e força Reprovado.
 

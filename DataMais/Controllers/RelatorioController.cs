@@ -315,6 +315,8 @@ public class RelatorioController : ControllerBase
         int Tentativa,
         DateTime DataInicio,
         DateTime? DataFim,
+        DateTime? DataInicioContagem,
+        DateTime? DataFimContagem,
         decimal PressaoCargaConfigurada,
         decimal TempoCargaConfigurado,
         double? PressaoMinima,
@@ -410,23 +412,51 @@ public class RelatorioController : ControllerBase
         var campoTestada = camara == "B" ? "pressaoB" : "pressaoA";
         var campoOposta = camara == "B" ? "pressaoA" : "pressaoB";
 
-        var from = etapa.DataInicio.ToUniversalTime().AddMinutes(-1);
-        var to = (etapa.DataFim ?? DateTime.UtcNow).ToUniversalTime().AddMinutes(1);
         var ensaioId = etapa.EnsaioId.ToString();
+
+        // Janela de contagem sinalizada pelo CLP (INICIA_CONTAGEM). Quando existe, ela
+        // é a fonte da verdade do patamar de teste: recorta exato, sem margem, para não
+        // pegar a rampa nem vazar para a etapa vizinha.
+        var contagemInicio = etapa.DataInicioContagem?.ToUniversalTime();
+        var contagemFim = (etapa.DataFimContagem ?? etapa.DataFim)?.ToUniversalTime();
+
+        var from = contagemInicio ?? etapa.DataInicio.ToUniversalTime().AddMinutes(-1);
+        var to = contagemInicio.HasValue
+            ? (contagemFim ?? DateTime.UtcNow)
+            : (etapa.DataFim ?? DateTime.UtcNow).ToUniversalTime().AddMinutes(1);
 
         var serieTestada = await FetchSeriePressaoAsync(queryApi, appConfig, ensaioId, campoTestada, from, to);
 
-        // A análise só começa quando a câmara atinge o setpoint pela primeira vez
-        var indiceT0 = serieTestada.FindIndex(p => p.pressao >= setpoint);
-        if (indiceT0 < 0)
+        DateTime t0;
+
+        if (contagemInicio.HasValue)
         {
-            _logger.LogWarning("Câmara {Camara} nunca atingiu o setpoint ({Setpoint}) na etapa {EtapaId}.",
-                camara, setpoint, etapa.Id);
-            return SemAnalise(etapa);
+            // O CLP disse quando a contagem começou — é esse o t0.
+            t0 = contagemInicio.Value;
+        }
+        else
+        {
+            // Ensaios anteriores ao INICIA_CONTAGEM: t0 é o primeiro ponto em que a
+            // câmara testada alcança o setpoint.
+            var indiceT0 = serieTestada.FindIndex(p => p.pressao >= setpoint);
+            if (indiceT0 < 0)
+            {
+                _logger.LogWarning("Câmara {Camara} nunca atingiu o setpoint ({Setpoint}) na etapa {EtapaId}.",
+                    camara, setpoint, etapa.Id);
+                return SemAnalise(etapa);
+            }
+
+            t0 = serieTestada[indiceT0].time;
         }
 
-        var t0 = serieTestada[indiceT0].time;
         var valoresTestada = serieTestada.Where(p => p.time >= t0).Select(p => p.pressao).ToList();
+
+        if (valoresTestada.Count == 0)
+        {
+            _logger.LogWarning("Nenhuma leitura da câmara {Camara} na janela de contagem da etapa {EtapaId}.",
+                camara, etapa.Id);
+            return SemAnalise(etapa);
+        }
 
         double? min = valoresTestada.Count > 0 ? valoresTestada.Min() : null;
         double? max = valoresTestada.Count > 0 ? valoresTestada.Max() : null;
@@ -444,12 +474,14 @@ public class RelatorioController : ControllerBase
 
         return new AnaliseEtapa(
             etapa.Id, camara, etapa.Tentativa, etapa.DataInicio, etapa.DataFim,
+            etapa.DataInicioContagem, etapa.DataFimContagem,
             etapa.PressaoCargaConfigurada, etapa.TempoCargaConfigurado,
             min, max, avg, maxOposta, limite, resultado);
     }
 
     private static AnaliseEtapa SemAnalise(EnsaioEtapa etapa) => new(
         etapa.Id, etapa.Camara, etapa.Tentativa, etapa.DataInicio, etapa.DataFim,
+        etapa.DataInicioContagem, etapa.DataFimContagem,
         etapa.PressaoCargaConfigurada, etapa.TempoCargaConfigurado,
         null, null, null, null, null, null);
 
@@ -759,6 +791,115 @@ public class RelatorioController : ControllerBase
             _logger.LogError(ex, "Erro ao concluir relatório {RelatorioId}", id);
             return StatusCode(500, new { message = "Erro ao concluir relatório", error = ex.Message });
         }
+    }
+
+    /// <summary>
+    /// Exclui um laudo em RASCUNHO e descarta o ensaio que o gerou: o ensaio vai para
+    /// Cancelado e as leituras dele saem do InfluxDB. Laudo já concluído (assinado) é
+    /// documento emitido e não pode ser excluído.
+    /// O número REH-MPR consumido NÃO volta para o contador — a sequência fica com um
+    /// buraco, e é assim de propósito: número emitido não é reaproveitado.
+    /// </summary>
+    [HttpDelete("{id:int}")]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> Excluir(int id)
+    {
+        try
+        {
+            var relatorio = await _context.Relatorios
+                .Include(r => r.Ensaio)
+                    .ThenInclude(e => e!.Etapas)
+                .FirstOrDefaultAsync(r => r.Id == id);
+
+            if (relatorio == null)
+            {
+                return NotFound(new { message = "Relatório não encontrado" });
+            }
+
+            if (relatorio.Situacao == "Concluido")
+            {
+                return Conflict(new
+                {
+                    message = $"O laudo {relatorio.Numero} está concluído e assinado — não pode ser excluído."
+                });
+            }
+
+            var numero = relatorio.Numero;
+            var ensaio = relatorio.Ensaio;
+            var agora = DateTime.UtcNow;
+
+            // As respostas dos campos e o histórico de versões saem por cascade
+            // (ver DataMaisDbContext.OnModelCreating).
+            _context.Relatorios.Remove(relatorio);
+
+            if (ensaio != null)
+            {
+                foreach (var etapa in ensaio.Etapas.Where(e => e.Status == StatusEtapa.EmExecucao))
+                {
+                    etapa.Status = StatusEtapa.Descartada;
+                    etapa.DataFim = agora;
+                    etapa.DataAtualizacao = agora;
+                }
+
+                ensaio.Status = StatusEnsaio.Cancelado;
+                ensaio.DataFim ??= agora;
+                ensaio.DataAtualizacao = agora;
+            }
+
+            await _context.SaveChangesAsync();
+
+            if (ensaio != null)
+            {
+                try
+                {
+                    await RemoverLeiturasInfluxAsync(ensaio.Id, ensaio.DataInicio ?? ensaio.DataCriacao, agora);
+                }
+                catch (Exception ex)
+                {
+                    // O laudo já saiu do banco: falhar aqui deixa lixo no Influx, não inconsistência.
+                    _logger.LogError(ex, "Erro ao remover leituras do ensaio {EnsaioId} após excluir o laudo {Numero}",
+                        ensaio.Id, numero);
+                }
+            }
+
+            _logger.LogWarning("Laudo {Numero} (id {RelatorioId}) excluído; ensaio {EnsaioId} cancelado.",
+                numero, id, ensaio?.Id);
+
+            return Ok(new
+            {
+                message = $"Laudo {numero} excluído e ensaio descartado.",
+                numero
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Erro ao excluir relatório {RelatorioId}", id);
+            return StatusCode(500, new { message = "Erro ao excluir relatório", error = ex.Message });
+        }
+    }
+
+    /// <summary>Remove as leituras do ensaio no InfluxDB (janela inteira do ensaio).</summary>
+    private async Task RemoverLeiturasInfluxAsync(int ensaioId, DateTime de, DateTime ate)
+    {
+        var appConfig = _configService.GetConfig();
+
+        if (!InfluxConfigurado(appConfig))
+        {
+            _logger.LogWarning("Configuração do InfluxDB incompleta. Não será possível remover leituras do ensaio {EnsaioId}.", ensaioId);
+            return;
+        }
+
+        var from = de.ToUniversalTime().AddMinutes(-1);
+        var to = ate.ToUniversalTime().AddMinutes(1);
+        var predicate = $"_measurement=\"ensaio_pressao\" AND ensaioId=\"{ensaioId}\"";
+
+        using var influxClient = new InfluxDBClient(appConfig.Influx.Url, appConfig.Influx.Token);
+        var deleteApi = influxClient.GetDeleteApi();
+
+        await deleteApi.Delete(from, to, predicate, appConfig.Influx.Bucket, appConfig.Influx.Organization);
+
+        _logger.LogInformation("Leituras do ensaio {EnsaioId} removidas do InfluxDB no intervalo {From} - {To}",
+            ensaioId, from, to);
     }
 
     /// <summary>Histórico de versões (conclusões/reaberturas) do relatório.</summary>

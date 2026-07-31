@@ -28,6 +28,9 @@ interface Etapa {
   status: 'EmExecucao' | 'Concluida' | 'Descartada' | 'Repetida'
   dataInicio: string
   dataFim: string | null
+  /** Quando o CLP ligou o INICIA_CONTAGEM — t0 real do teste. Null enquanto na rampa. */
+  dataInicioContagem: string | null
+  dataFimContagem: string | null
   pressaoCargaConfigurada: number
   tempoCargaConfigurado: number
 }
@@ -59,7 +62,42 @@ interface OpcaoCilindro {
   codigoCliente?: string | null
 }
 
+/** Estado das pressões da bancada com o ensaio parado — quem libera o início. */
+interface PressoesBancada {
+  pressaoA: number | null
+  pressaoB: number | null
+  limite: number
+  podeIniciar: boolean
+  impedimento: string | null
+}
+
+/** Recusa do backend em iniciar por cilindro ainda pressurizado. */
+interface BloqueioPressao {
+  mensagem: string
+  pressaoA: number | null
+  pressaoB: number | null
+  limite: number
+}
+
 const CAMARAS: Camara[] = ['A', 'B']
+
+const formatarBar = (valor: number | null | undefined) =>
+  valor == null ? '—' : `${valor.toFixed(2)} bar`
+
+/**
+ * Como o ensaio se apresenta na tela. O `numero` do ensaio (ENSAIO-20260731-134721) é
+ * só um identificador interno do cabeçalho — o número oficial é o REH-MPR, e ele só é
+ * queimado no aceite, para ensaio descartado não consumir sequencial. Mostrar o código
+ * cru fazia parecer que o padrão de numeração estava errado.
+ */
+const rotuloEnsaio = (ensaio: EnsaioAberto) =>
+  `Ensaio de ${new Date(ensaio.dataCriacao).toLocaleString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })}`
 
 /** Etapa que vale para o laudo: última tentativa concluída da câmara. */
 const etapaValida = (ensaio: EnsaioAberto | null, camara: Camara): Etapa | null => {
@@ -102,6 +140,12 @@ const Ensaio = () => {
   const [logEventos, setLogEventos] = useState<LogEvento[]>([])
   const [tempoAtual, setTempoAtual] = useState(Date.now())
 
+  const [pressoesBancada, setPressoesBancada] = useState<PressoesBancada | null>(null)
+  const [bloqueioPressao, setBloqueioPressao] = useState<BloqueioPressao | null>(null)
+
+  // Câmara aguardando o CLP confirmar a partida (REGISTRO_RODANDO) — segura o spinner
+  const [iniciando, setIniciando] = useState<Camara | null>(null)
+
   const [modalEncerrar, setModalEncerrar] = useState<Etapa | null>(null)
   const [modalCancelar, setModalCancelar] = useState(false)
   const [pendenteADescartar, setPendenteADescartar] = useState<EnsaioAberto | null>(null)
@@ -136,7 +180,7 @@ const Ensaio = () => {
         const { data } = await api.get('/ensaio/ativo')
         if (data?.ativo && data.ensaio) {
           setEnsaio(data.ensaio)
-          registrarLog(`Ensaio ${data.ensaio.numero} retomado`)
+          registrarLog(`${rotuloEnsaio(data.ensaio)} retomado`)
         } else {
           await carregarPendentes()
         }
@@ -260,6 +304,46 @@ const Ensaio = () => {
     }
   }, [ensaio, etapaAtiva])
 
+  // ── Pressão da bancada com tudo parado (2 s) ─────────────────────────────
+  // Enquanto nenhuma câmara roda, a coleta ao vivo não acontece. O operador ainda
+  // precisa enxergar a pressão residual: é ela que libera ou trava o início.
+  useEffect(() => {
+    if (etapaAtiva) {
+      setPressoesBancada(null)
+      return
+    }
+
+    const abortController = new AbortController()
+    let montado = true
+    let emVoo = false
+
+    const ler = async () => {
+      if (emVoo) return
+      emVoo = true
+
+      try {
+        const { data } = await api.get('/ensaio/pressoes', { signal: abortController.signal })
+        if (montado) setPressoesBancada(data)
+      } catch (err: any) {
+        if (err.name !== 'CanceledError' && err.code !== 'ERR_CANCELED' && montado) {
+          console.error('Erro ao ler pressões da bancada:', err)
+          setPressoesBancada(null)
+        }
+      } finally {
+        emVoo = false
+      }
+    }
+
+    ler()
+    const interval = setInterval(ler, 2000)
+
+    return () => {
+      montado = false
+      abortController.abort()
+      clearInterval(interval)
+    }
+  }, [etapaAtiva])
+
   // Cronômetro da etapa em execução
   useEffect(() => {
     if (!etapaAtiva) return
@@ -315,7 +399,7 @@ const Ensaio = () => {
       setEnsaio(data.ensaio)
       setDados([])
       setTotalPontosColetados(0)
-      registrarLog(`Ensaio ${data.ensaio.numero} criado — escolha por qual câmara começar`)
+      registrarLog(`${rotuloEnsaio(data.ensaio)} criado — escolha por qual câmara começar`)
 
       // Ao criar o ensaio o backend manda ao CLP os limites do cilindro e a calibração
       // dos sensores; se algo não foi enviado, o operador precisa saber antes de rodar.
@@ -336,7 +420,7 @@ const Ensaio = () => {
     setPendentes([])
     setDados([])
     setTotalPontosColetados(0)
-    registrarLog(`Ensaio ${pendente.numero} retomado`)
+    registrarLog(`${rotuloEnsaio(pendente)} retomado`)
   }
 
   const iniciarEtapa = async (camara: Camara) => {
@@ -358,8 +442,11 @@ const Ensaio = () => {
     }
 
     setOcupado(true)
+    setIniciando(camara)
 
     try {
+      // Pode demorar alguns segundos: o backend só responde depois de confirmar por
+      // leitura que o CLP está mesmo rodando.
       const { data } = await api.post(`/ensaio/${ensaio.id}/etapa`, {
         camara,
         pressaoCarga: pressao,
@@ -378,9 +465,22 @@ const Ensaio = () => {
     } catch (err: any) {
       console.error('Erro ao iniciar etapa:', err)
       const msg = mensagemDeErro(err, 'Erro ao iniciar a câmara')
-      setErro(msg)
       registrarLog(msg, 'desvio')
+
+      // Cilindro ainda pressurizado: modal bloqueante, não uma tarja que passa batido.
+      if (err?.response?.data?.bloqueioPressao) {
+        const dados = err.response.data
+        setBloqueioPressao({
+          mensagem: msg,
+          pressaoA: dados.pressaoA ?? null,
+          pressaoB: dados.pressaoB ?? null,
+          limite: dados.limite ?? 3,
+        })
+      } else {
+        setErro(msg)
+      }
     } finally {
+      setIniciando(null)
       setOcupado(false)
     }
   }
@@ -435,7 +535,7 @@ const Ensaio = () => {
 
     try {
       await api.post(`/ensaio/${ensaio.id}/cancelar`)
-      registrarLog(`Ensaio ${ensaio.numero} cancelado — nenhum relatório gerado`)
+      registrarLog(`${rotuloEnsaio(ensaio)} cancelado — nenhum relatório gerado`)
       setEnsaio(null)
       setDados([])
       setTotalPontosColetados(0)
@@ -459,7 +559,7 @@ const Ensaio = () => {
 
     try {
       await api.post(`/ensaio/${alvo.id}/cancelar`)
-      registrarLog(`Ensaio ${alvo.numero} descartado`)
+      registrarLog(`${rotuloEnsaio(alvo)} descartado`)
       await carregarPendentes()
     } catch (err: any) {
       console.error('Erro ao descartar ensaio pendente:', err)
@@ -477,6 +577,14 @@ const Ensaio = () => {
   const ultimaLeitura = dados.length > 0 ? dados[dados.length - 1] : null
   const decorrido = etapaAtiva
     ? (tempoAtual - new Date(etapaAtiva.dataInicio).getTime()) / 1000
+    : 0
+
+  // O que vale para o teste é a contagem do CLP (INICIA_CONTAGEM), não o clique:
+  // até ela subir, a bancada está na rampa.
+  const contando = etapaAtiva?.dataInicioContagem != null && etapaAtiva.dataFimContagem == null
+  const decorridoContagem = etapaAtiva?.dataInicioContagem
+    ? ((etapaAtiva.dataFimContagem ? new Date(etapaAtiva.dataFimContagem).getTime() : tempoAtual) -
+        new Date(etapaAtiva.dataInicioContagem).getTime()) / 1000
     : 0
 
   if (carregando) {
@@ -497,7 +605,7 @@ const Ensaio = () => {
           <h1>Ensaio Hidráulico</h1>
           <p className="page-subtitle">
             {ensaio
-              ? `${ensaio.numero} · ${ensaio.cilindroNome ?? 'cilindro'} · ${ensaio.clienteNome ?? ''}`
+              ? `${ensaio.cilindroNome ?? 'cilindro'} · ${ensaio.clienteNome ?? ''} — o número REH-MPR do laudo sai no aceite`
               : 'Cada ensaio testa as duas câmaras e gera um único relatório'}
           </p>
         </div>
@@ -586,7 +694,7 @@ const Ensaio = () => {
             {pendentes.map(p => (
               <li key={p.id} className="pendente-item">
                 <div>
-                  <strong>{p.numero}</strong>
+                  <strong>{rotuloEnsaio(p)}</strong>
                   <span className="pendente-detalhe">
                     {p.cilindroNome ?? 'cilindro'} · {p.ordemServico ? `OS ${p.ordemServico}` : 'sem OS'} ·{' '}
                     {p.status === 'AguardandoAceite'
@@ -631,6 +739,17 @@ const Ensaio = () => {
             ))}
           </div>
 
+          {/* Bancada pressurizada: avisa antes de o operador tentar iniciar */}
+          {pressoesBancada && !pressoesBancada.podeIniciar && (
+            <div className="ensaio-aviso" role="status">
+              <span>
+                {pressoesBancada.impedimento ??
+                  `Cilindro pressurizado — as duas câmaras precisam estar abaixo de ${pressoesBancada.limite} bar.`}
+                {' '}(A: {formatarBar(pressoesBancada.pressaoA)} · B: {formatarBar(pressoesBancada.pressaoB)})
+              </span>
+            </div>
+          )}
+
           <div className="camaras-grid">
             {CAMARAS.map(camara => {
               const rodando = etapaAtiva?.camara === camara
@@ -645,7 +764,13 @@ const Ensaio = () => {
                   <div className="camara-header">
                     <h2>Câmara {camara}</h2>
                     <span className="camara-estado">
-                      {rodando ? '● Rodando' : concluida ? '✔ Concluída' : '○ Não iniciada'}
+                      {rodando
+                        ? contando
+                          ? '● Contando'
+                          : '● Rampa — aguardando contagem'
+                        : concluida
+                          ? '✔ Concluída'
+                          : '○ Não iniciada'}
                     </span>
                   </div>
 
@@ -663,6 +788,14 @@ const Ensaio = () => {
                         <div>
                           <dt>Decorrido</dt>
                           <dd>{formatarDuracao(decorrido)}</dd>
+                        </div>
+                        <div>
+                          <dt>Contagem (CLP)</dt>
+                          <dd>
+                            {etapaAtiva.dataInicioContagem
+                              ? formatarDuracao(decorridoContagem)
+                              : 'aguardando'}
+                          </dd>
                         </div>
                       </dl>
                       {podeOperar && (
@@ -706,7 +839,13 @@ const Ensaio = () => {
                           disabled={ocupado || outraRodando}
                           title={outraRodando ? 'Encerre a outra câmara antes' : undefined}
                         >
-                          Repetir câmara {camara}
+                          {iniciando === camara ? (
+                            <>
+                              <span className="spinner" aria-hidden="true" /> Confirmando no CLP…
+                            </>
+                          ) : (
+                            `Repetir câmara ${camara}`
+                          )}
                         </button>
                       )}
                     </>
@@ -749,7 +888,13 @@ const Ensaio = () => {
                           disabled={ocupado || outraRodando}
                           title={outraRodando ? 'Encerre a outra câmara antes' : undefined}
                         >
-                          ▶ Iniciar câmara {camara}
+                          {iniciando === camara ? (
+                            <>
+                              <span className="spinner" aria-hidden="true" /> Confirmando no CLP…
+                            </>
+                          ) : (
+                            `▶ Iniciar câmara ${camara}`
+                          )}
                         </button>
                       )}
                     </>
@@ -782,13 +927,13 @@ const Ensaio = () => {
             <div className="stat-mini">
               <span className="stat-mini-label">Pressão A</span>
               <span className="stat-mini-value">
-                {ultimaLeitura?.pressaoA != null ? Math.round(ultimaLeitura.pressaoA) : 0} bar
+                {Math.round(ultimaLeitura?.pressaoA ?? pressoesBancada?.pressaoA ?? 0)} bar
               </span>
             </div>
             <div className="stat-mini">
               <span className="stat-mini-label">Pressão B</span>
               <span className="stat-mini-value">
-                {ultimaLeitura?.pressaoB != null ? Math.round(ultimaLeitura.pressaoB) : 0} bar
+                {Math.round(ultimaLeitura?.pressaoB ?? pressoesBancada?.pressaoB ?? 0)} bar
               </span>
             </div>
             <div className="stat-mini">
@@ -802,7 +947,9 @@ const Ensaio = () => {
             <div className="stat-mini">
               <span className="stat-mini-label">Registro</span>
               <span className={`stat-mini-value ${etapaAtiva ? 'status-active' : 'status-inactive'}`}>
-                {etapaAtiva ? `● Câmara ${etapaAtiva.camara}` : '○ Parado'}
+                {etapaAtiva
+                  ? `● Câmara ${etapaAtiva.camara} · ${contando ? 'contando' : 'rampa'}`
+                  : '○ Parado'}
               </span>
             </div>
           </div>
@@ -890,6 +1037,35 @@ const Ensaio = () => {
         </>
       )}
 
+      {/* Cilindro pressurizado — impede o início; sem ação possível além de aliviar */}
+      {bloqueioPressao && (
+        <div className="modal-overlay" role="alertdialog" aria-modal="true" aria-labelledby="titulo-bloqueio-pressao">
+          <div className="modal-card">
+            <h2 id="titulo-bloqueio-pressao">Não é possível iniciar o ensaio</h2>
+            <p>{bloqueioPressao.mensagem}</p>
+            <dl className="camara-dados">
+              <div>
+                <dt>Câmara A</dt>
+                <dd>{formatarBar(bloqueioPressao.pressaoA)}</dd>
+              </div>
+              <div>
+                <dt>Câmara B</dt>
+                <dd>{formatarBar(bloqueioPressao.pressaoB)}</dd>
+              </div>
+              <div>
+                <dt>Limite</dt>
+                <dd>abaixo de {bloqueioPressao.limite} bar</dd>
+              </div>
+            </dl>
+            <div className="modal-acoes">
+              <button className="btn btn-primary" onClick={() => setBloqueioPressao(null)}>
+                Entendi
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Encerrar câmara — três saídas explícitas, inclusive voltar sem fazer nada */}
       {modalEncerrar && (
         <div className="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="titulo-encerrar">
@@ -917,7 +1093,7 @@ const Ensaio = () => {
       {pendenteADescartar && (
         <div className="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="titulo-descartar">
           <div className="modal-card">
-            <h2 id="titulo-descartar">Descartar o ensaio {pendenteADescartar.numero}?</h2>
+            <h2 id="titulo-descartar">Descartar o {rotuloEnsaio(pendenteADescartar).toLowerCase()}?</h2>
             <p>
               As corridas já feitas são perdidas e as leituras apagadas. Nenhum relatório é
               gerado. Use para limpar ensaios que ficaram pela metade.
@@ -937,7 +1113,7 @@ const Ensaio = () => {
       {modalCancelar && ensaio && (
         <div className="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="titulo-cancelar">
           <div className="modal-card">
-            <h2 id="titulo-cancelar">Cancelar o ensaio {ensaio.numero}?</h2>
+            <h2 id="titulo-cancelar">Cancelar o {rotuloEnsaio(ensaio).toLowerCase()}?</h2>
             <p>
               As duas câmaras são descartadas e as leituras apagadas. Nenhum relatório é gerado
               e nenhum número é consumido.

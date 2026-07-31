@@ -21,6 +21,13 @@ namespace DataMais.Controllers;
 [Route("api/[controller]")]
 public class EnsaioController : ControllerBase
 {
+    /// <summary>
+    /// Pressão residual máxima admitida em QUALQUER uma das câmaras para liberar o
+    /// início de uma corrida. Acima disso o cilindro ainda está carregado: a câmara
+    /// oposta já começaria pressurizada e o critério de passagem não valeria nada.
+    /// </summary>
+    private const double PressaoMaximaParaIniciarBar = 3.0;
+
     private readonly DataMaisDbContext _context;
     private readonly ModbusService _modbusService;
     private readonly ConfigService _configService;
@@ -289,6 +296,27 @@ public class EnsaioController : ControllerBase
                 });
             }
 
+            // Trava de segurança: as DUAS câmaras precisam estar despressurizadas.
+            // Começar com pressão residual invalida o ensaio (o pico da câmara oposta
+            // é justamente o critério de passagem) e ainda arrisca o equipamento.
+            var pressoes = await LerPressoesDasCamarasAsync(ensaio.Id);
+            var impedimento = AvaliarPressaoParaInicio(pressoes);
+
+            if (impedimento != null)
+            {
+                _logger.LogWarning("Início da câmara {Camara} do ensaio {EnsaioId} bloqueado: {Motivo} (A={PressaoA}, B={PressaoB})",
+                    camara, id, impedimento, pressoes.A, pressoes.B);
+
+                return Conflict(new
+                {
+                    message = impedimento,
+                    bloqueioPressao = true,
+                    pressaoA = pressoes.A,
+                    pressaoB = pressoes.B,
+                    limite = PressaoMaximaParaIniciarBar
+                });
+            }
+
             var agora = DateTime.UtcNow;
             var proximaTentativa = ensaio.Etapas
                 .Where(e => e.Camara == camara)
@@ -391,6 +419,13 @@ public class EnsaioController : ControllerBase
             etapa.DataFim = agora;
             etapa.Status = salvar ? StatusEtapa.Concluida : StatusEtapa.Descartada;
             etapa.DataAtualizacao = agora;
+
+            // Parada manual no meio da contagem: fecha a janela aqui, senão o laudo
+            // analisaria daí até o fim dos dados.
+            if (etapa.DataInicioContagem != null && etapa.DataFimContagem == null)
+            {
+                etapa.DataFimContagem = agora;
+            }
 
             if (salvar)
             {
@@ -686,6 +721,35 @@ public class EnsaioController : ControllerBase
     }
 
     /// <summary>
+    /// Pressões atuais das duas câmaras, sem exigir etapa em execução e sem gravar no
+    /// Influx. A tela usa para mostrar o estado da bancada e avisar que o cilindro ainda
+    /// está pressurizado antes mesmo do operador tentar iniciar.
+    /// </summary>
+    [HttpGet("pressoes")]
+    public async Task<IActionResult> LerPressoesDaBancada()
+    {
+        try
+        {
+            var pressoes = await LerPressoesDasCamarasAsync(0);
+            var impedimento = AvaliarPressaoParaInicio(pressoes);
+
+            return Ok(new
+            {
+                pressaoA = pressoes.A,
+                pressaoB = pressoes.B,
+                limite = PressaoMaximaParaIniciarBar,
+                podeIniciar = impedimento == null,
+                impedimento
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Erro ao ler pressões da bancada");
+            return StatusCode(500, new { message = "Erro ao ler pressões da bancada", error = ex.Message });
+        }
+    }
+
+    /// <summary>
     /// Histórico de pressões do InfluxDB para reconstruir o gráfico ao reentrar na tela.
     /// Com <paramref name="etapaId"/>, recorta só a janela daquela câmara.
     /// </summary>
@@ -784,6 +848,8 @@ public class EnsaioController : ControllerBase
                 status = e.Status,
                 dataInicio = e.DataInicio,
                 dataFim = e.DataFim,
+                dataInicioContagem = e.DataInicioContagem,
+                dataFimContagem = e.DataFimContagem,
                 pressaoCargaConfigurada = e.PressaoCargaConfigurada,
                 tempoCargaConfigurado = e.TempoCargaConfigurado
             })
@@ -912,8 +978,19 @@ public class EnsaioController : ControllerBase
             // 3. Tempo de carga
             await EscreverParametroAsync("TEMPO_CARGA", tempoCarga, avisos);
 
-            // 4. Inicia o registro e confirma por REGISTRO_RODANDO
-            await LigarIniciaRegistroAsync(avisos);
+            // 4. Inicia o registro e confirma por REGISTRO_RODANDO. Não confirmar é FATAL:
+            //    sem o CLP rodando de fato, a etapa ficaria "em execução" na tela sem nada
+            //    acontecendo na bancada e sem ninguém para fechá-la.
+            var registroLigou = await LigarIniciaRegistroAsync(avisos);
+
+            if (!registroLigou)
+            {
+                await PararRegistroNoClpAsync("abortar etapa sem confirmação do REGISTRO_RODANDO");
+
+                return new ResultadoInicioClp(false,
+                    "o CLP não confirmou o REGISTRO_RODANDO. A bancada não começou a rodar — verifique a unidade hidráulica e tente de novo.",
+                    avisos);
+            }
         }
         catch (Exception ex)
         {
@@ -1037,7 +1114,11 @@ public class EnsaioController : ControllerBase
         }
     }
 
-    private async Task LigarIniciaRegistroAsync(List<string> avisos)
+    /// <summary>
+    /// Liga INICIA_REGISTRO e confirma por leitura do REGISTRO_RODANDO.
+    /// Retorna false se o CLP não confirmou que começou a rodar.
+    /// </summary>
+    private async Task<bool> LigarIniciaRegistroAsync(List<string> avisos)
     {
         var iniciaRegistro = await _context.ModbusConfigs
             .FirstOrDefaultAsync(m => m.Nome == "INICIA_REGISTRO" && m.Ativo);
@@ -1057,7 +1138,7 @@ public class EnsaioController : ControllerBase
 
         if (iniciaRegistro == null || registroRodando == null)
         {
-            return;
+            return false;
         }
 
         // INICIA_REGISTRO é coil de NÍVEL (não pulso): permanece LIGADO durante todo o
@@ -1065,12 +1146,14 @@ public class EnsaioController : ControllerBase
         if (!await _modbusService.EscreverRegistroAsync(ConfigParaEscrita(iniciaRegistro), true))
         {
             avisos.Add("Erro ao ativar INICIA_REGISTRO");
-            return;
+            return false;
         }
 
         await Task.Delay(300);
 
-        var timeout = TimeSpan.FromSeconds(2);
+        // 5 s: agora não confirmar ABORTA a etapa, então um falso negativo custa caro —
+        // vale esperar mais do que os 2 s de quando isso era só um aviso.
+        var timeout = TimeSpan.FromSeconds(5);
         var inicioVerificacao = DateTime.UtcNow;
         var tentativas = 0;
 
@@ -1087,7 +1170,7 @@ public class EnsaioController : ControllerBase
                 if (rodando)
                 {
                     _logger.LogInformation("REGISTRO_RODANDO confirmado após {Tentativas} tentativas", tentativas);
-                    return;
+                    return true;
                 }
             }
             catch (Exception ex)
@@ -1096,7 +1179,10 @@ public class EnsaioController : ControllerBase
             }
         }
 
-        avisos.Add("Registro não iniciou após 2 segundos. Verifique REGISTRO_RODANDO.");
+        _logger.LogWarning("REGISTRO_RODANDO não confirmou em {Timeout}s após {Tentativas} leituras",
+            timeout.TotalSeconds, tentativas);
+
+        return false;
     }
 
     /// <summary>
@@ -1266,6 +1352,50 @@ public class EnsaioController : ControllerBase
             _logger.LogWarning(ex, "Erro ao ler pressão {Camara} do Modbus para ensaio {EnsaioId}", camara, ensaioId);
             return null;
         }
+    }
+
+    private sealed record PressoesBancada(double? A, double? B);
+
+    /// <summary>Lê as duas câmaras de uma vez (só leitura — não grava no Influx).</summary>
+    private async Task<PressoesBancada> LerPressoesDasCamarasAsync(int ensaioId)
+    {
+        var registroA = await BuscarRegistroPressaoAsync("PRESSAO_A_CONV", "PRESSAO_A");
+        var registroB = await BuscarRegistroPressaoAsync("PRESSAO_B_CONV", "PRESSAO_B");
+
+        return new PressoesBancada(
+            await LerPressaoAsync(registroA, "A", ensaioId),
+            await LerPressaoAsync(registroB, "B", ensaioId));
+    }
+
+    /// <summary>
+    /// Motivo pelo qual a bancada NÃO pode iniciar uma corrida agora, ou null se pode.
+    /// Pressão que não pôde ser lida também bloqueia: sem confirmar que o cilindro está
+    /// aliviado, o certo é não começar.
+    /// </summary>
+    private static string? AvaliarPressaoParaInicio(PressoesBancada pressoes)
+    {
+        var naoLidas = new List<string>();
+        if (!pressoes.A.HasValue) naoLidas.Add("A");
+        if (!pressoes.B.HasValue) naoLidas.Add("B");
+
+        if (naoLidas.Count > 0)
+        {
+            return $"Não foi possível ler a pressão da câmara {string.Join(" e ", naoLidas)} no CLP. " +
+                   "Sem confirmar que o cilindro está aliviado, o ensaio não pode começar.";
+        }
+
+        var acima = new List<string>();
+        if (pressoes.A!.Value >= PressaoMaximaParaIniciarBar) acima.Add($"câmara A com {pressoes.A.Value:0.##} bar");
+        if (pressoes.B!.Value >= PressaoMaximaParaIniciarBar) acima.Add($"câmara B com {pressoes.B.Value:0.##} bar");
+
+        if (acima.Count > 0)
+        {
+            return $"O cilindro ainda está pressurizado ({string.Join(" e ", acima)}). " +
+                   $"As duas câmaras precisam estar abaixo de {PressaoMaximaParaIniciarBar:0.##} bar para iniciar o ensaio. " +
+                   "Alivie a pressão e tente de novo.";
+        }
+
+        return null;
     }
 
     // ── InfluxDB ────────────────────────────────────────────────────────────

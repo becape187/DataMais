@@ -9,6 +9,8 @@ namespace DataMais.Models;
 /// é uma nova etapa com <see cref="Tentativa"/> incrementada.
 /// A janela [DataInicio, DataFim] é o que recorta as leituras da etapa no InfluxDB,
 /// já que todas as etapas do ensaio compartilham a mesma tag <c>ensaioId</c>.
+/// Dentro dela, [DataInicioContagem, DataFimContagem] é o patamar de teste sinalizado
+/// pelo CLP — é essa janela menor que o laudo analisa.
 /// </summary>
 public class EnsaioEtapa
 {
@@ -35,6 +37,16 @@ public class EnsaioEtapa
     public DateTime DataInicio { get; set; }
 
     public DateTime? DataFim { get; set; }
+
+    /// <summary>
+    /// Instante em que o CLP ligou o INICIA_CONTAGEM — o começo real do patamar de teste,
+    /// depois da rampa. É o t0 da análise do laudo. Nulo enquanto o CLP não sinalizou
+    /// (e nos ensaios anteriores a este registro, que caem na regra antiga do setpoint).
+    /// </summary>
+    public DateTime? DataInicioContagem { get; set; }
+
+    /// <summary>Instante em que o INICIA_CONTAGEM caiu — fim do patamar de teste.</summary>
+    public DateTime? DataFimContagem { get; set; }
 
     /// <summary>Setpoint de pressão desta etapa (bar).</summary>
     [Column(TypeName = "decimal(10,2)")]

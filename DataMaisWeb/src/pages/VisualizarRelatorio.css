@@ -38,6 +38,73 @@
   cursor: not-allowed;
 }
 
+/* Exclusão do laudo: destrutiva e irreversível — nunca com cara de botão padrão */
+.btn-excluir {
+  background: transparent;
+  color: var(--danger);
+  border: 2px solid var(--danger);
+  padding: 8px 18px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-excluir:hover:not(:disabled) {
+  background: var(--danger);
+  color: var(--white);
+}
+
+.rel-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 1000;
+}
+
+.rel-modal-card {
+  background: var(--white);
+  border-radius: 12px;
+  padding: 28px;
+  width: 100%;
+  max-width: 520px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+}
+
+.rel-modal-card h2 {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--modec-navy);
+  margin: 0 0 12px;
+}
+
+.rel-modal-card p {
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin: 0 0 16px;
+}
+
+.rel-modal-acoes {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: 24px;
+}
+
+/* O modal não entra no PDF nem na impressão do laudo */
+@media print {
+  .rel-modal-overlay {
+    display: none;
+  }
+}
+
 .visualizar-relatorio .page-header {
   display: flex;
   justify-content: space-between;

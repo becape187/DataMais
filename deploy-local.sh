@@ -24,6 +24,13 @@
 #     EmAndamento, Pendente→Cancelado). O Down reverte os status mas APAGA as etapas.
 #     Por isso o dump do banco virou parte do deploy, e não uma sugestão.
 #
+# 📌 Release "janela de contagem" (migration AddJanelaContagemEnsaioEtapa):
+#     Adiciona EnsaioEtapas.DataInicioContagem/DataFimContagem (duas colunas nullable,
+#     sem backfill). O t0 do laudo passa a vir do sinal INICIA_CONTAGEM do CLP — que
+#     precisa estar CADASTRADO E ATIVO em ModbusConfigs, senão o sistema cai no
+#     comportamento antigo (t0 = primeiro ponto que atinge o setpoint) sem avisar.
+#     Este script confere as duas coisas no fim do deploy.
+#
 # USO:
 #   cd <pasta-do-repo-pullado>
 #   chmod +x deploy-local.sh
@@ -198,6 +205,57 @@ SELECT count(*) AS ensaios_sem_etapa
 FROM "Ensaios" e
 WHERE NOT EXISTS (SELECT 1 FROM "EnsaioEtapas" et WHERE et."EnsaioId" = e."Id");
 SQL
+
+  # ── Release "janela de contagem": colunas novas + registro do CLP ──────────
+  echo ""
+  echo "==> Conferindo a release da janela de contagem:"
+
+  COLUNAS="$(PGPASSWORD="${POSTGRES_PASSWORD:-}" psql -tAq \
+    -h "${POSTGRES_HOST:-localhost}" -p "${POSTGRES_PORT:-5432}" \
+    -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DATABASE:-datamais}" \
+    -c "SELECT count(*) FROM information_schema.columns
+        WHERE table_name = 'EnsaioEtapas'
+          AND column_name IN ('DataInicioContagem','DataFimContagem');" 2>/dev/null || echo "?")"
+
+  if [ "$COLUNAS" = "2" ]; then
+    echo "    ✓ EnsaioEtapas.DataInicioContagem/DataFimContagem criadas pela migration."
+  else
+    echo "    ❌ As colunas da janela de contagem NÃO estão no banco (encontradas: $COLUNAS de 2)."
+    echo "       A migration não aplicou. Veja o log do serviço acima antes de rodar ensaio."
+  fi
+
+  # O INICIA_CONTAGEM é cadastrado pela tela de Registros, não por seed — em uma VM
+  # nova (ou banco restaurado de backup antigo) ele simplesmente não existe.
+  CONTAGEM="$(PGPASSWORD="${POSTGRES_PASSWORD:-}" psql -tAq \
+    -h "${POSTGRES_HOST:-localhost}" -p "${POSTGRES_PORT:-5432}" \
+    -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DATABASE:-datamais}" \
+    -c "SELECT count(*) FROM \"ModbusConfigs\"
+        WHERE \"Nome\" = 'INICIA_CONTAGEM' AND \"Ativo\" = true;" 2>/dev/null || echo "?")"
+
+  if [ "${CONTAGEM:-0}" -ge 1 ] 2>/dev/null; then
+    echo "    ✓ Registro INICIA_CONTAGEM cadastrado e ativo."
+  else
+    echo "    ⚠️  INICIA_CONTAGEM não está cadastrado/ativo em ModbusConfigs."
+    echo "       Sem ele: o t0 do laudo cai na regra antiga (setpoint), a etapa fecha só"
+    echo "       pelo REGISTRO_RODANDO e a tela não mostra a contagem do CLP."
+    echo "       Cadastre em Configurações → Registros Modbus antes do próximo ensaio."
+  fi
+
+  # Sem o REGISTRO_RODANDO como ReadInputs, a partida da câmara agora ABORTA
+  # (o double-check virou bloqueante nesta release).
+  RODANDO="$(PGPASSWORD="${POSTGRES_PASSWORD:-}" psql -tAq \
+    -h "${POSTGRES_HOST:-localhost}" -p "${POSTGRES_PORT:-5432}" \
+    -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DATABASE:-datamais}" \
+    -c "SELECT count(*) FROM \"ModbusConfigs\"
+        WHERE \"Nome\" = 'REGISTRO_RODANDO' AND \"Ativo\" = true
+          AND \"FuncaoModbus\" = 'ReadInputs';" 2>/dev/null || echo "?")"
+
+  if [ "${RODANDO:-0}" -ge 1 ] 2>/dev/null; then
+    echo "    ✓ Registro REGISTRO_RODANDO (ReadInputs) cadastrado e ativo."
+  else
+    echo "    ❌ REGISTRO_RODANDO (ReadInputs) ausente/inativo — NENHUMA câmara vai iniciar."
+    echo "       A confirmação de partida virou bloqueante: sem esse registro a etapa é abortada."
+  fi
 fi
 
 # ── (--reset-admin) Força admin/admin no banco ──────────────────────────────
