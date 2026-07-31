@@ -31,18 +31,40 @@ public class EnsaioController : ControllerBase
     private readonly DataMaisDbContext _context;
     private readonly ModbusService _modbusService;
     private readonly ConfigService _configService;
+    private readonly EstadoSinaisClp _estadoSinais;
     private readonly ILogger<EnsaioController> _logger;
 
     public EnsaioController(
         DataMaisDbContext context,
         ModbusService modbusService,
         ConfigService configService,
+        EstadoSinaisClp estadoSinais,
         ILogger<EnsaioController> logger)
     {
         _context = context;
         _modbusService = modbusService;
         _configService = configService;
+        _estadoSinais = estadoSinais;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// Última leitura dos sinais de ciclo feita pelo monitor (cache — zero Modbus).
+    /// Vai junto nas respostas de polling para a tela mostrar o estado real do CLP.
+    /// </summary>
+    private object MontarSinaisClp()
+    {
+        // Captura CADA record uma única vez: o monitor troca a referência a ~1 Hz, e
+        // reler a propriedade por campo poderia misturar pedaços de duas leituras
+        // (ex.: ligado do publish antigo com erro do novo).
+        var rodando = _estadoSinais.RegistroRodando;
+        var contagem = _estadoSinais.IniciaContagem;
+
+        return new
+        {
+            registroRodando = new { ligado = rodando.Ligado, lidoEm = rodando.LidoEm, erro = rodando.Erro },
+            iniciaContagem = new { ligado = contagem.Ligado, lidoEm = contagem.LidoEm, erro = contagem.Erro }
+        };
     }
 
     // ── Consulta ────────────────────────────────────────────────────────────
@@ -667,7 +689,14 @@ public class EnsaioController : ControllerBase
 
             if (!pressaoA.HasValue && !pressaoB.HasValue)
             {
-                return StatusCode(500, new { message = "Falha ao ler pressões A e B do Modbus" });
+                // Mesmo sem pressões, os sinais vão no corpo do erro: é justamente com
+                // o CLP caindo que a tela mais precisa mostrar o estado real (e a idade)
+                // dos sinais, em vez de congelar no último valor bom.
+                return StatusCode(500, new
+                {
+                    message = "Falha ao ler pressões A e B do Modbus",
+                    sinais = MontarSinaisClp()
+                });
             }
 
             var timestamp = DateTime.UtcNow;
@@ -710,7 +739,8 @@ public class EnsaioController : ControllerBase
                 pressaoA,
                 pressaoB,
                 etapaId = etapaAtiva.Id,
-                camara = etapaAtiva.Camara
+                camara = etapaAtiva.Camara,
+                sinais = MontarSinaisClp()
             });
         }
         catch (Exception ex)
@@ -739,7 +769,8 @@ public class EnsaioController : ControllerBase
                 pressaoB = pressoes.B,
                 limite = PressaoMaximaParaIniciarBar,
                 podeIniciar = impedimento == null,
-                impedimento
+                impedimento,
+                sinais = MontarSinaisClp()
             });
         }
         catch (Exception ex)
@@ -773,7 +804,8 @@ public class EnsaioController : ControllerBase
                 bancadaParada,
                 camaraEmExecucao = etapaRodando?.Camara,
                 registroRodando = await DiagnosticarSinalAsync("REGISTRO_RODANDO", bancadaParada),
-                iniciaContagem = await DiagnosticarSinalAsync("INICIA_CONTAGEM", bancadaParada)
+                iniciaContagem = await DiagnosticarSinalAsync("INICIA_CONTAGEM", bancadaParada),
+                ultimaLeituraMonitor = MontarSinaisClp()
             });
         }
         catch (Exception ex)

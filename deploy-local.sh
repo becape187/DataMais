@@ -273,10 +273,16 @@ SQL
   fi
 
   echo ""
-  echo "    Confira ao vivo em: https://<host>/api/ensaio/sinais-clp"
-  echo "    Abra com a BANCADA PARADA: os dois sinais têm que aparecer ligado=false."
-  echo "    Se INICIA_CONTAGEM vier ligado=true com tudo parado, o endereço está errado —"
-  echo "    é isso que faz a contagem começar sozinha assim que a câmara arranca."
+  echo "    Conferência ao vivo — DUAS formas agora:"
+  echo "    1. A própria tela do Ensaio mostra REGISTRO_RODANDO e INICIA_CONTAGEM"
+  echo "       (● Ligado / ○ Desligado / ⚠ falha), atualizados pelo monitor do backend."
+  echo "       Com a bancada parada, os dois têm que estar ○ Desligado."
+  echo "    2. GET https://<host>/api/ensaio/sinais-clp (diagnóstico completo: valor"
+  echo "       bruto, tipo, erro e a última leitura do monitor)."
+  echo ""
+  echo "    Nesta release as transações Modbus passaram a ser SERIALIZADAS por conexão:"
+  echo "    era o monitor e o polling da tela dividindo o mesmo socket sem lock que"
+  echo "    corrompia as leituras (contagem ligando sozinha, etapa que não encerrava)."
 
   # Sem o REGISTRO_RODANDO como ReadInputs, a partida da câmara agora ABORTA
   # (o double-check virou bloqueante nesta release).

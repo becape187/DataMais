@@ -57,6 +57,8 @@ Services/         → ModbusService (conexões/leitura/escrita CLP), ConfigServi
 
 `ModbusService` (singleton) lê o CLP via Modbus TCP (`NModbus`). Cada registro a ler/escrever é uma linha de `ModbusConfig` no PostgreSQL (IP, porta, slaveId, função, endereço, tipo de dado, byte order, fator/offset). Conexões TCP são **mantidas abertas permanentemente** por IP:porta (o CLP não tolera múltiplas conexões) e reaproveitadas; só são recriadas quando inválidas. `ConverterValor` aplica tipo (UInt16/Int16/Int32/Float), byte order, fator de conversão e offset.
 
+**Toda transação Modbus é serializada por um `SemaphoreSlim` por conexão** (`ExecutarNaConexaoAsync`) — o `IModbusMaster` do NModbus não é thread-safe, e o monitor (1 Hz) mais o polling da tela (1 Hz) compartilham o mesmo socket. Sem isso, frames se entrelaçavam e a resposta de um discrete input era entregue ao outro (contagem "ligando sozinha", etapa que não encerrava). Regra: **nunca** chame `master.*`/`ObterOuCriarConexaoAsync` fora desse invólucro, e a remoção de conexão em falha acontece **dentro** do semáforo (nunca em cima de transação alheia).
+
 ### Calibração de sensor
 
 `Sensor` guarda uma **calibração linear de 2 pontos** (`InputMin/OutputMin`, `InputMax/OutputMax`): converte valor AD bruto → grandeza de engenharia por interpolação linear.

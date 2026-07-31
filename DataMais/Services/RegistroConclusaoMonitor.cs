@@ -20,25 +20,44 @@ public class RegistroConclusaoMonitor : BackgroundService
 {
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ModbusService _modbusService;
+    private readonly EstadoSinaisClp _estadoSinais;
     private readonly ILogger<RegistroConclusaoMonitor> _logger;
 
     // 1 s: o t0 do laudo sai daqui, então a resolução do polling é o erro do t0.
     private static readonly TimeSpan Intervalo = TimeSpan.FromSeconds(1);
 
     // Estado anterior dos sinais (para detectar as bordas). Null = ainda não observado.
+    // Chaveado por _etapaRastreadaId: trocar de etapa zera as bordas, senão a descida
+    // da etapa anterior "vazaria" e concluiria uma etapa recém-iniciada.
     private bool? _registroAnterior;
     private bool? _contagemAnterior;
+    private int? _etapaRastreadaId;
+
+    // Ciclos consecutivos com etapa aberta e REGISTRO_RODANDO desligado SEM borda
+    // observada. Cobre a descida perdida (ex.: deploy reiniciou o backend enquanto o
+    // CLP terminava o ciclo): o estado de borda vive só em memória, então sem isso a
+    // etapa ficaria presa em EmExecucao para sempre. É seguro concluir porque a
+    // partida só cria a etapa depois de confirmar REGISTRO_RODANDO=true no CLP.
+    private int _ciclosParadoSemBorda;
+    private const int CiclosParadoParaConcluir = 5;
 
     // Ciclos consecutivos em que a leitura do INICIA_CONTAGEM falhou (log throttled).
     private int _ciclosComFalhaNaContagem;
 
+    // Sem etapa ativa a leitura é só informativa (alimenta a tela); se o CLP está
+    // fora, espaça as tentativas em vez de martelar uma conexão morta a cada segundo.
+    private int _ciclo;
+    private bool _falhaOciosaRecente;
+
     public RegistroConclusaoMonitor(
         IServiceScopeFactory scopeFactory,
         ModbusService modbusService,
+        EstadoSinaisClp estadoSinais,
         ILogger<RegistroConclusaoMonitor> logger)
     {
         _scopeFactory = scopeFactory;
         _modbusService = modbusService;
+        _estadoSinais = estadoSinais;
         _logger = logger;
     }
 
@@ -71,7 +90,11 @@ public class RegistroConclusaoMonitor : BackgroundService
         using var scope = _scopeFactory.CreateScope();
         var context = scope.ServiceProvider.GetRequiredService<DataMaisDbContext>();
 
-        // Só há o que monitorar se existir uma etapa rodando agora
+        _ciclo++;
+
+        // A etapa em execução, se houver. O monitor lê os sinais SEMPRE — mesmo sem
+        // etapa — para a tela do ensaio mostrar o estado real do CLP; a lógica de
+        // bordas/conclusão continua valendo só com etapa ativa.
         var etapa = await context.EnsaioEtapas
             .Include(e => e.Ensaio)
                 .ThenInclude(en => en.Etapas)
@@ -81,10 +104,26 @@ public class RegistroConclusaoMonitor : BackgroundService
 
         if (etapa == null)
         {
-            // Reseta o rastreamento quando não há etapa ativa
+            // Reseta o rastreamento de bordas quando não há etapa ativa
             _registroAnterior = null;
             _contagemAnterior = null;
-            return;
+            _etapaRastreadaId = null;
+            _ciclosParadoSemBorda = 0;
+
+            // CLP fora e nada rodando: tenta 1x a cada 10 ciclos, não a cada segundo
+            if (_falhaOciosaRecente && _ciclo % 10 != 0)
+            {
+                return;
+            }
+        }
+        else if (_etapaRastreadaId != etapa.Id)
+        {
+            // Etapa nova (ou o monitor acabou de subir com etapa já aberta): as bordas
+            // recomeçam do zero — o estado da etapa anterior não vale para esta.
+            _etapaRastreadaId = etapa.Id;
+            _registroAnterior = null;
+            _contagemAnterior = null;
+            _ciclosParadoSemBorda = 0;
         }
 
         var registroConfig = await context.ModbusConfigs
@@ -92,7 +131,14 @@ public class RegistroConclusaoMonitor : BackgroundService
 
         if (registroConfig == null)
         {
-            _logger.LogWarning("REGISTRO_RODANDO (ReadInputs) não encontrado; monitor não consegue avaliar conclusão.");
+            _estadoSinais.PublicarRegistroRodando(null, "REGISTRO_RODANDO (ReadInputs) não cadastrado ou inativo");
+            _estadoSinais.PublicarIniciaContagem(null, "não avaliado: REGISTRO_RODANDO não cadastrado ou inativo");
+
+            if (etapa != null)
+            {
+                _logger.LogWarning("REGISTRO_RODANDO (ReadInputs) não encontrado; monitor não consegue avaliar conclusão.");
+            }
+
             return;
         }
 
@@ -106,11 +152,34 @@ public class RegistroConclusaoMonitor : BackgroundService
         try
         {
             rodando = await LerSinalAsync(registroConfig.Id);
+            _estadoSinais.PublicarRegistroRodando(rodando);
+            _falhaOciosaRecente = false;
         }
         catch (Exception ex)
         {
-            // CLP indisponível: não conclui por engano, apenas tenta de novo no próximo ciclo
-            _logger.LogWarning(ex, "Falha ao ler REGISTRO_RODANDO no monitor");
+            var raiz = ex is AggregateException ae ? ae.InnerException ?? ex : ex;
+            _estadoSinais.PublicarRegistroRodando(null, $"{raiz.GetType().Name}: {raiz.Message}");
+
+            // O ciclo aborta aqui, então o INICIA_CONTAGEM não será lido: invalida o
+            // cache dele também — senão a tela mostraria um "Ligado" congelado de um
+            // CLP que não responde mais.
+            _estadoSinais.PublicarIniciaContagem(null, $"não avaliado: falha ao ler REGISTRO_RODANDO ({raiz.GetType().Name})");
+
+            // Falha de leitura não conta como "parado": zera o debounce da descida
+            // perdida para nunca concluir uma etapa por CLP indisponível.
+            _ciclosParadoSemBorda = 0;
+
+            if (etapa != null)
+            {
+                // CLP indisponível: não conclui por engano, apenas tenta de novo no próximo ciclo
+                _logger.LogWarning(ex, "Falha ao ler REGISTRO_RODANDO no monitor");
+            }
+            else
+            {
+                _falhaOciosaRecente = true;
+                _logger.LogDebug(ex, "Falha ao ler REGISTRO_RODANDO com a bancada ociosa");
+            }
+
             return;
         }
 
@@ -125,17 +194,31 @@ public class RegistroConclusaoMonitor : BackgroundService
             try
             {
                 contando = await LerSinalAsync(contagemConfig.Id);
+                _estadoSinais.PublicarIniciaContagem(contando);
                 _ciclosComFalhaNaContagem = 0;
             }
             catch (Exception ex)
             {
-                if (_ciclosComFalhaNaContagem++ % 30 == 0)
+                var raiz = ex is AggregateException ae ? ae.InnerException ?? ex : ex;
+                _estadoSinais.PublicarIniciaContagem(null, $"{raiz.GetType().Name}: {raiz.Message}");
+
+                if (etapa != null && _ciclosComFalhaNaContagem++ % 30 == 0)
                 {
                     _logger.LogError(ex,
                         "Não foi possível ler INICIA_CONTAGEM (registro {RegistroId}, função {Funcao}, endereço {Endereco}). O t0 do laudo cai na regra do setpoint e o encerramento passa a depender só do REGISTRO_RODANDO.",
                         contagemConfig.Id, contagemConfig.FuncaoModbus, contagemConfig.EnderecoRegistro);
                 }
             }
+        }
+        else
+        {
+            _estadoSinais.PublicarIniciaContagem(null, "INICIA_CONTAGEM não cadastrado ou inativo");
+        }
+
+        if (etapa == null)
+        {
+            // Bancada parada: as leituras acima já alimentaram a tela; nada a concluir.
+            return;
         }
 
         // Bordas do INICIA_CONTAGEM carimbam a janela de contagem, mesmo na primeira
@@ -145,21 +228,48 @@ public class RegistroConclusaoMonitor : BackgroundService
             await RegistrarBordasDaContagemAsync(context, etapa, contando.Value, ct);
         }
 
-        // Primeira leitura com etapa ativa: só registra o estado, não conclui
-        if (_registroAnterior == null)
+        // Quem encerra a etapa é o REGISTRO_RODANDO, por dois caminhos:
+        //
+        // 1. Borda de descida observada (caminho normal): estava ligado, desligou.
+        //
+        // 2. Descida PERDIDA: o CLP terminou o ciclo enquanto o monitor não olhava
+        //    (ex.: deploy reiniciou o backend — o estado de borda vive só em memória).
+        //    Sem este caminho, o monitor acordava vendo rodando=false desde o início,
+        //    a borda nunca existia e a etapa ficava presa em EmExecucao para sempre,
+        //    obrigando o encerramento manual. Critério: sinal desligado por
+        //    N ciclos consecutivos COM a etapa já velha o bastante para não confundir
+        //    com a janela de partida (o CLP demora alguns segundos para ligar o sinal
+        //    depois que a etapa é criada).
+        var bordaObservada = _registroAnterior == true && !rodando;
+
+        if (rodando)
         {
-            _registroAnterior = rodando;
-            _contagemAnterior = contando;
-            return;
+            _ciclosParadoSemBorda = 0;
+        }
+        else
+        {
+            _ciclosParadoSemBorda++;
         }
 
-        // Borda de descida do REGISTRO_RODANDO = o CLP parou o registro desta câmara.
-        // É o único critério de encerramento.
-        if (_registroAnterior == true && !rodando)
+        var idadeEtapa = DateTime.UtcNow - etapa.DataInicio;
+        var descidaPerdida = !rodando &&
+                             _ciclosParadoSemBorda >= CiclosParadoParaConcluir &&
+                             idadeEtapa > TimeSpan.FromSeconds(30);
+
+        if (bordaObservada || descidaPerdida)
         {
-            _logger.LogInformation(
-                "REGISTRO_RODANDO caiu: concluindo a câmara {Camara} do ensaio {EnsaioId}.",
-                etapa.Camara, etapa.EnsaioId);
+            if (bordaObservada)
+            {
+                _logger.LogInformation(
+                    "REGISTRO_RODANDO caiu: concluindo a câmara {Camara} do ensaio {EnsaioId}.",
+                    etapa.Camara, etapa.EnsaioId);
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "REGISTRO_RODANDO está desligado há {Ciclos} ciclos com a câmara {Camara} do ensaio {EnsaioId} aberta (idade {Idade:0}s) — a descida não foi observada (provável restart do backend durante o ciclo). Concluindo a etapa.",
+                    _ciclosParadoSemBorda, etapa.Camara, etapa.EnsaioId, idadeEtapa.TotalSeconds);
+            }
 
             await ConcluirEtapaAsync(context, etapa, ct);
         }
@@ -262,6 +372,8 @@ public class RegistroConclusaoMonitor : BackgroundService
 
         _registroAnterior = false;
         _contagemAnterior = false;
+        _ciclosParadoSemBorda = 0;
+        _etapaRastreadaId = null;
         _logger.LogInformation(
             "Câmara {Camara} do ensaio {EnsaioId} concluída pelo monitor. Ensaio agora está {Status}.",
             etapa.Camara, ensaio.Id, ensaio.Status);

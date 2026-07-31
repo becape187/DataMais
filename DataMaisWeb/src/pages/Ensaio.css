@@ -359,6 +359,11 @@
   align-items: center;
 }
 
+/* Sinal do CLP com falha de leitura — diferente de desligado */
+.sinal-erro {
+  color: var(--modec-red, #c0392b);
+}
+
 /* Tempo desde o clique: informativo, não é o tempo do teste */
 .camara-dado-secundario {
   color: var(--text-secondary);

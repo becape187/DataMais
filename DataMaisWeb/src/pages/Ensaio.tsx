@@ -62,6 +62,18 @@ interface OpcaoCilindro {
   codigoCliente?: string | null
 }
 
+/** Última leitura de um sinal de ciclo do CLP, feita pelo monitor no backend. */
+interface SinalClp {
+  ligado: boolean | null
+  lidoEm: string | null
+  erro: string | null
+}
+
+interface SinaisClp {
+  registroRodando: SinalClp
+  iniciaContagem: SinalClp
+}
+
 /** Estado das pressões da bancada com o ensaio parado — quem libera o início. */
 interface PressoesBancada {
   pressaoA: number | null
@@ -69,6 +81,7 @@ interface PressoesBancada {
   limite: number
   podeIniciar: boolean
   impedimento: string | null
+  sinais?: SinaisClp
 }
 
 /** Recusa do backend em iniciar por cilindro ainda pressurizado. */
@@ -90,6 +103,28 @@ const formatarBar = (valor: number | null | undefined) =>
  * queimado no aceite, para ensaio descartado não consumir sequencial. Mostrar o código
  * cru fazia parecer que o padrão de numeração estava errado.
  */
+/**
+ * Renderização de um sinal do CLP: ligado / desligado / erro / sem leitura.
+ * Leitura velha (> 15 s — acima do ciclo de 1 s do monitor e do backoff ocioso de
+ * 10 s) é denunciada como tal: um "Ligado" congelado de minutos atrás enganaria o
+ * operador exatamente no momento em que o CLP caiu.
+ */
+const descreverSinal = (sinal: SinalClp | undefined, agora: number) => {
+  if (!sinal || (sinal.ligado == null && !sinal.erro && !sinal.lidoEm)) {
+    return { texto: '— sem leitura', classe: 'status-inactive' }
+  }
+
+  const idadeSeg = sinal.lidoEm ? (agora - new Date(sinal.lidoEm).getTime()) / 1000 : null
+  if (idadeSeg != null && idadeSeg > 15) {
+    return { texto: `⚠ leitura de ${Math.round(idadeSeg)}s atrás`, classe: 'sinal-erro' }
+  }
+
+  if (sinal.ligado == null) return { texto: '⚠ falha na leitura', classe: 'sinal-erro' }
+  return sinal.ligado
+    ? { texto: '● Ligado', classe: 'status-active' }
+    : { texto: '○ Desligado', classe: 'status-inactive' }
+}
+
 const rotuloEnsaio = (ensaio: EnsaioAberto) =>
   `Ensaio de ${new Date(ensaio.dataCriacao).toLocaleString('pt-BR', {
     day: '2-digit',
@@ -142,6 +177,10 @@ const Ensaio = () => {
 
   const [pressoesBancada, setPressoesBancada] = useState<PressoesBancada | null>(null)
   const [bloqueioPressao, setBloqueioPressao] = useState<BloqueioPressao | null>(null)
+
+  // Estado real dos sinais do CLP, lido pelo monitor do backend (cache, sem custo
+  // Modbus): é a conferência ao vivo de que a leitura está funcionando.
+  const [sinaisClp, setSinaisClp] = useState<SinaisClp | null>(null)
 
   // Câmara aguardando o CLP confirmar a partida (REGISTRO_RODANDO) — segura o spinner
   const [iniciando, setIniciando] = useState<Camara | null>(null)
@@ -287,10 +326,15 @@ const Ensaio = () => {
         if (montado) {
           setDados(prev => [...prev, { time: data.time, pressaoA: data.pressaoA, pressaoB: data.pressaoB }].slice(-100))
           setTotalPontosColetados(prev => prev + 1)
+          if (data.sinais) setSinaisClp(data.sinais)
         }
       } catch (err: any) {
         if (err.name !== 'CanceledError' && err.code !== 'ERR_CANCELED' && montado) {
           console.error('Erro ao ler pressão atual do ensaio:', err)
+          // O 500 de "CLP fora" ainda carrega o estado dos sinais no corpo — é
+          // justamente nessa hora que o painel precisa refletir a falha.
+          const sinais = err.response?.data?.sinais
+          if (sinais) setSinaisClp(sinais)
         }
       } finally {
         emVoo = false
@@ -323,7 +367,10 @@ const Ensaio = () => {
 
       try {
         const { data } = await api.get('/ensaio/pressoes', { signal: abortController.signal })
-        if (montado) setPressoesBancada(data)
+        if (montado) {
+          setPressoesBancada(data)
+          if (data.sinais) setSinaisClp(data.sinais)
+        }
       } catch (err: any) {
         if (err.name !== 'CanceledError' && err.code !== 'ERR_CANCELED' && montado) {
           console.error('Erro ao ler pressões da bancada:', err)
@@ -344,12 +391,13 @@ const Ensaio = () => {
     }
   }, [etapaAtiva])
 
-  // Cronômetro da etapa em execução
+  // Relógio de 1 s: cronômetros da etapa E idade das leituras dos sinais do CLP.
+  // Roda sempre — se o polling morrer junto com o CLP, é este tick que faz o painel
+  // de sinais envelhecer na tela em vez de congelar num "Ligado" antigo.
   useEffect(() => {
-    if (!etapaAtiva) return
     const interval = setInterval(() => setTempoAtual(Date.now()), 1000)
     return () => clearInterval(interval)
-  }, [etapaAtiva])
+  }, [])
 
   // ── Sincronização com o CLP ──────────────────────────────────────────────
   // O backend fecha a etapa sozinho quando o REGISTRO_RODANDO cai; aqui só
@@ -935,6 +983,36 @@ const Ensaio = () => {
             <div className="stat-mini">
               <span className="stat-mini-label">Pontos Coletados</span>
               <span className="stat-mini-value">{totalPontosColetados}</span>
+            </div>
+            {/* Estado REAL dos sinais do CLP, lido pelo monitor do backend — é a
+                conferência de que a leitura Modbus está funcionando */}
+            <div className="stat-mini">
+              <span className="stat-mini-label">REGISTRO_RODANDO</span>
+              {(() => {
+                const s = descreverSinal(sinaisClp?.registroRodando, tempoAtual)
+                return (
+                  <span
+                    className={`stat-mini-value ${s.classe}`}
+                    title={sinaisClp?.registroRodando?.erro ?? undefined}
+                  >
+                    {s.texto}
+                  </span>
+                )
+              })()}
+            </div>
+            <div className="stat-mini">
+              <span className="stat-mini-label">INICIA_CONTAGEM</span>
+              {(() => {
+                const s = descreverSinal(sinaisClp?.iniciaContagem, tempoAtual)
+                return (
+                  <span
+                    className={`stat-mini-value ${s.classe}`}
+                    title={sinaisClp?.iniciaContagem?.erro ?? undefined}
+                  >
+                    {s.texto}
+                  </span>
+                )
+              })()}
             </div>
             <div className="stat-mini">
               <span className="stat-mini-label">Registro</span>

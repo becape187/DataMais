@@ -80,6 +80,10 @@ builder.Services.AddSingleton<ConfigService>(configService);
 // Registra o ModbusService como singleton para manter uma única conexão Modbus
 builder.Services.AddSingleton<DataMais.Services.ModbusService>();
 
+// Cache do estado dos sinais de ciclo do CLP (REGISTRO_RODANDO / INICIA_CONTAGEM):
+// o monitor escreve a cada ciclo, a tela do ensaio lê sem custo Modbus extra.
+builder.Services.AddSingleton<DataMais.Services.EstadoSinaisClp>();
+
 // Monitora REGISTRO_RODANDO em background: quando o CLP conclui o ensaio,
 // finaliza e gera o relatório automaticamente (mesmo sem ninguém na tela).
 builder.Services.AddHostedService<DataMais.Services.RegistroConclusaoMonitor>();
