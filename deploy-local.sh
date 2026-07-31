@@ -272,8 +272,11 @@ SQL
     echo "       aparece na tela e o t0 do laudo usa a regra antiga (setpoint)."
   fi
 
+  echo ""
   echo "    Confira ao vivo em: https://<host>/api/ensaio/sinais-clp"
-  echo "    (mostra valor bruto, tipo e erro de cada sinal — abra com a câmara rodando)"
+  echo "    Abra com a BANCADA PARADA: os dois sinais têm que aparecer ligado=false."
+  echo "    Se INICIA_CONTAGEM vier ligado=true com tudo parado, o endereço está errado —"
+  echo "    é isso que faz a contagem começar sozinha assim que a câmara arranca."
 
   # Sem o REGISTRO_RODANDO como ReadInputs, a partida da câmara agora ABORTA
   # (o double-check virou bloqueante nesta release).

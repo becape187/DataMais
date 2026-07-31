@@ -760,10 +760,20 @@ public class EnsaioController : ControllerBase
     {
         try
         {
+            // Com a bancada parada, os dois sinais TÊM que estar desligados. Um deles
+            // ligado nessa condição é endereço errado (ou coil retido no CLP) — e é
+            // exatamente o que faz a contagem "começar sozinha".
+            var etapaRodando = await _context.EnsaioEtapas
+                .FirstOrDefaultAsync(e => e.Status == StatusEtapa.EmExecucao);
+
+            var bancadaParada = etapaRodando == null;
+
             return Ok(new
             {
-                registroRodando = await DiagnosticarSinalAsync("REGISTRO_RODANDO"),
-                iniciaContagem = await DiagnosticarSinalAsync("INICIA_CONTAGEM")
+                bancadaParada,
+                camaraEmExecucao = etapaRodando?.Camara,
+                registroRodando = await DiagnosticarSinalAsync("REGISTRO_RODANDO", bancadaParada),
+                iniciaContagem = await DiagnosticarSinalAsync("INICIA_CONTAGEM", bancadaParada)
             });
         }
         catch (Exception ex)
@@ -773,7 +783,7 @@ public class EnsaioController : ControllerBase
         }
     }
 
-    private async Task<object> DiagnosticarSinalAsync(string nome)
+    private async Task<object> DiagnosticarSinalAsync(string nome, bool bancadaParada)
     {
         var registro = await _context.ModbusConfigs.FirstOrDefaultAsync(m => m.Nome == nome && m.Ativo);
 
@@ -810,6 +820,18 @@ public class EnsaioController : ControllerBase
         var funcaoDeLeitura = registro.FuncaoModbus is "ReadCoils" or "ReadInputs"
             or "ReadHoldingRegisters" or "ReadInputRegisters";
 
+        var ligado = erro == null ? ModbusService.InterpretarComoLigado(valorBruto) : (bool?)null;
+
+        // Diagnóstico automático, na ordem em que os problemas realmente aparecem.
+        string? problema =
+            !funcaoDeLeitura
+                ? $"'{nome}' está cadastrado com a função {registro.FuncaoModbus}, que é de ESCRITA — não dá para ler o estado dele. Use ReadInputs (0x02) ou ReadCoils."
+            : erro != null
+                ? $"A leitura de '{nome}' falhou. Confira endereço, slaveId e função no cadastro."
+            : ligado == true && bancadaParada
+                ? $"'{nome}' está LIGADO com a bancada parada. Como nenhuma câmara está rodando, ele deveria estar desligado — o endereço {registro.EnderecoRegistro} provavelmente aponta para outro ponto, ou o CLP está segurando esse sinal."
+            : null;
+
         return new
         {
             nome,
@@ -824,13 +846,9 @@ public class EnsaioController : ControllerBase
             ip = $"{registro.IpAddress}:{registro.Port}",
             valorBruto = valorBruto?.ToString(),
             tipoRetorno = valorBruto?.GetType().Name,
-            ligado = erro == null ? ModbusService.InterpretarComoLigado(valorBruto) : (bool?)null,
+            ligado,
             erro,
-            problema = !funcaoDeLeitura
-                ? $"'{nome}' está cadastrado com a função {registro.FuncaoModbus}, que é de ESCRITA — não dá para ler o estado dele. Use ReadCoils ou ReadInputs."
-                : erro != null
-                    ? $"A leitura de '{nome}' falhou. Confira endereço, slaveId e função no cadastro."
-                    : null
+            problema
         };
     }
 
