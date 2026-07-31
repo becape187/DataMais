@@ -20,6 +20,22 @@ Segunda diretriz de fluxo, também permanente: **nenhuma mudança "no escuro"** 
 antes de mexer, explicar o que será mudado e por quê; diagnóstico com prova
 (journalctl/sinais-clp) vem antes de correção.
 
+## E o último 00:00:00 — relógio do PC da bancada
+
+Após a regra por nível, o teste mostrou o badge "Contando" (t0 CARIMBADO ✓) e
+MESMO ASSIM "Tempo de teste" E "Desde a partida" em 00:00:00 — com o gráfico
+andando normalmente. Prova: o gráfico usa horários formatados NO SERVIDOR; os
+cronômetros eram `Date.now() do PC − timestamp do servidor`. O PC da bancada tem
+relógio/fuso deslocado → conta negativa → `formatarDuracao` clampa em zero.
+TODOS os "00:00:00" da sessão tinham essa componente.
+
+Correção: os endpoints de polling devolvem `agoraServidor`; a tela mede o offset
+(`agoraServidor − Date.now()`) a cada resposta e calcula TODO tempo decorrido no
+relógio do servidor (`agoraCorrigido = tique local + offset`). Os cronômetros
+ficam imunes ao relógio do PC. Regra: nunca comparar timestamp do servidor com
+`Date.now()` cru em tela nova. Vale conferir mesmo assim o fuso/hora do PC da
+bancada.
+
 ## O que foi construído
 
 ### Trava de pressão na partida (`def4b28`)

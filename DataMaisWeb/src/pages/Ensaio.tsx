@@ -36,6 +36,8 @@ interface Etapa {
 }
 
 interface EnsaioAberto {
+  /** Relógio do servidor no momento da resposta — referência dos cronômetros. */
+  agoraServidor?: string
   id: number
   numero: string
   status: 'EmAndamento' | 'AguardandoAceite' | 'Aceito' | 'Cancelado'
@@ -76,6 +78,7 @@ interface SinaisClp {
 
 /** Estado das pressões da bancada com o ensaio parado — quem libera o início. */
 interface PressoesBancada {
+  agoraServidor?: string
   pressaoA: number | null
   pressaoB: number | null
   limite: number
@@ -193,6 +196,18 @@ const Ensaio = () => {
   const etapaAtiva = ensaio?.etapas.find(e => e.id === ensaio.etapaEmExecucaoId) ?? null
   const etapaAtivaAnteriorRef = useRef<number | null>(null)
 
+  // Diferença entre o relógio do servidor e o do PC da bancada (ms). Os cronômetros
+  // comparam timestamps do SERVIDOR entre si — o relógio local só fornece o tique.
+  // Sem isso, um PC com fuso/hora errados (comum em bancada) deixava a subtração
+  // negativa e TODOS os tempos travados em 00:00:00, parecendo bug de contagem.
+  const offsetServidorRef = useRef(0)
+
+  const sincronizarRelogio = useCallback((agoraServidor?: string | null) => {
+    if (!agoraServidor) return
+    const t = new Date(agoraServidor).getTime()
+    if (Number.isFinite(t)) offsetServidorRef.current = t - Date.now()
+  }, [])
+
   const registrarLog = useCallback((texto: string, tipo: 'normal' | 'desvio' = 'normal') => {
     setLogEventos(prev => [
       { id: Date.now() + Math.floor(Math.random() * 1000), texto: `[${new Date().toLocaleTimeString('pt-BR')}] ${texto}`, tipo, comentarios: 0 },
@@ -218,6 +233,7 @@ const Ensaio = () => {
       try {
         const { data } = await api.get('/ensaio/ativo')
         if (data?.ativo && data.ensaio) {
+          sincronizarRelogio(data.ensaio.agoraServidor)
           setEnsaio(data.ensaio)
           registrarLog(`${rotuloEnsaio(data.ensaio)} retomado`)
         } else {
@@ -324,6 +340,7 @@ const Ensaio = () => {
         })
 
         if (montado) {
+          sincronizarRelogio(data.agoraServidor)
           setDados(prev => [...prev, { time: data.time, pressaoA: data.pressaoA, pressaoB: data.pressaoB }].slice(-100))
           setTotalPontosColetados(prev => prev + 1)
           if (data.sinais) setSinaisClp(data.sinais)
@@ -368,6 +385,7 @@ const Ensaio = () => {
       try {
         const { data } = await api.get('/ensaio/pressoes', { signal: abortController.signal })
         if (montado) {
+          sincronizarRelogio(data.agoraServidor)
           setPressoesBancada(data)
           if (data.sinais) setSinaisClp(data.sinais)
         }
@@ -415,6 +433,7 @@ const Ensaio = () => {
         const { data } = await api.get('/ensaio/ativo')
 
         if (data?.ativo && data.ensaio) {
+          sincronizarRelogio(data.ensaio.agoraServidor)
           setEnsaio(data.ensaio)
           return
         }
@@ -422,6 +441,7 @@ const Ensaio = () => {
         // Nada em execução no backend, mas a tela ainda mostra a câmara rodando:
         // o monitor concluiu (ou alguém encerrou por fora). Busca o estado final.
         const { data: detalhe } = await api.get(`/ensaio/${ensaio.id}`)
+        sincronizarRelogio(detalhe?.agoraServidor)
         registrarLog(`CLP concluiu a câmara ${etapaAtiva.camara}`)
         setEnsaio(detalhe)
       } catch (err) {
@@ -632,15 +652,21 @@ const Ensaio = () => {
 
   // ── Render ───────────────────────────────────────────────────────────────
   const ultimaLeitura = dados.length > 0 ? dados[dados.length - 1] : null
+
+  // "Agora" no relógio DO SERVIDOR: tique local + offset medido a cada polling.
+  // Nunca comparar timestamp do servidor com Date.now() cru — PC de bancada com
+  // fuso errado deixava a conta negativa e os cronômetros travados em 00:00:00.
+  const agoraCorrigido = tempoAtual + offsetServidorRef.current
+
   const decorrido = etapaAtiva
-    ? (tempoAtual - new Date(etapaAtiva.dataInicio).getTime()) / 1000
+    ? (agoraCorrigido - new Date(etapaAtiva.dataInicio).getTime()) / 1000
     : 0
 
   // O que vale para o teste é a contagem do CLP (INICIA_CONTAGEM), não o clique:
   // até ela subir, a bancada está na rampa.
   const contando = etapaAtiva?.dataInicioContagem != null && etapaAtiva.dataFimContagem == null
   const decorridoContagem = etapaAtiva?.dataInicioContagem
-    ? ((etapaAtiva.dataFimContagem ? new Date(etapaAtiva.dataFimContagem).getTime() : tempoAtual) -
+    ? ((etapaAtiva.dataFimContagem ? new Date(etapaAtiva.dataFimContagem).getTime() : agoraCorrigido) -
         new Date(etapaAtiva.dataInicioContagem).getTime()) / 1000
     : 0
 
@@ -998,7 +1024,7 @@ const Ensaio = () => {
             <div className="stat-mini">
               <span className="stat-mini-label">REGISTRO_RODANDO</span>
               {(() => {
-                const s = descreverSinal(sinaisClp?.registroRodando, tempoAtual)
+                const s = descreverSinal(sinaisClp?.registroRodando, agoraCorrigido)
                 return (
                   <span
                     className={`stat-mini-value ${s.classe}`}
@@ -1012,7 +1038,7 @@ const Ensaio = () => {
             <div className="stat-mini">
               <span className="stat-mini-label">INICIA_CONTAGEM</span>
               {(() => {
-                const s = descreverSinal(sinaisClp?.iniciaContagem, tempoAtual)
+                const s = descreverSinal(sinaisClp?.iniciaContagem, agoraCorrigido)
                 return (
                   <span
                     className={`stat-mini-value ${s.classe}`}

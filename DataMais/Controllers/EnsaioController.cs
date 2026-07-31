@@ -735,6 +735,7 @@ public class EnsaioController : ControllerBase
 
             return Ok(new
             {
+                agoraServidor = DateTime.UtcNow,
                 time = DateTime.Now.ToString("HH:mm:ss"),
                 pressaoA,
                 pressaoB,
@@ -765,6 +766,7 @@ public class EnsaioController : ControllerBase
 
             return Ok(new
             {
+                agoraServidor = DateTime.UtcNow,
                 pressaoA = pressoes.A,
                 pressaoB = pressoes.B,
                 limite = PressaoMaximaParaIniciarBar,
@@ -1005,6 +1007,10 @@ public class EnsaioController : ControllerBase
 
         return new
         {
+            // Relógio do servidor na resposta: a tela calcula os tempos decorridos
+            // contra ELE, nunca contra o relógio do PC da bancada — que já esteve
+            // horas fora e travava todos os cronômetros em 00:00:00.
+            agoraServidor = DateTime.UtcNow,
             id = ensaio.Id,
             numero = ensaio.Numero,
             status = ensaio.Status,
