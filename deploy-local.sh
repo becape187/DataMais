@@ -26,10 +26,15 @@
 #
 # 📌 Release "janela de contagem" (migration AddJanelaContagemEnsaioEtapa):
 #     Adiciona EnsaioEtapas.DataInicioContagem/DataFimContagem (duas colunas nullable,
-#     sem backfill). O t0 do laudo passa a vir do sinal INICIA_CONTAGEM do CLP — que
-#     precisa estar CADASTRADO E ATIVO em ModbusConfigs, senão o sistema cai no
-#     comportamento antigo (t0 = primeiro ponto que atinge o setpoint) sem avisar.
-#     Este script confere as duas coisas no fim do deploy.
+#     sem backfill).
+#     Quem manda em quê, no CLP:
+#       REGISTRO_RODANDO  inicia e para o registro — a descida dele, sozinha, fecha a etapa.
+#                         Precisa existir como ReadInputs, senão NENHUMA câmara inicia
+#                         (a confirmação de partida virou bloqueante).
+#       INICIA_CONTAGEM   manda só na contagem de tempo (t0 do laudo e relógio da tela).
+#                         Precisa estar cadastrado com função de LEITURA; com função de
+#                         escrita a leitura lança exceção e a contagem nunca começa.
+#     Este script confere as colunas e o cadastro dos dois no fim do deploy.
 #
 # USO:
 #   cd <pasta-do-repo-pullado>
@@ -226,20 +231,49 @@ SQL
 
   # O INICIA_CONTAGEM é cadastrado pela tela de Registros, não por seed — em uma VM
   # nova (ou banco restaurado de backup antigo) ele simplesmente não existe.
-  CONTAGEM="$(PGPASSWORD="${POSTGRES_PASSWORD:-}" psql -tAq \
+  # A FUNÇÃO importa: cadastrar com função de ESCRITA faz a leitura lançar exceção
+  # (foi o que aconteceu no primeiro ensaio desta release).
+  echo "    -- Cadastro dos sinais de ciclo --"
+  PGPASSWORD="${POSTGRES_PASSWORD:-}" psql \
+    -h "${POSTGRES_HOST:-localhost}" -p "${POSTGRES_PORT:-5432}" \
+    -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DATABASE:-datamais}" <<'SQL' || \
+    echo "    ⚠️  Não deu para listar os registros."
+SELECT "Nome", "FuncaoModbus", "EnderecoRegistro" AS "Endereco", "SlaveId",
+       "TipoDado", "Ativo"
+FROM "ModbusConfigs"
+WHERE "Nome" IN ('REGISTRO_RODANDO','INICIA_CONTAGEM')
+ORDER BY "Nome";
+SQL
+
+  CONTAGEM_OK="$(PGPASSWORD="${POSTGRES_PASSWORD:-}" psql -tAq \
     -h "${POSTGRES_HOST:-localhost}" -p "${POSTGRES_PORT:-5432}" \
     -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DATABASE:-datamais}" \
     -c "SELECT count(*) FROM \"ModbusConfigs\"
-        WHERE \"Nome\" = 'INICIA_CONTAGEM' AND \"Ativo\" = true;" 2>/dev/null || echo "?")"
+        WHERE \"Nome\" = 'INICIA_CONTAGEM' AND \"Ativo\" = true
+          AND \"FuncaoModbus\" IN ('ReadCoils','ReadInputs','ReadHoldingRegisters','ReadInputRegisters');" \
+    2>/dev/null || echo "?")"
 
-  if [ "${CONTAGEM:-0}" -ge 1 ] 2>/dev/null; then
-    echo "    ✓ Registro INICIA_CONTAGEM cadastrado e ativo."
+  CONTAGEM_EXISTE="$(PGPASSWORD="${POSTGRES_PASSWORD:-}" psql -tAq \
+    -h "${POSTGRES_HOST:-localhost}" -p "${POSTGRES_PORT:-5432}" \
+    -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DATABASE:-datamais}" \
+    -c "SELECT count(*) FROM \"ModbusConfigs\" WHERE \"Nome\" = 'INICIA_CONTAGEM';" \
+    2>/dev/null || echo "?")"
+
+  if [ "${CONTAGEM_OK:-0}" -ge 1 ] 2>/dev/null; then
+    echo "    ✓ INICIA_CONTAGEM cadastrado, ativo e com função de LEITURA."
+  elif [ "${CONTAGEM_EXISTE:-0}" -ge 1 ] 2>/dev/null; then
+    echo "    ❌ INICIA_CONTAGEM existe, mas está INATIVO ou com função de ESCRITA."
+    echo "       Ler um registro cadastrado como Write* lança exceção: a contagem nunca"
+    echo "       começa e o t0 do laudo cai na regra antiga (setpoint)."
+    echo "       Corrija a função para ReadCoils/ReadInputs em Registros Modbus."
   else
-    echo "    ⚠️  INICIA_CONTAGEM não está cadastrado/ativo em ModbusConfigs."
-    echo "       Sem ele: o t0 do laudo cai na regra antiga (setpoint), a etapa fecha só"
-    echo "       pelo REGISTRO_RODANDO e a tela não mostra a contagem do CLP."
-    echo "       Cadastre em Configurações → Registros Modbus antes do próximo ensaio."
+    echo "    ⚠️  INICIA_CONTAGEM não está cadastrado em ModbusConfigs."
+    echo "       Sem ele o ensaio roda e encerra normalmente, mas o tempo de teste não"
+    echo "       aparece na tela e o t0 do laudo usa a regra antiga (setpoint)."
   fi
+
+  echo "    Confira ao vivo em: https://<host>/api/ensaio/sinais-clp"
+  echo "    (mostra valor bruto, tipo e erro de cada sinal — abra com a câmara rodando)"
 
   # Sem o REGISTRO_RODANDO como ReadInputs, a partida da câmara agora ABORTA
   # (o double-check virou bloqueante nesta release).
