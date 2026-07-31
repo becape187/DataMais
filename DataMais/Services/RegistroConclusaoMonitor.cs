@@ -275,7 +275,15 @@ public class RegistroConclusaoMonitor : BackgroundService
         }
 
         _registroAnterior = rodando;
-        _contagemAnterior = contando;
+
+        // Falha de leitura (contando == null) NÃO apaga o último estado observado:
+        // _contagemAnterior == null significa estritamente "nunca lido nesta etapa".
+        // Sem esta guarda, um glitch de 1 ciclo faria a subida real seguinte parecer
+        // "sinal já ligado" e o t0 só nasceria pela regra de recuperação, atrasado.
+        if (contando.HasValue)
+        {
+            _contagemAnterior = contando;
+        }
     }
 
     private async Task<bool> LerSinalAsync(int registroId)
@@ -284,32 +292,132 @@ public class RegistroConclusaoMonitor : BackgroundService
         return ModbusService.InterpretarComoLigado(leitura);
     }
 
+    // Loga a re-subida ignorada (recuo/retenção tardia) uma única vez por etapa.
+    private int? _etapaAvisadaResubidaTardia;
+
     /// <summary>
-    /// Carimba na etapa o começo e o fim do patamar de teste conforme o INICIA_CONTAGEM.
-    /// O t0 só é gravado uma vez por etapa; a queda fecha a janela.
+    /// Carimba na etapa a janela do patamar de teste conforme o INICIA_CONTAGEM.
+    ///
+    /// Regras (aprendidas em bancada — a versão anterior congelava o cronômetro):
+    /// 1. O t0 nasce na BORDA de subida. Sinal já ligado na primeira observação de
+    ///    uma etapa recém-criada é retenção do ciclo anterior no CLP — carimbar t0
+    ///    ali era o que fazia a contagem "começar sozinha" na partida. A única
+    ///    aceitação por nível é a PRIMEIRA observação de uma etapa já velha (>30s):
+    ///    backend reiniciado no meio do patamar. Retenção observada continuamente
+    ///    desde a partida NUNCA vira t0 — só a borda real.
+    /// 2. A queda do sinal fecha a janela; o sinal voltando decide pelo contexto:
+    ///    - janela anterior ≤ 5s: era um retalho (flicker/retenção), não patamar —
+    ///      descarta e recomeça o t0 agora;
+    ///    - janela anterior > 5s e o sinal voltou em ≤ 5s: vale/flicker no meio do
+    ///      patamar — reabre mantendo o t0;
+    ///    - janela anterior > 5s e o sinal voltou DEPOIS: evento novo (ex.: recuo,
+    ///      que pressuriza a câmara oposta de propósito) — a janela medida fica
+    ///      como está, senão o laudo engoliria o recuo e reprovaria sem passagem.
+    /// 3. Toda gravação é um UPDATE condicionado a Status = EmExecucao: se o
+    ///    operador encerrou a etapa no meio do ciclo do monitor, o carimbo é
+    ///    descartado — sem isso sobrava t0 > DataFim no banco e o laudo quebrava.
     /// </summary>
     private async Task RegistrarBordasDaContagemAsync(
         DataMaisDbContext context, EnsaioEtapa etapa, bool contando, CancellationToken ct)
     {
         var agora = DateTime.UtcNow;
 
-        if (contando && etapa.DataInicioContagem == null)
+        if (contando)
         {
-            etapa.DataInicioContagem = agora;
-            etapa.DataFimContagem = null;
-            etapa.DataAtualizacao = agora;
-            await context.SaveChangesAsync(ct);
+            if (etapa.DataInicioContagem == null)
+            {
+                var bordaDeSubida = _contagemAnterior == false;
+                var recuperacaoPosRestart = _contagemAnterior == null &&
+                                            agora - etapa.DataInicio > TimeSpan.FromSeconds(30);
 
-            _logger.LogInformation("INICIA_CONTAGEM subiu: t0 da câmara {Camara} do ensaio {EnsaioId} em {T0:o}",
-                etapa.Camara, etapa.EnsaioId, agora);
+                if (bordaDeSubida || recuperacaoPosRestart)
+                {
+                    var linhas = await context.EnsaioEtapas
+                        .Where(e => e.Id == etapa.Id && e.Status == StatusEtapa.EmExecucao)
+                        .ExecuteUpdateAsync(s => s
+                            .SetProperty(e => e.DataInicioContagem, agora)
+                            .SetProperty(e => e.DataFimContagem, (DateTime?)null)
+                            .SetProperty(e => e.DataAtualizacao, agora), ct);
+
+                    if (linhas == 0) return; // etapa foi encerrada no meio do ciclo
+
+                    etapa.DataInicioContagem = agora;
+                    etapa.DataFimContagem = null;
+
+                    _logger.LogInformation(
+                        "INICIA_CONTAGEM {Como}: t0 da câmara {Camara} do ensaio {EnsaioId} em {T0:o}",
+                        bordaDeSubida ? "subiu" : "já ligado na primeira observação de etapa antiga (recuperação pós-restart)",
+                        etapa.Camara, etapa.EnsaioId, agora);
+                }
+                else if (_contagemAnterior == null)
+                {
+                    // Primeira observação da etapa com o sinal já ligado: retenção do
+                    // CLP. (Loga uma vez: no próximo ciclo _contagemAnterior != null.)
+                    _logger.LogWarning(
+                        "INICIA_CONTAGEM já estava ligado quando a câmara {Camara} do ensaio {EnsaioId} partiu — ignorando o nível retido e aguardando a borda de subida para marcar o t0.",
+                        etapa.Camara, etapa.EnsaioId);
+                }
+
+                return;
+            }
+
+            if (etapa.DataFimContagem != null)
+            {
+                var janelaAnterior = etapa.DataFimContagem.Value - etapa.DataInicioContagem.Value;
+                var gap = agora - etapa.DataFimContagem.Value;
+
+                var descartaRetalho = janelaAnterior <= TimeSpan.FromSeconds(5);
+                var valeNoPatamar = !descartaRetalho && gap <= TimeSpan.FromSeconds(5);
+
+                if (!descartaRetalho && !valeNoPatamar)
+                {
+                    // Patamar real já medido + sinal voltando muito depois = evento
+                    // novo (recuo/retenção tardia). A janela do laudo fica como está.
+                    if (_etapaAvisadaResubidaTardia != etapa.Id)
+                    {
+                        _etapaAvisadaResubidaTardia = etapa.Id;
+                        _logger.LogWarning(
+                            "INICIA_CONTAGEM religou {Gap:0}s depois do fim da contagem na câmara {Camara} do ensaio {EnsaioId} — ignorado: a janela medida ({Janela:0}s) permanece a do laudo.",
+                            gap.TotalSeconds, etapa.Camara, etapa.EnsaioId, janelaAnterior.TotalSeconds);
+                    }
+
+                    return;
+                }
+
+                var novoInicio = descartaRetalho ? agora : etapa.DataInicioContagem.Value;
+
+                var linhas = await context.EnsaioEtapas
+                    .Where(e => e.Id == etapa.Id && e.Status == StatusEtapa.EmExecucao)
+                    .ExecuteUpdateAsync(s => s
+                        .SetProperty(e => e.DataInicioContagem, novoInicio)
+                        .SetProperty(e => e.DataFimContagem, (DateTime?)null)
+                        .SetProperty(e => e.DataAtualizacao, agora), ct);
+
+                if (linhas == 0) return;
+
+                etapa.DataInicioContagem = novoInicio;
+                etapa.DataFimContagem = null;
+
+                _logger.LogWarning(
+                    "INICIA_CONTAGEM voltou a ligar na câmara {Camara} do ensaio {EnsaioId}: janela anterior de {Segundos:0.#}s {Acao}.",
+                    etapa.Camara, etapa.EnsaioId, janelaAnterior.TotalSeconds,
+                    descartaRetalho ? "descartada como retalho — t0 recomeça agora" : "mantida — retomando após vale no patamar");
+            }
+
             return;
         }
 
-        if (!contando && etapa.DataInicioContagem != null && etapa.DataFimContagem == null)
+        if (etapa.DataInicioContagem != null && etapa.DataFimContagem == null)
         {
+            var linhas = await context.EnsaioEtapas
+                .Where(e => e.Id == etapa.Id && e.Status == StatusEtapa.EmExecucao)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(e => e.DataFimContagem, agora)
+                    .SetProperty(e => e.DataAtualizacao, agora), ct);
+
+            if (linhas == 0) return;
+
             etapa.DataFimContagem = agora;
-            etapa.DataAtualizacao = agora;
-            await context.SaveChangesAsync(ct);
 
             _logger.LogInformation("INICIA_CONTAGEM caiu: contagem da câmara {Camara} do ensaio {EnsaioId} durou {Segundos:0}s",
                 etapa.Camara, etapa.EnsaioId, (agora - etapa.DataInicioContagem.Value).TotalSeconds);

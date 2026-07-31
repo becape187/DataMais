@@ -803,6 +803,14 @@ public class EnsaioController : ControllerBase
             {
                 bancadaParada,
                 camaraEmExecucao = etapaRodando?.Camara,
+                // Janela de contagem carimbada na etapa em execução — é ela que o
+                // cronômetro da tela e o laudo usam. Congelou? Olhe aqui primeiro.
+                janelaContagem = etapaRodando == null ? null : new
+                {
+                    etapaId = etapaRodando.Id,
+                    dataInicioContagem = etapaRodando.DataInicioContagem,
+                    dataFimContagem = etapaRodando.DataFimContagem
+                },
                 registroRodando = await DiagnosticarSinalAsync("REGISTRO_RODANDO", bancadaParada),
                 iniciaContagem = await DiagnosticarSinalAsync("INICIA_CONTAGEM", bancadaParada),
                 ultimaLeituraMonitor = MontarSinaisClp()

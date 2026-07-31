@@ -400,21 +400,30 @@ const Ensaio = () => {
   }, [])
 
   // ── Sincronização com o CLP ──────────────────────────────────────────────
-  // O backend fecha a etapa sozinho quando o REGISTRO_RODANDO cai; aqui só
-  // observamos a mudança de estado do ensaio e refletimos na tela.
+  // O backend fecha a etapa sozinho quando o REGISTRO_RODANDO cai. ATENÇÃO ao
+  // detalhe que já mordeu: no instante em que o monitor conclui a etapa, o ensaio
+  // DEIXA de ter câmara em execução e /ensaio/ativo passa a responder
+  // { ativo: false } — durante meses o guard abaixo fazia `return` nesse caso e a
+  // tela ficava presa em "Rodando" para sempre, obrigando o encerramento manual
+  // (o backend tinha encerrado; a tela é que nunca ficava sabendo). Quando o ativo
+  // sumir, é preciso buscar o estado final do ensaio pelo id.
   useEffect(() => {
     if (!ensaio || !etapaAtiva) return
 
     const interval = setInterval(async () => {
       try {
         const { data } = await api.get('/ensaio/ativo')
-        if (!data?.ativo || !data.ensaio) return
 
-        const atualizado: EnsaioAberto = data.ensaio
-        if (atualizado.etapaEmExecucaoId === null && etapaAtiva) {
-          registrarLog(`CLP concluiu a câmara ${etapaAtiva.camara}`)
+        if (data?.ativo && data.ensaio) {
+          setEnsaio(data.ensaio)
+          return
         }
-        setEnsaio(atualizado)
+
+        // Nada em execução no backend, mas a tela ainda mostra a câmara rodando:
+        // o monitor concluiu (ou alguém encerrou por fora). Busca o estado final.
+        const { data: detalhe } = await api.get(`/ensaio/${ensaio.id}`)
+        registrarLog(`CLP concluiu a câmara ${etapaAtiva.camara}`)
+        setEnsaio(detalhe)
       } catch (err) {
         console.error('Erro ao sincronizar estado do ensaio:', err)
       }

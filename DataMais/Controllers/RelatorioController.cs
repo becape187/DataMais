@@ -420,6 +420,18 @@ public class RelatorioController : ControllerBase
         var contagemInicio = etapa.DataInicioContagem?.ToUniversalTime();
         var contagemFim = (etapa.DataFimContagem ?? etapa.DataFim)?.ToUniversalTime();
 
+        // Janela invertida (t0 depois do fim — dado corrompido por corrida antiga entre
+        // o monitor e o encerramento manual): descarta e cai na regra do setpoint, em
+        // vez de mandar um range start > stop para o Flux e deixar a câmara sem veredito.
+        if (contagemInicio.HasValue && contagemFim.HasValue && contagemInicio.Value >= contagemFim.Value)
+        {
+            _logger.LogWarning(
+                "Etapa {EtapaId}: janela de contagem invertida ({Inicio:o} >= {Fim:o}) — ignorando e usando a regra do setpoint.",
+                etapa.Id, contagemInicio.Value, contagemFim.Value);
+            contagemInicio = null;
+            contagemFim = null;
+        }
+
         var from = contagemInicio ?? etapa.DataInicio.ToUniversalTime().AddMinutes(-1);
         var to = contagemInicio.HasValue
             ? (contagemFim ?? DateTime.UtcNow)
