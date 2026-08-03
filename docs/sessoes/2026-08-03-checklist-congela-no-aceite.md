@@ -74,7 +74,23 @@ guarda tudo em `RelatorioVersao.RespostasJson`.
   filtro de excluídos, erro visível
 - `DataMaisWeb/src/pages/VisualizarRelatorio.css` — `.campo-relatorio-valor`, `.checklist-erro`
 
-Sem migration: nada mudou no schema.
+- `deploy-local.sh` — nota da release + conferência da pergunta retirada e dos
+  laudos por situação
+
+Sem migration: nada mudou no schema. O que mexe no banco é o seed do boot —
+por isso o dump que o `deploy-local.sh` faz antes do restart importa nesta release.
+
+## Como subir no cliente
+
+```bash
+cd <pasta-do-repo-na-VM>
+git pull
+./deploy-local.sh          # dump do banco → build → restart → conferências
+```
+
+Se der erro de `\r`: `sed -i 's/\r$//' deploy-local.sh`.
+No fim ele confere se `Estado das conexões e flanges` saiu do banco (campo e
+respostas) e lista os laudos por situação.
 
 ## Pendente de validar na bancada
 

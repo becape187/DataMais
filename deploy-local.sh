@@ -36,6 +36,20 @@
 #                         escrita a leitura lança exceção e a contagem nunca começa.
 #     Este script confere as colunas e o cadastro dos dois no fim do deploy.
 #
+# 📌 Release "checklist congela no aceite" (SEM migration — só código e seed):
+#     - Laudo Concluido passa a RECUSAR gravação de checklist (409). Reabrir virou
+#       ato explícito (botão "Editar (gera vN+1)" → POST /relatorio/{id}/reabrir).
+#       Antes, tocar num radio de laudo assinado o reabria sozinho e sumia o PDF.
+#     - Em laudo assinado o checklist é exibido como TEXTO (✔ Sim / ✕ Não), não input:
+#       input radio marcado não aparece no PDF.
+#     ⚠️  APAGA DADOS: no boot, DbSeeder.RemoverCamposDescontinuados faz soft-delete
+#         da pergunta "Estado das conexões e flanges" E DELETA as respostas dadas a
+#         ela (em todos os laudos, inclusive assinados). É de propósito — a pergunta
+#         foi retirada do formulário. O histórico fica preservado no snapshot da
+#         versão assinada (RelatorioVersao.RespostasJson), e o dump feito por este
+#         script logo antes do restart é a volta, se for o caso.
+#         Procure no log: "✓ 1 pergunta(s) descontinuada(s) do checklist removida(s)".
+#
 # USO:
 #   cd <pasta-do-repo-pullado>
 #   chmod +x deploy-local.sh
@@ -299,6 +313,54 @@ SQL
     echo "    ❌ REGISTRO_RODANDO (ReadInputs) ausente/inativo — NENHUMA câmara vai iniciar."
     echo "       A confirmação de partida virou bloqueante: sem esse registro a etapa é abortada."
   fi
+
+  # ── Release "checklist congela no aceite": pergunta descontinuada ──────────
+  # Sem migration nesta release. O que muda no banco é o seed do boot, que retira
+  # a pergunta "Estado das conexões e flanges" e apaga as respostas dela.
+  echo ""
+  echo "==> Conferindo a release do checklist do laudo:"
+
+  psql_um() {
+    PGPASSWORD="${POSTGRES_PASSWORD:-}" psql -tAq \
+      -h "${POSTGRES_HOST:-localhost}" -p "${POSTGRES_PORT:-5432}" \
+      -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DATABASE:-datamais}" \
+      -c "$1" 2>/dev/null || echo "?"
+  }
+
+  FLANGE_ATIVA="$(psql_um "SELECT count(*) FROM \"CamposRelatorio\"
+                           WHERE \"Nome\" = 'Estado das conexões e flanges'
+                             AND \"DataExclusao\" IS NULL;")"
+
+  FLANGE_RESP="$(psql_um "SELECT count(*) FROM \"RespostasCampoRelatorio\" r
+                          JOIN \"CamposRelatorio\" c ON c.\"Id\" = r.\"CampoRelatorioId\"
+                          WHERE c.\"Nome\" = 'Estado das conexões e flanges';")"
+
+  if [ "${FLANGE_ATIVA:-1}" = "0" ] && [ "${FLANGE_RESP:-1}" = "0" ]; then
+    echo "    ✓ Pergunta 'Estado das conexões e flanges' retirada do checklist (sem respostas órfãs)."
+  else
+    echo "    ❌ A pergunta 'Estado das conexões e flanges' ainda está no banco"
+    echo "       (ativa: ${FLANGE_ATIVA}, respostas: ${FLANGE_RESP})."
+    echo "       O seed do boot não rodou — veja o log do serviço acima procurando"
+    echo "       por 'descontinuada'. Enquanto isso ela continua aparecendo no laudo."
+  fi
+
+  echo "    -- Laudos por situação (assinado x rascunho) --"
+  PGPASSWORD="${POSTGRES_PASSWORD:-}" psql \
+    -h "${POSTGRES_HOST:-localhost}" -p "${POSTGRES_PORT:-5432}" \
+    -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DATABASE:-datamais}" <<'SQL' || \
+    echo "    ⚠️  Não deu para listar os laudos."
+SELECT "Situacao", count(*) AS total, max("Versao") AS maior_versao
+FROM "Relatorios" GROUP BY "Situacao" ORDER BY 1;
+SQL
+
+  echo ""
+  echo "    Teste de bancada desta release (na tela do laudo):"
+  echo "    1. Abrir um laudo JÁ ASSINADO — o checklist tem que MOSTRAR as respostas"
+  echo "       (✔ Sim / ✕ Não, em texto) e não deve haver nada clicável."
+  echo "    2. Baixar o PDF várias vezes seguidas: o botão não pode mais desabilitar"
+  echo "       sozinho, e as respostas do checklist têm que sair impressas."
+  echo "    3. 'Editar (gera vN+1)' → mudar uma resposta → 'Concluir / Assinar':"
+  echo "       o Histórico de Versões ganha 'Reaberto' e depois 'Concluido' na v seguinte."
 fi
 
 # ── (--reset-admin) Força admin/admin no banco ──────────────────────────────
