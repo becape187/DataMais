@@ -151,8 +151,13 @@ public class DataMaisDbContext : DbContext
             entity.HasIndex(e => e.CampoRelatorioId);
             entity.HasIndex(e => new { e.RelatorioId, e.CampoRelatorioId }).IsUnique();
             
+            // WithMany(rel => rel.RespostasCampos) — apontar a coleção é OBRIGATÓRIO aqui.
+            // Com WithMany() vazio o EF não liga esta FK à navegação Relatorio.RespostasCampos:
+            // trata as duas pontas como relacionamentos DIFERENTES e cria uma FK sombra
+            // (RelatorioId1). O controller gravava em RelatorioId e todo Include(RespostasCampos)
+            // lia por RelatorioId1 — sempre NULL. Resultado: checklist gravava e nunca voltava.
             entity.HasOne(r => r.Relatorio)
-                .WithMany()
+                .WithMany(rel => rel.RespostasCampos)
                 .HasForeignKey(r => r.RelatorioId)
                 .OnDelete(DeleteBehavior.Cascade);
             

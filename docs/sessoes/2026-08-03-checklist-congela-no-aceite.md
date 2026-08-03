@@ -65,6 +65,49 @@ excluído com resposta volta a aparecer — apagar a resposta é o que faz a per
 sumir de verdade dos laudos antigos. O histórico não se perde: a versão assinada
 guarda tudo em `RelatorioVersao.RespostasJson`.
 
+## 5. A causa real do checklist vazio: FK sombra no EF
+
+Depois do primeiro deploy o sintoma continuou — **sair do laudo e voltar mostrava
+tudo "Não respondido"**, mesmo em rascunho, mesmo acabando de responder. Não era a
+tela: era mapeamento.
+
+`DataMaisDbContext.cs` configurava a ponta assim:
+
+```csharp
+entity.HasOne(r => r.Relatorio)
+    .WithMany()                      // ← sem apontar Relatorio.RespostasCampos
+    .HasForeignKey(r => r.RelatorioId)
+```
+
+Com `WithMany()` vazio o EF **não liga** essa FK à navegação
+`Relatorio.RespostasCampos`. Ele entende duas relações distintas e cria uma FK
+sombra para a segunda: a coluna `RespostasCampoRelatorio.RelatorioId1`, que está no
+banco desde a migration `20260228193244_perguntas`.
+
+Daí o comportamento:
+
+- `SalvarRespostasCampos` grava `new RespostaCampoRelatorio { RelatorioId = id }` →
+  `RelatorioId` correto, `RelatorioId1` **NULL**.
+- Todo `Include(r => r.RespostasCampos)` lê **por `RelatorioId1`** → não traz nada.
+
+Grava e nunca lê. E não era só a exibição — tudo que passa por essa navegação
+estava mudo:
+
+- `SerializarRespostas` → o snapshot da versão assinada saía `{}`;
+- o override do checklist em `GetById` e em `AvaliarResultadoAsync` → **"Vazamentos
+  visíveis = Sim" nunca reprovou laudo nenhum**.
+
+Correção: `.WithMany(rel => rel.RespostasCampos)` + migration
+`CorrigeFkRespostasCampoRelatorio`, que dropa a coluna sombra (e o índice e a FK
+dela).
+
+**As respostas antigas não se perderam** — sempre estiveram corretas em
+`RelatorioId`. Voltam a aparecer sozinhas depois do deploy.
+
+**Atenção ao veredito:** o resultado é calculado ao abrir o laudo, não é persistido.
+Com o override voltando a funcionar, um laudo **já assinado** pode passar a mostrar
+Reprovado. Conferir os emitidos que tenham "Vazamentos visíveis = Sim".
+
 ## Arquivos
 
 - `DataMais/Controllers/RelatorioController.cs` — 409 em concluído, endpoint `reabrir`
@@ -74,11 +117,14 @@ guarda tudo em `RelatorioVersao.RespostasJson`.
   filtro de excluídos, erro visível
 - `DataMaisWeb/src/pages/VisualizarRelatorio.css` — `.campo-relatorio-valor`, `.checklist-erro`
 
-- `deploy-local.sh` — nota da release + conferência da pergunta retirada e dos
-  laudos por situação
+- `DataMais/Data/DataMaisDbContext.cs` — `.WithMany(rel => rel.RespostasCampos)`
+- `DataMais/Migrations/20260803202157_CorrigeFkRespostasCampoRelatorio.cs` — dropa
+  a coluna sombra `RelatorioId1`
+- `deploy-local.sh` — notas das duas releases, pré-voo da coluna sombra (antes do
+  restart, que é quando ela some) e conferências no fim
 
-Sem migration: nada mudou no schema. O que mexe no banco é o seed do boot —
-por isso o dump que o `deploy-local.sh` faz antes do restart importa nesta release.
+Uma migration (`CorrigeFkRespostasCampoRelatorio`) e um passo de seed que apaga
+respostas — por isso o dump que o `deploy-local.sh` faz antes do restart importa.
 
 ## Como subir no cliente
 

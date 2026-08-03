@@ -36,6 +36,18 @@
 #                         escrita a leitura lança exceção e a contagem nunca começa.
 #     Este script confere as colunas e o cadastro dos dois no fim do deploy.
 #
+# 🔴 Release "checklist volta a aparecer" (migration CorrigeFkRespostasCampoRelatorio):
+#     O checklist gravava e NUNCA voltava — todo laudo reaberto mostrava "Não respondido".
+#     Causa: DataMaisDbContext mapeava a FK com .WithMany() vazio, então o EF criou uma
+#     coluna sombra RespostasCampoRelatorio.RelatorioId1 e passou a LER por ela, enquanto
+#     o controller GRAVAVA em RelatorioId. A migration dropa a coluna sombra.
+#     ⚠️  As respostas antigas NÃO se perderam: estavam certas em RelatorioId o tempo todo
+#         e voltam a aparecer sozinhas depois deste deploy.
+#     ⚠️  O override "reprova se Sim" (ex.: Vazamentos visíveis) lia pela mesma navegação
+#         quebrada e NUNCA disparou. Como o veredito é calculado ao abrir o laudo, um laudo
+#         já assinado pode passar a mostrar REPROVADO depois deste deploy. Confira os
+#         laudos emitidos que tenham "Vazamentos visíveis = Sim".
+#
 # 📌 Release "checklist congela no aceite" (SEM migration — só código e seed):
 #     - Laudo Concluido passa a RECUSAR gravação de checklist (409). Reabrir virou
 #       ato explícito (botão "Editar (gera vN+1)" → POST /relatorio/{id}/reabrir).
@@ -167,6 +179,35 @@ if [ "$BACKUP_DB" = "1" ]; then
   fi
 else
   echo "==> --sem-backup-db: pulando o dump do banco."
+fi
+
+# ── Pré-voo da migration CorrigeFkRespostasCampoRelatorio ───────────────────
+# Ela DROPA a coluna sombra RespostasCampoRelatorio.RelatorioId1. A coluna nunca foi
+# escrita pela aplicação (todo insert seta RelatorioId), mas conferir custa nada e
+# depois do restart a coluna não existe mais para ser olhada.
+if command -v psql >/dev/null 2>&1; then
+  TMPENV="$(mktemp)"
+  sudo grep -E '^(POSTGRES_HOST|POSTGRES_PORT|POSTGRES_USER|POSTGRES_DATABASE|POSTGRES_PASSWORD)=' \
+    "$ENV_FILE" > "$TMPENV" 2>/dev/null || true
+  set -a; . "$TMPENV"; set +a
+  rm -f "$TMPENV"
+
+  ORFAS="$(PGPASSWORD="${POSTGRES_PASSWORD:-}" psql -tAq \
+    -h "${POSTGRES_HOST:-localhost}" -p "${POSTGRES_PORT:-5432}" \
+    -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DATABASE:-datamais}" \
+    -c "SELECT count(*) FROM \"RespostasCampoRelatorio\" WHERE \"RelatorioId1\" IS NOT NULL;" \
+    2>/dev/null || echo "sem-coluna")"
+
+  case "$ORFAS" in
+    0|sem-coluna) echo "==> Pré-voo OK: nada depende da coluna sombra RelatorioId1." ;;
+    *)
+      echo "⚠️  $ORFAS resposta(s) com RelatorioId1 preenchido — a migration vai dropar essa coluna."
+      echo "    Não deveria acontecer (a aplicação só escreve RelatorioId). O dump acabou de ser"
+      echo "    feito; se quiser conferir antes, aborte agora e olhe a tabela."
+      read -r -p "    Continuar o deploy? [s/N] " resp
+      [ "${resp,,}" = "s" ] || { echo "Abortado. Serviço parado: sudo systemctl start $SERVICE"; exit 1; }
+      ;;
+  esac
 fi
 
 # ── Backend: backup + substituição ──────────────────────────────────────────
@@ -343,6 +384,28 @@ SQL
     echo "       O seed do boot não rodou — veja o log do serviço acima procurando"
     echo "       por 'descontinuada'. Enquanto isso ela continua aparecendo no laudo."
   fi
+
+  COL_SOMBRA="$(psql_um "SELECT count(*) FROM information_schema.columns
+                         WHERE table_name = 'RespostasCampoRelatorio'
+                           AND column_name = 'RelatorioId1';")"
+
+  if [ "${COL_SOMBRA:-1}" = "0" ]; then
+    echo "    ✓ Coluna sombra RelatorioId1 removida — o checklist volta a ser lido."
+  else
+    echo "    ❌ RelatorioId1 ainda existe: a migration CorrigeFkRespostasCampoRelatorio não"
+    echo "       aplicou. O checklist continuará abrindo como 'Não respondido'."
+  fi
+
+  echo "    -- Respostas de checklist gravadas (por laudo, top 5) --"
+  PGPASSWORD="${POSTGRES_PASSWORD:-}" psql \
+    -h "${POSTGRES_HOST:-localhost}" -p "${POSTGRES_PORT:-5432}" \
+    -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DATABASE:-datamais}" <<'SQL' || \
+    echo "    ⚠️  Não deu para listar as respostas."
+SELECT r."Numero", count(*) AS respostas
+FROM "RespostasCampoRelatorio" resp
+JOIN "Relatorios" r ON r."Id" = resp."RelatorioId"
+GROUP BY r."Numero" ORDER BY r."Numero" DESC LIMIT 5;
+SQL
 
   echo "    -- Laudos por situação (assinado x rascunho) --"
   PGPASSWORD="${POSTGRES_PASSWORD:-}" psql \
