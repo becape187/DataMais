@@ -129,7 +129,9 @@ const PLACEHOLDERS_SEM_VALOR = new Set([
 const textoOuTraco = (valor?: string | null): string => {
   const t = (valor ?? '').trim()
   if (!t) return '-'
-  return PLACEHOLDERS_SEM_VALOR.has(t.toLowerCase()) ? '-' : t
+  // Espaço duplo / NBSP colados no meio ("Not  Found") não podem escapar da comparação.
+  const chave = t.toLowerCase().replace(/\s+/g, ' ')
+  return PLACEHOLDERS_SEM_VALOR.has(chave) ? '-' : t
 }
 
 const VisualizarRelatorio = () => {
