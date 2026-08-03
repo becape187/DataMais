@@ -409,6 +409,47 @@
   margin-bottom: 12px;
 }
 
+/* Laudo assinado: a resposta é texto, não input. Rende no PDF (radio marcado não rende)
+   e não tem como o operador alterar sem passar pela reabertura. */
+.campo-relatorio-valor {
+  display: inline-block;
+  margin-top: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.campo-relatorio-valor.sim {
+  color: var(--modec-navy);
+}
+
+.campo-relatorio-valor.nao {
+  color: var(--text-secondary);
+}
+
+.campo-relatorio-valor.texto {
+  font-weight: 400;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.campo-relatorio-valor.vazio {
+  font-weight: 400;
+  font-style: italic;
+  color: var(--text-secondary);
+}
+
+.checklist-erro {
+  margin: 0 0 16px;
+  padding: 12px 16px;
+  border-radius: 8px;
+  border-left: 4px solid var(--danger);
+  background: rgba(220, 53, 69, 0.08);
+  color: var(--danger);
+  font-size: 14px;
+  font-weight: 600;
+}
+
 .campo-relatorio-radio-group {
   display: flex;
   gap: 24px;

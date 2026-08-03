@@ -656,6 +656,17 @@ public class RelatorioController : ControllerBase
                 return NotFound(new { message = "Relatório não encontrado" });
             }
 
+            // Laudo assinado é documento emitido: o checklist fica congelado. Para mudar,
+            // o operador reabre explicitamente (POST /reabrir) — e a próxima conclusão
+            // grava uma versão nova. Antes daqui a edição reabria sozinha, no clique.
+            if (relatorio.Situacao == "Concluido")
+            {
+                return Conflict(new
+                {
+                    message = "Relatório concluído: use 'Editar (nova versão)' para reabrir antes de alterar o checklist."
+                });
+            }
+
             if (request.Respostas == null || request.Respostas.Count == 0)
             {
                 return BadRequest(new { message = "Lista de respostas é obrigatória" });
@@ -710,25 +721,7 @@ public class RelatorioController : ControllerBase
                 }
             }
 
-            // Editar um relatório JÁ CONCLUÍDO invalida a conclusão: reabre como Rascunho
-            // e registra a reabertura no histórico (com o usuário logado). O PDF volta a ficar
-            // bloqueado até nova conclusão.
-            if (relatorio.Situacao == "Concluido")
-            {
-                var (uid, unome) = UsuarioAtual();
-                relatorio.Situacao = "Rascunho";
-                relatorio.DataAtualizacao = DateTime.UtcNow;
-                _context.RelatorioVersoes.Add(new RelatorioVersao
-                {
-                    RelatorioId = relatorio.Id,
-                    NumeroVersao = relatorio.Versao,
-                    Acao = "Reaberto",
-                    UsuarioId = uid,
-                    UsuarioNome = unome,
-                    DataHora = DateTime.UtcNow,
-                    Observacoes = relatorio.Observacoes
-                });
-            }
+            relatorio.DataAtualizacao = DateTime.UtcNow;
 
             await _context.SaveChangesAsync();
 
@@ -802,6 +795,63 @@ public class RelatorioController : ControllerBase
         {
             _logger.LogError(ex, "Erro ao concluir relatório {RelatorioId}", id);
             return StatusCode(500, new { message = "Erro ao concluir relatório", error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Reabre um laudo concluído para edição do checklist: volta para Rascunho e registra
+    /// a reabertura no histórico. A conclusão seguinte grava a versão nova (v+1).
+    /// Enquanto reaberto, o PDF fica bloqueado — o documento não está assinado.
+    /// </summary>
+    [HttpPost("{id:int}/reabrir")]
+    [Authorize(Roles = "Admin,Operador")]
+    public async Task<IActionResult> Reabrir(int id)
+    {
+        try
+        {
+            var relatorio = await _context.Relatorios.FindAsync(id);
+
+            if (relatorio == null)
+            {
+                return NotFound(new { message = "Relatório não encontrado" });
+            }
+
+            if (relatorio.Situacao != "Concluido")
+            {
+                // Já editável: idempotente, não empilha "Reaberto" no histórico.
+                return Ok(new { message = "Relatório já está em rascunho", situacao = relatorio.Situacao, versao = relatorio.Versao });
+            }
+
+            var (uid, unome) = UsuarioAtual();
+            var agora = DateTime.UtcNow;
+
+            relatorio.Situacao = "Rascunho";
+            relatorio.DataAtualizacao = agora;
+
+            _context.RelatorioVersoes.Add(new RelatorioVersao
+            {
+                RelatorioId = relatorio.Id,
+                NumeroVersao = relatorio.Versao,
+                Acao = "Reaberto",
+                UsuarioId = uid,
+                UsuarioNome = unome,
+                DataHora = agora,
+                Observacoes = relatorio.Observacoes
+            });
+
+            await _context.SaveChangesAsync();
+
+            return Ok(new
+            {
+                message = "Relatório reaberto para edição",
+                situacao = relatorio.Situacao,
+                versao = relatorio.Versao
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Erro ao reabrir relatório {RelatorioId}", id);
+            return StatusCode(500, new { message = "Erro ao reabrir relatório", error = ex.Message });
         }
     }
 

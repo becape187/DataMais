@@ -16,7 +16,6 @@ public static class DbSeeder
         // 3. Inspeção Visual Inicial
         new("Inspeção Visual", "Estado da pintura", "TextoSimples", false),
         new("Inspeção Visual", "Vazamentos visíveis", "SimOuNao", true), // Sim → Reprovado (regra rev02)
-        new("Inspeção Visual", "Estado das conexões e flanges", "SimOuNao", false),
         new("Inspeção Visual", "Haste (riscos/corrosão/empenamento)", "SimOuNao", false),
         new("Inspeção Visual", "Identificação e plaquetas legíveis", "SimOuNao", false),
         new("Inspeção Visual", "Observações da Inspeção", "MultiplasLinhas", false),
@@ -30,6 +29,13 @@ public static class DbSeeder
         // 5. Condições Finais
         new("Condições Finais", "Ruídos anormais durante operação", "SimOuNao", false),
         new("Condições Finais", "Observações Finais", "MultiplasLinhas", false),
+    };
+
+    // Perguntas retiradas do checklist depois de já terem ido para produção. Tirar do
+    // array acima não basta: o registro continua no banco e a pergunta segue aparecendo.
+    private static readonly string[] CamposDescontinuados =
+    {
+        "Estado das conexões e flanges",
     };
 
     /// <summary>
@@ -67,5 +73,36 @@ public static class DbSeeder
             ctx.SaveChanges();
             Console.WriteLine($"✓ {novos.Count} campo(s) do checklist rev02 criados.");
         }
+    }
+
+    /// <summary>
+    /// Retira do checklist as perguntas descontinuadas: soft-delete no campo e remoção das
+    /// respostas dadas a ele. As respostas vão junto de propósito — resposta a pergunta que
+    /// não existe mais reapareceria nos laudos antigos (que exibem campo excluído COM
+    /// resposta). O histórico não se perde: a versão assinada guarda o snapshot em
+    /// RelatorioVersao.RespostasJson. Idempotente.
+    /// </summary>
+    public static void RemoverCamposDescontinuados(DataMaisDbContext ctx)
+    {
+        var alvos = ctx.CamposRelatorio
+            .Where(c => CamposDescontinuados.Contains(c.Nome) && c.DataExclusao == null)
+            .ToList();
+
+        if (alvos.Count == 0) return;
+
+        var ids = alvos.Select(c => c.Id).ToList();
+        var respostas = ctx.RespostasCampoRelatorio
+            .Where(r => ids.Contains(r.CampoRelatorioId))
+            .ToList();
+
+        ctx.RespostasCampoRelatorio.RemoveRange(respostas);
+
+        foreach (var campo in alvos)
+        {
+            campo.DataExclusao = DateTime.UtcNow;
+        }
+
+        ctx.SaveChanges();
+        Console.WriteLine($"✓ {alvos.Count} pergunta(s) descontinuada(s) do checklist removida(s) ({respostas.Count} resposta(s) apagada(s)).");
     }
 }

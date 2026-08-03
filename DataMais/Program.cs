@@ -201,6 +201,7 @@ using (var scope = app.Services.CreateScope())
 
         // Seed idempotente do checklist do relatório rev02.
         DataMais.Data.DbSeeder.SeedCamposRelatorioRev02(dbContext);
+        DataMais.Data.DbSeeder.RemoverCamposDescontinuados(dbContext);
     }
     catch (Exception ex)
     {

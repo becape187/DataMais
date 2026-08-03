@@ -128,9 +128,13 @@ const VisualizarRelatorio = () => {
   const [respostasCampos, setRespostasCampos] = useState<Record<number, string>>({})
   const [versoes, setVersoes] = useState<VersaoHistorico[]>([])
   const [concluindo, setConcluindo] = useState(false)
+  const [reabrindo, setReabrindo] = useState(false)
+  const [erroChecklist, setErroChecklist] = useState<string | null>(null)
   const [modalExcluir, setModalExcluir] = useState(false)
   const [excluindo, setExcluindo] = useState(false)
   const relatorioContainerRef = useRef<HTMLDivElement>(null)
+  /** Último valor que o backend confirmou para cada campo — é para ele que a tela volta se a gravação falhar. */
+  const respostasSalvasRef = useRef<Record<number, string>>({})
 
   const concluido = relatorio?.situacao === 'Concluido'
 
@@ -185,6 +189,7 @@ const VisualizarRelatorio = () => {
           })
         }
         setRespostasCampos(respostas)
+        respostasSalvasRef.current = { ...respostas }
 
         setRelatorio({
           id: r.id,
@@ -264,21 +269,50 @@ const VisualizarRelatorio = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
 
-  const salvarRespostas = async (campoId: number, valor: string) => {
+  // Grava uma resposta do checklist. Só vale em Rascunho — laudo assinado é recusado
+  // pelo backend (409) e a edição passa a exigir reabertura explícita.
+  //
+  // Falha de gravação NÃO pode passar em silêncio: o operador via o clique marcado na tela
+  // e o laudo abria vazio depois. Em erro, o valor anterior volta e ele é avisado.
+  const salvarRespostas = async (campoId: number, valor: string, valorAnterior: string) => {
     if (!id || !relatorio) return
 
     try {
-      const resp = await api.post(`/Relatorio/${id}/respostas-campos`, {
+      await api.post(`/Relatorio/${id}/respostas-campos`, {
         respostas: [{ campoRelatorioId: campoId, valor: valor || null }]
       })
-      // Editar um relatório concluído o REABRE no backend → reflete na tela.
-      const novaSituacao = resp.data?.situacao
-      if (novaSituacao && novaSituacao !== relatorio.situacao) {
-        setRelatorio(prev => (prev ? { ...prev, situacao: novaSituacao } : prev))
-        carregarVersoes()
-      }
-    } catch (error) {
+      respostasSalvasRef.current[campoId] = valor
+      setErroChecklist(null)
+    } catch (error: any) {
       console.error('Erro ao salvar resposta:', error)
+      setRespostasCampos(prev => ({ ...prev, [campoId]: valorAnterior }))
+      setErroChecklist(
+        error?.response?.data?.message || 'Não foi possível salvar a resposta. Verifique a conexão e tente de novo.'
+      )
+    }
+  }
+
+  // Reabertura explícita de um laudo assinado: volta para Rascunho e a próxima conclusão
+  // grava a versão seguinte. Antes isso acontecia sozinho no primeiro clique do checklist.
+  const reabrirRelatorio = async () => {
+    if (!id || !relatorio) return
+    const proxima = (relatorio.versao ?? 0) + 1
+    if (!window.confirm(
+      `Reabrir o laudo ${relatorio.numero} para edição?\n\n` +
+      `Ele volta para rascunho e o PDF fica bloqueado até ser concluído de novo — ` +
+      `quando será assinado como v${proxima}.`
+    )) return
+
+    try {
+      setReabrindo(true)
+      const resp = await api.post(`/Relatorio/${id}/reabrir`)
+      setRelatorio(prev => (prev ? { ...prev, situacao: resp.data?.situacao ?? 'Rascunho' } : prev))
+      setErroChecklist(null)
+      await carregarVersoes()
+    } catch (err: any) {
+      alert(err.response?.data?.message || 'Erro ao reabrir o laudo')
+    } finally {
+      setReabrindo(false)
     }
   }
 
@@ -434,7 +468,34 @@ const VisualizarRelatorio = () => {
 
   const secoesRelatorio = ['Inspeção Visual', 'Testes Funcionais', 'Condições Finais']
 
+  // Laudo assinado (ou usuário sem permissão de operar): o checklist vira LEITURA — texto,
+  // não input desabilitado. Dois motivos: não há como editar por engano, e a resposta
+  // aparece de fato no PDF (o html2canvas não desenha o ponto de um <input type="radio">
+  // marcado, então o laudo saía com as bolinhas todas vazias).
+  const renderCampoLeitura = (campo: CampoRelatorio) => {
+    const valor = (respostasCampos[campo.id] || '').trim()
+
+    if (!valor) {
+      return <span className="campo-relatorio-valor vazio">Não respondido</span>
+    }
+
+    if (campo.tipoResposta === 'SimOuNao') {
+      const sim = valor.toLowerCase() === 'sim'
+      return (
+        <span className={`campo-relatorio-valor ${sim ? 'sim' : 'nao'}`}>
+          {sim ? '✔' : '✕'} {valor}
+        </span>
+      )
+    }
+
+    return <span className="campo-relatorio-valor texto">{valor}</span>
+  }
+
   const renderCampoInput = (campo: CampoRelatorio) => {
+    if (!podeOperar || concluido) {
+      return renderCampoLeitura(campo)
+    }
+
     if (campo.tipoResposta === 'SimOuNao') {
       return (
         <div className="campo-relatorio-radio-group">
@@ -445,10 +506,10 @@ const VisualizarRelatorio = () => {
                 name={`campo-${campo.id}`}
                 value={opt}
                 checked={respostasCampos[campo.id] === opt}
-                disabled={!podeOperar}
                 onChange={(e) => {
+                  const anterior = respostasSalvasRef.current[campo.id] || ''
                   setRespostasCampos({ ...respostasCampos, [campo.id]: e.target.value })
-                  salvarRespostas(campo.id, e.target.value)
+                  salvarRespostas(campo.id, e.target.value, anterior)
                 }}
               />
               {opt}
@@ -462,9 +523,8 @@ const VisualizarRelatorio = () => {
         <textarea
           className="campo-relatorio-textarea-display"
           value={respostasCampos[campo.id] || ''}
-          disabled={!podeOperar}
           onChange={(e) => setRespostasCampos({ ...respostasCampos, [campo.id]: e.target.value })}
-          onBlur={() => salvarRespostas(campo.id, respostasCampos[campo.id] || '')}
+          onBlur={() => salvarRespostas(campo.id, respostasCampos[campo.id] || '', respostasSalvasRef.current[campo.id] || '')}
           placeholder="Digite sua resposta..."
           rows={3}
           style={{ width: '100%', minHeight: 70, resize: 'vertical' }}
@@ -476,9 +536,8 @@ const VisualizarRelatorio = () => {
         type="text"
         className="campo-relatorio-input"
         value={respostasCampos[campo.id] || ''}
-        disabled={!podeOperar}
         onChange={(e) => setRespostasCampos({ ...respostasCampos, [campo.id]: e.target.value })}
-        onBlur={() => salvarRespostas(campo.id, respostasCampos[campo.id] || '')}
+        onBlur={(e) => salvarRespostas(campo.id, respostasCampos[campo.id] || '', e.target.defaultValue)}
         placeholder="Digite sua resposta..."
       />
     )
@@ -527,6 +586,12 @@ const VisualizarRelatorio = () => {
               {concluindo ? 'Concluindo...' : '✔ Concluir / Assinar'}
             </button>
           )}
+          {/* Assinado: o checklist está congelado. Editar é ato explícito e gera versão nova. */}
+          {podeOperar && concluido && (
+            <button className="btn btn-secondary" onClick={reabrirRelatorio} disabled={reabrindo}>
+              {reabrindo ? 'Reabrindo...' : `✎ Editar (gera v${(relatorio.versao ?? 0) + 1})`}
+            </button>
+          )}
           <button
             className="btn btn-secondary"
             onClick={exportarParaPDF}
@@ -555,6 +620,13 @@ const VisualizarRelatorio = () => {
           )}
         </div>
       </div>
+
+      {/* Fora do .relatorio-container de propósito: é aviso de tela, não faz parte do documento. */}
+      {erroChecklist && (
+        <div className="checklist-erro" role="alert">
+          ⚠ {erroChecklist}
+        </div>
+      )}
 
       {modalExcluir && relatorio && (
         <div className="rel-modal-overlay" role="alertdialog" aria-modal="true" aria-labelledby="titulo-excluir-laudo">
@@ -824,8 +896,11 @@ const VisualizarRelatorio = () => {
         </div>
 
         {relatorio.campos && relatorio.campos.length > 0 && (() => {
+          // Campo excluído do cadastro entra quando ESTE laudo já o respondeu — o backend
+          // manda esses de propósito, e descartá-los aqui apagava da tela o checklist de
+          // laudos antigos (a pergunta saiu do cadastro depois, a resposta continua valendo).
           const ativos = (relatorio.campos || [])
-            .filter(c => !c.excluido)
+            .filter(c => !c.excluido || (c.valor || '').trim() !== '')
             .sort((a, b) => a.ordem - b.ordem)
           const grupos = secoesRelatorio
             .map(sec => ({ sec, itens: ativos.filter(c => (c.secao || '').trim() === sec) }))
