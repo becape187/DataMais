@@ -485,6 +485,62 @@
   outline: none;
 }
 
+/* ---- Quadro de assinaturas ----------------------------------------------
+   Dois papéis por linha. Com os quatro lado a lado (modelo antigo) cada linha
+   ficava com ~90px de largura útil: não cabia uma assinatura à caneta nem o
+   carimbo que o gov.br estampa. As alturas abaixo são o "respiro" — a linha
+   de assinatura é deliberadamente mais alta que as de nome/data. */
+.assinaturas-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 40px 56px;
+}
+
+.assinatura-bloco {
+  break-inside: avoid;
+}
+
+.assinatura-papel {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--modec-navy);
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+  border-bottom: 2px solid var(--text-primary);
+}
+
+.assinatura-observacao {
+  font-weight: 400;
+  font-style: italic;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.assinatura-campo {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  height: 42px;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+/* Espaço da assinatura propriamente dita — carimbo digital ou caneta. */
+.assinatura-campo-alto {
+  height: 66px;
+}
+
+.assinatura-rotulo {
+  font-weight: 600;
+  white-space: nowrap;
+  padding-bottom: 4px;
+}
+
+.assinatura-linha {
+  flex: 1;
+  border-bottom: 1px solid var(--text-primary);
+}
+
 .relatorio-footer {
   margin-top: 40px;
   padding-top: 32px;
@@ -532,6 +588,10 @@
   }
 
   .relatorio-meta {
+    grid-template-columns: 1fr;
+  }
+
+  .assinaturas-grid {
     grid-template-columns: 1fr;
   }
 

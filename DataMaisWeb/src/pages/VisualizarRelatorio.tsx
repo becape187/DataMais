@@ -94,6 +94,29 @@ interface DataPoint {
   pressaoB?: number | null
 }
 
+// Quadro de assinaturas manuais do laudo (modelo MODEC).
+// Vão dois papéis por linha — os quatro lado a lado espremiam as linhas a ponto
+// de não caber nem caneta nem o carimbo de uma assinatura gov.br.
+const BLOCOS_ASSINATURA = [
+  {
+    papel: 'Executor do Ensaio',
+    campos: [{ rotulo: 'Nome' }, { rotulo: 'Assinatura', alto: true }, { rotulo: 'Data' }]
+  },
+  {
+    papel: 'Supervisor / Coordenador',
+    campos: [{ rotulo: 'Nome' }, { rotulo: 'Assinatura', alto: true }, { rotulo: 'Data' }]
+  },
+  {
+    papel: 'PIC – Engineer',
+    campos: [{ rotulo: 'Nome' }, { rotulo: 'Assinatura', alto: true }, { rotulo: 'Data' }]
+  },
+  {
+    papel: 'Classificadora',
+    observacao: 'quando aplicável',
+    campos: [{ rotulo: 'Empresa' }, { rotulo: 'Surveyor' }, { rotulo: 'Assinatura', alto: true }]
+  }
+]
+
 const VisualizarRelatorio = () => {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -870,6 +893,31 @@ const VisualizarRelatorio = () => {
             </div>
           </div>
         )}
+
+        <div className="relatorio-section">
+          <h3>Assinaturas</h3>
+          <div className="assinaturas-grid">
+            {BLOCOS_ASSINATURA.map(bloco => (
+              <div className="assinatura-bloco" key={bloco.papel}>
+                <div className="assinatura-papel">
+                  {bloco.papel}
+                  {bloco.observacao && (
+                    <span className="assinatura-observacao"> ({bloco.observacao})</span>
+                  )}
+                </div>
+                {bloco.campos.map(campo => (
+                  <div
+                    className={`assinatura-campo${campo.alto ? ' assinatura-campo-alto' : ''}`}
+                    key={campo.rotulo}
+                  >
+                    <span className="assinatura-rotulo">{campo.rotulo}:</span>
+                    <span className="assinatura-linha"></span>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
 
         <div className="relatorio-footer">
           <div className="footer-signature">
