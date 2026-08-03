@@ -108,6 +108,23 @@ dela).
 Com o override voltando a funcionar, um laudo **já assinado** pode passar a mostrar
 Reprovado. Conferir os emitidos que tenham "Vazamentos visíveis = Sim".
 
+## 6. "Not found" no Nº de Série
+
+Volta do dia 03/08 de manhã, que tinha decidido "é dado, resolve no cadastro".
+Decisão revista: a string `Not found` **não existe em nenhum ponto do código** —
+é digitada no cadastro do cilindro —, mas o laudo é documento emitido e não pode
+depender de o cadastro estar limpo.
+
+Novo helper `textoOuTraco` em `VisualizarRelatorio.tsx`: campo preenchido com
+`Not found`, `N/A`, `não informado` e afins é **ausência** de informação, então sai
+como `-`, igual a campo vazio. Aplicado aos campos de texto das duas seções de
+identificação (documento e equipamento), não só ao Nº de Série — o mesmo lixo cabe
+em Fabricante, Part Number etc.
+
+Não mascara dado real: nenhum número de série legítimo é "N/A". O cadastro continua
+com o valor — apagar pela tela funciona (o PUT manda `null` quando o campo vem
+vazio), só não é mais obrigatório para o laudo sair correto.
+
 ## Arquivos
 
 - `DataMais/Controllers/RelatorioController.cs` — 409 em concluído, endpoint `reabrir`

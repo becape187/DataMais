@@ -117,6 +117,21 @@ const BLOCOS_ASSINATURA = [
   }
 ]
 
+// Cadastro sujo não entra no laudo. Campo preenchido com "Not found", "N/A" e afins é
+// AUSÊNCIA de informação, não informação — no documento tem que sair "-", igual a campo
+// vazio. (A string "Not found" não vem do sistema: é digitada no cadastro do cilindro.)
+const PLACEHOLDERS_SEM_VALOR = new Set([
+  '-', '--', '?', 'not found', 'notfound', 'not informed', 'none', 'null', 'undefined',
+  'n/a', 'n.a.', 'na', 'nd', 'n/d', 'nao encontrado', 'não encontrado',
+  'nao informado', 'não informado', 'sem informacao', 'sem informação'
+])
+
+const textoOuTraco = (valor?: string | null): string => {
+  const t = (valor ?? '').trim()
+  if (!t) return '-'
+  return PLACEHOLDERS_SEM_VALOR.has(t.toLowerCase()) ? '-' : t
+}
+
 const VisualizarRelatorio = () => {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -681,21 +696,21 @@ const VisualizarRelatorio = () => {
         <div className="relatorio-section">
           <h3>Identificação do Documento</h3>
           <div className="info-grid">
-            <div className="info-card"><span className="info-label">Local do Teste</span><span className="info-value">{relatorio.ensaioLocalTeste || '-'}</span></div>
-            <div className="info-card"><span className="info-label">Departamento</span><span className="info-value">{relatorio.ensaioDepartamento || '-'}</span></div>
-            <div className="info-card"><span className="info-label">Ordem de Serviço</span><span className="info-value">{relatorio.ensaioOrdemServico || '-'}</span></div>
+            <div className="info-card"><span className="info-label">Local do Teste</span><span className="info-value">{textoOuTraco(relatorio.ensaioLocalTeste)}</span></div>
+            <div className="info-card"><span className="info-label">Departamento</span><span className="info-value">{textoOuTraco(relatorio.ensaioDepartamento)}</span></div>
+            <div className="info-card"><span className="info-label">Ordem de Serviço</span><span className="info-value">{textoOuTraco(relatorio.ensaioOrdemServico)}</span></div>
           </div>
         </div>
 
         <div className="relatorio-section">
           <h3>Identificação do Equipamento</h3>
           <div className="info-grid">
-            <div className="info-card"><span className="info-label">Código SAP</span><span className="info-value">{relatorio.cilindroCodigoSap || '-'}</span></div>
-            <div className="info-card"><span className="info-label">Tag / ID</span><span className="info-value">{relatorio.cilindroTagId || '-'}</span></div>
-            <div className="info-card"><span className="info-label">Fabricante</span><span className="info-value">{relatorio.cilindroFabricante || '-'}</span></div>
-            <div className="info-card"><span className="info-label">Nº de Série</span><span className="info-value">{relatorio.cilindroNumeroSerie || '-'}</span></div>
-            <div className="info-card"><span className="info-label">Part Number</span><span className="info-value">{relatorio.cilindroPartNumber || '-'}</span></div>
-            <div className="info-card"><span className="info-label">Fluido Utilizado</span><span className="info-value">{relatorio.cilindroFluido || '-'}</span></div>
+            <div className="info-card"><span className="info-label">Código SAP</span><span className="info-value">{textoOuTraco(relatorio.cilindroCodigoSap)}</span></div>
+            <div className="info-card"><span className="info-label">Tag / ID</span><span className="info-value">{textoOuTraco(relatorio.cilindroTagId)}</span></div>
+            <div className="info-card"><span className="info-label">Fabricante</span><span className="info-value">{textoOuTraco(relatorio.cilindroFabricante)}</span></div>
+            <div className="info-card"><span className="info-label">Nº de Série</span><span className="info-value">{textoOuTraco(relatorio.cilindroNumeroSerie)}</span></div>
+            <div className="info-card"><span className="info-label">Part Number</span><span className="info-value">{textoOuTraco(relatorio.cilindroPartNumber)}</span></div>
+            <div className="info-card"><span className="info-label">Fluido Utilizado</span><span className="info-value">{textoOuTraco(relatorio.cilindroFluido)}</span></div>
             <div className="info-card"><span className="info-label">Ø Êmbolo (mm)</span><span className="info-value">{relatorio.cilindroDiametroInterno ?? '-'}</span></div>
             <div className="info-card"><span className="info-label">Ø Haste (mm)</span><span className="info-value">{relatorio.cilindroDiametroHaste ?? '-'}</span></div>
             <div className="info-card"><span className="info-label">Pressão Máx. A (bar)</span><span className="info-value">{relatorio.cilindroMaximaPressaoA ?? '-'}</span></div>
