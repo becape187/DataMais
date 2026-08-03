@@ -9,13 +9,25 @@ import html2canvas from 'html2canvas'
 // de modo que nenhuma seção — em especial o par cards+gráfico de uma câmara —
 // termine cortada ao meio. Como a altura de cada bloco é praticamente fixa, a
 // quebra fica previsível de um laudo para o outro.
+//
+// TAMANHO DO ARQUIVO — o jsPDF **descarta** a compressão do PNG que entra em
+// `addImage`: ele decodifica a imagem e, se nenhuma compressão for pedida,
+// regrava os pixels em RGB cru (`processPNG` → ramo `canCompress === false`).
+// Sem `compress` no documento e sem o argumento `compression`, um laudo de 4
+// páginas saía com ~70 MB de bytes crus e nenhum `/Filter` no arquivo inteiro.
+// Por isso os dois ajustes abaixo são obrigatórios, não cosméticos.
 
 const A4_LARGURA_MM = 210
 const A4_ALTURA_MM = 297
 const MARGEM_MM = 10
 const RODAPE_MM = 8 // faixa reservada para a numeração de página
 const LARGURA_RENDER_PX = 1200 // largura fixa de renderização (independe da janela)
-const ESCALA_CAPTURA = 2 // qualidade da imagem
+const ESCALA_CAPTURA = 1.5 // 1800px sobre 190mm ≈ 240 DPI — de sobra para um laudo impresso
+
+// Compressão Flate aplicada pelo jsPDF à imagem de cada página.
+// 'FAST' = zlib nível 1 + filtro Sub · 'MEDIUM' = nível 6 + Average · 'SLOW' = nível 9 + Paeth.
+// Todas são sem perda: mudam só o tamanho do arquivo e o tempo de geração.
+const COMPRESSAO_IMAGEM = 'FAST' as const
 
 const LARGURA_UTIL_MM = A4_LARGURA_MM - MARGEM_MM * 2 // 190mm
 const ALTURA_UTIL_MM = A4_ALTURA_MM - MARGEM_MM * 2 - RODAPE_MM
@@ -145,7 +157,9 @@ export async function gerarRelatorioPdf(origem: HTMLElement, identificacao: stri
 
     const paginas = paginar(cortes, alturaTotalPx, alturaPaginaPx)
 
-    const pdf = new jsPDF('p', 'mm', 'a4')
+    // `compress: true` cobre os streams de conteúdo; a imagem depende do
+    // argumento passado no addImage abaixo.
+    const pdf = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4', compress: true })
 
     paginas.forEach((pagina, i) => {
       if (i > 0) pdf.addPage()
@@ -159,7 +173,9 @@ export async function gerarRelatorioPdf(origem: HTMLElement, identificacao: stri
         MARGEM_MM,
         MARGEM_MM,
         LARGURA_UTIL_MM,
-        alturaFatiaPx * mmPorPx
+        alturaFatiaPx * mmPorPx,
+        undefined, // alias: cada fatia é uma imagem distinta, não há o que reaproveitar
+        COMPRESSAO_IMAGEM
       )
     })
 
