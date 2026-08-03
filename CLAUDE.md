@@ -118,6 +118,7 @@ Onde fica:
 ## Convenções
 
 - Entidades, propriedades e vocabulário de domínio em **português** — siga isso em código novo.
+- Em `OnModelCreating`, relacionamento cuja entidade-pai tem a coleção **precisa** apontá-la: `WithMany(pai => pai.Filhos)`. Com `WithMany()` vazio o EF trata a navegação como um segundo relacionamento e cria uma **FK sombra** (`XId1`) — o código grava na FK explícita e o `Include` lê pela sombra, sempre nula. Foi o que apagou o checklist do laudo por meses (`RespostasCampoRelatorio.RelatorioId1`).
 - Models são POCO com **Data Annotations** (`[Key]`, `[Required]`, `[MaxLength]`, `[Column(TypeName=...)]`). Relacionamentos e índices ficam em `DataMaisDbContext.OnModelCreating`. Soft-delete só onde existe (`CampoRelatorio.DataExclusao`); a maioria usa `DataCriacao`/`DataAtualizacao` sem soft-delete.
 - JSON da API é **camelCase** (configurado em `Program.cs`); o frontend consome assim.
 - Configuração sensível (PostgreSQL, InfluxDB token, Modbus) vem de um arquivo **`.env`** lido por `ConfigService` — nunca hardcode credenciais. Ver `DataMais/env.example`, `INFLUX_SETUP.md`, `CONFIGURAR_SECRETS.md`.
