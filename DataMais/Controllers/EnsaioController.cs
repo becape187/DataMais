@@ -294,6 +294,14 @@ public class EnsaioController : ControllerBase
                 return BadRequest(new { message = "Câmara inválida. Use 'A' ou 'B'." });
             }
 
+            if (!ensaio.CamarasHabilitadas.Contains(camara))
+            {
+                return BadRequest(new
+                {
+                    message = $"A câmara {camara} está desmarcada neste ensaio. Marque-a antes de iniciar."
+                });
+            }
+
             if (request.PressaoCarga <= 0)
             {
                 return BadRequest(new { message = "Pressão de carga deve ser maior que zero." });
@@ -498,7 +506,118 @@ public class EnsaioController : ControllerBase
     }
 
     /// <summary>
-    /// Aceita o ensaio e gera o relatório. Exige as duas câmaras concluídas —
+    /// Marca/desmarca as câmaras que este ensaio testa. Um ensaio nasce com as duas;
+    /// desmarcar uma é o caminho para fechar o laudo só com a outra.
+    ///
+    /// Desmarcar uma câmara que JÁ RODOU descarta as corridas dela — é justamente o
+    /// caso de o operador não querer levar aquele resultado adiante. O ato é
+    /// irreversível (as leituras saem do Influx), por isso a tela confirma antes.
+    /// </summary>
+    [HttpPut("{id:int}/camaras")]
+    [Authorize(Roles = "Admin,Operador")]
+    public async Task<IActionResult> DefinirCamaras(int id, [FromBody] DefinirCamarasRequest request)
+    {
+        try
+        {
+            var ensaio = await _context.Ensaios
+                .Include(e => e.Cliente)
+                .Include(e => e.Cilindro)
+                .Include(e => e.Etapas)
+                .FirstOrDefaultAsync(e => e.Id == id);
+
+            if (ensaio == null)
+            {
+                return NotFound(new { message = "Ensaio não encontrado" });
+            }
+
+            if (ensaio.Status != StatusEnsaio.EmAndamento && ensaio.Status != StatusEnsaio.AguardandoAceite)
+            {
+                return BadRequest(new { message = $"Ensaio não está aberto (status atual: {ensaio.Status})." });
+            }
+
+            if (!request.CamaraAHabilitada && !request.CamaraBHabilitada)
+            {
+                return BadRequest(new { message = "O ensaio precisa de ao menos uma câmara marcada." });
+            }
+
+            var desmarcadas = new List<string>();
+            if (ensaio.CamaraAHabilitada && !request.CamaraAHabilitada) desmarcadas.Add("A");
+            if (ensaio.CamaraBHabilitada && !request.CamaraBHabilitada) desmarcadas.Add("B");
+
+            // Câmara rodando não pode ser desmarcada pelas costas do CLP: encerrar é
+            // um ato próprio (com o registro desligado na sequência certa).
+            var rodando = ensaio.Etapas.FirstOrDefault(e =>
+                e.Status == StatusEtapa.EmExecucao && desmarcadas.Contains(e.Camara));
+
+            if (rodando != null)
+            {
+                return Conflict(new
+                {
+                    message = $"A câmara {rodando.Camara} está rodando. Encerre-a antes de desmarcá-la."
+                });
+            }
+
+            var agora = DateTime.UtcNow;
+            var descartadas = new List<EnsaioEtapa>();
+
+            foreach (var camara in desmarcadas)
+            {
+                foreach (var etapa in ensaio.Etapas.Where(e =>
+                             e.Camara == camara &&
+                             (e.Status == StatusEtapa.Concluida || e.Status == StatusEtapa.Repetida)))
+                {
+                    etapa.Status = StatusEtapa.Descartada;
+                    etapa.DataAtualizacao = agora;
+                    descartadas.Add(etapa);
+                }
+            }
+
+            ensaio.CamaraAHabilitada = request.CamaraAHabilitada;
+            ensaio.CamaraBHabilitada = request.CamaraBHabilitada;
+
+            AtualizarStatusEnsaio(ensaio, agora);
+            await _context.SaveChangesAsync();
+
+            // As leituras das corridas descartadas não podem sobrar no Influx: elas
+            // contaminariam o gráfico do laudo, que recorta por janela de tempo.
+            // Sem folga na janela — a corrida da outra câmara costuma começar logo
+            // depois e não pode ser levada junto.
+            foreach (var etapa in descartadas)
+            {
+                try
+                {
+                    await RemoverLeiturasInfluxAsync(
+                        etapa.EnsaioId, etapa.DataInicio, etapa.DataFim ?? agora, TimeSpan.Zero);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Erro ao remover leituras da etapa {EtapaId} no InfluxDB", etapa.Id);
+                }
+            }
+
+            _logger.LogInformation(
+                "Ensaio {EnsaioId}: câmaras habilitadas agora são {Camaras} ({Descartadas} corrida(s) descartada(s))",
+                ensaio.Id, string.Join("+", ensaio.CamarasHabilitadas), descartadas.Count);
+
+            return Ok(new
+            {
+                message = desmarcadas.Any()
+                    ? $"Câmara {string.Join(" e ", desmarcadas)} fora deste ensaio"
+                    : "Câmaras atualizadas",
+                corridasDescartadas = descartadas.Count,
+                ensaio = MontarDto(ensaio)
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Erro ao definir câmaras do ensaio {EnsaioId}", id);
+            return StatusCode(500, new { message = "Erro ao definir as câmaras do ensaio", error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Aceita o ensaio e gera o relatório. Exige concluídas as câmaras HABILITADAS
+    /// (por padrão as duas; o operador pode ter desmarcado uma) —
     /// é aqui que o número REH-MPR é queimado, não antes.
     /// </summary>
     [HttpPost("{id:int}/aceitar")]
@@ -540,7 +659,14 @@ public class EnsaioController : ControllerBase
                 return BadRequest(new { message = "Há uma câmara ainda rodando. Encerre-a antes de aceitar o ensaio." });
             }
 
-            var faltando = new[] { "A", "B" }
+            var camaras = ensaio.CamarasHabilitadas;
+
+            if (camaras.Length == 0)
+            {
+                return BadRequest(new { message = "Nenhuma câmara habilitada neste ensaio. Marque ao menos uma para gerar o laudo." });
+            }
+
+            var faltando = camaras
                 .Where(c => !ensaio.Etapas.Any(e => e.Camara == c && e.Status == StatusEtapa.Concluida))
                 .ToList();
 
@@ -548,7 +674,7 @@ public class EnsaioController : ControllerBase
             {
                 return BadRequest(new
                 {
-                    message = $"Faltam câmaras concluídas: {string.Join(" e ", faltando)}. O ensaio só vira laudo com as duas."
+                    message = $"Faltam câmaras concluídas: {string.Join(" e ", faltando)}. Conclua-as ou desmarque a câmara que não será ensaiada."
                 });
             }
 
@@ -566,7 +692,8 @@ public class EnsaioController : ControllerBase
                 // Pelo ensaio, não pelo código dele: o único número que o cliente reconhece
                 // no documento é o REH-MPR. O horário sai no fuso do servidor, como no laudo.
                 Observacoes = $"Relatório gerado a partir do ensaio de "
-                    + $"{(ensaio.DataInicio ?? ensaio.DataCriacao).ToLocalTime():dd/MM/yyyy HH:mm} (câmaras A e B).",
+                    + $"{(ensaio.DataInicio ?? ensaio.DataCriacao).ToLocalTime():dd/MM/yyyy HH:mm} "
+                    + $"({(camaras.Length == 1 ? $"somente câmara {camaras[0]}" : $"câmaras {string.Join(" e ", camaras)}")}).",
                 ClienteId = ensaio.ClienteId,
                 CilindroId = ensaio.CilindroId,
                 EnsaioId = ensaio.Id,
@@ -967,8 +1094,9 @@ public class EnsaioController : ControllerBase
             .FirstOrDefaultAsync();
 
     /// <summary>
-    /// Move o ensaio para AguardandoAceite quando as duas câmaras têm etapa concluída,
-    /// ou de volta para EmAndamento se ainda falta alguma.
+    /// Move o ensaio para AguardandoAceite quando toda câmara HABILITADA tem etapa
+    /// concluída, ou de volta para EmAndamento se ainda falta alguma. Câmara desmarcada
+    /// pelo operador não é exigida.
     /// </summary>
     private static void AtualizarStatusEnsaio(Ensaio ensaio, DateTime agora)
     {
@@ -977,7 +1105,7 @@ public class EnsaioController : ControllerBase
             return;
         }
 
-        var completo = new[] { "A", "B" }
+        var completo = ensaio.CamarasHabilitadas
             .All(c => ensaio.Etapas.Any(e => e.Camara == c && e.Status == StatusEtapa.Concluida));
 
         ensaio.Status = completo ? StatusEnsaio.AguardandoAceite : StatusEnsaio.EmAndamento;
@@ -1004,7 +1132,7 @@ public class EnsaioController : ControllerBase
             })
             .ToList();
 
-        var podeAceitar = new[] { "A", "B" }
+        var podeAceitar = ensaio.CamarasHabilitadas
             .All(c => ensaio.Etapas.Any(e => e.Camara == c && e.Status == StatusEtapa.Concluida));
 
         var emExecucao = ensaio.Etapas.FirstOrDefault(e => e.Status == StatusEtapa.EmExecucao);
@@ -1031,6 +1159,8 @@ public class EnsaioController : ControllerBase
             cilindroNome = ensaio.Cilindro?.Nome,
             etapas,
             etapaEmExecucaoId = emExecucao?.Id,
+            camaraAHabilitada = ensaio.CamaraAHabilitada,
+            camaraBHabilitada = ensaio.CamaraBHabilitada,
             podeAceitar = podeAceitar && emExecucao == null
         };
     }
@@ -1608,8 +1738,11 @@ public class EnsaioController : ControllerBase
     /// <summary>
     /// Remove do InfluxDB as leituras de um ensaio numa janela de tempo — usado ao
     /// descartar uma etapa (só a janela dela) ou cancelar o ensaio (janela inteira).
+    /// A <paramref name="folga"/> alarga a janela dos dois lados (1 min por padrão,
+    /// para não deixar pontas do descarte); use <c>TimeSpan.Zero</c> quando a janela
+    /// vizinha for de outra corrida válida.
     /// </summary>
-    private async Task RemoverLeiturasInfluxAsync(int ensaioId, DateTime de, DateTime ate)
+    private async Task RemoverLeiturasInfluxAsync(int ensaioId, DateTime de, DateTime ate, TimeSpan? folga = null)
     {
         var appConfig = _configService.GetConfig();
 
@@ -1619,8 +1752,9 @@ public class EnsaioController : ControllerBase
             return;
         }
 
-        var from = de.ToUniversalTime().AddMinutes(-1);
-        var to = ate.ToUniversalTime().AddMinutes(1);
+        var margem = folga ?? TimeSpan.FromMinutes(1);
+        var from = de.ToUniversalTime() - margem;
+        var to = ate.ToUniversalTime() + margem;
         var predicate = $"_measurement=\"ensaio_pressao\" AND ensaioId=\"{ensaioId}\"";
 
         using var influxClient = new InfluxDBClient(appConfig.Influx.Url, appConfig.Influx.Token);
@@ -1650,6 +1784,15 @@ public class CriarEnsaioRequest
 
     /// <summary>Ordem de Serviço / Work Order.</summary>
     public string? OrdemServico { get; set; }
+}
+
+public class DefinirCamarasRequest
+{
+    /// <summary>Câmara A faz parte deste ensaio.</summary>
+    public bool CamaraAHabilitada { get; set; } = true;
+
+    /// <summary>Câmara B faz parte deste ensaio.</summary>
+    public bool CamaraBHabilitada { get; set; } = true;
 }
 
 public class IniciarEtapaRequest

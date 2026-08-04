@@ -131,6 +131,11 @@ export async function gerarRelatorioPdf(origem: HTMLElement, identificacao: stri
     ;(btn as HTMLElement).style.display = 'none'
   })
 
+  // Blocos que existem só na tela (ex.: Histórico de Versões) saem do documento.
+  // Removidos do DOM, não escondidos: assim não sobra o espaçamento do bloco entre
+  // as seções vizinhas — o `gap` do container só some quando o filho deixa de existir.
+  clone.querySelectorAll('.fora-do-pdf').forEach(el => el.remove())
+
   document.body.appendChild(clone)
 
   try {

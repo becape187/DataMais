@@ -752,10 +752,14 @@ const VisualizarRelatorio = () => {
               </span>
             </div>
           </div>
+          {/* O critério tem que corresponder ao que foi ensaiado: laudo de uma câmara
+              só (a outra foi desmarcada no ensaio) não é julgado por "as duas". */}
           <p className="resultado-criterio">
             {reprovadoPorChecklist
               ? 'Reprovado pelo checklist de inspeção — sobrepõe o resultado das câmaras.'
-              : 'O ensaio é aprovado somente se as duas câmaras forem aprovadas.'}
+              : relatorio.etapas.length === 1
+                ? `Ensaio realizado somente na câmara ${relatorio.etapas[0].camara} — o veredito considera apenas ela.`
+                : 'O ensaio é aprovado somente se as duas câmaras forem aprovadas.'}
           </p>
         </div>
 
@@ -956,8 +960,10 @@ const VisualizarRelatorio = () => {
           )
         })()}
 
+        {/* `fora-do-pdf`: rastro interno de quem assinou/reabriu, útil na tela e
+            fora do documento entregue ao cliente. O gerador remove a seção. */}
         {versoes.length > 0 && (
-          <div className="relatorio-section">
+          <div className="relatorio-section fora-do-pdf">
             <h3>Histórico de Versões</h3>
             <div className="table-container">
               <table>

@@ -193,6 +193,49 @@
   border-top-color: var(--modec-navy);
 }
 
+/* Câmara desmarcada: continua visível (para poder voltar), mas sem chamar atenção */
+.camara-card.camara-fora {
+  border-top-color: #ddd;
+  background: #fafafa;
+}
+
+.camara-fora .camara-header h2,
+.camara-fora .camara-estado {
+  color: var(--text-secondary);
+}
+
+/* Marcar/desmarcar a câmara — é o que define se ela é exigida no aceite */
+.camara-inclusao {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+
+.camara-inclusao input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--modec-navy);
+  cursor: pointer;
+}
+
+.camara-inclusao input:disabled {
+  cursor: not-allowed;
+}
+
+.camara-inclusao input:disabled + span {
+  opacity: 0.6;
+}
+
+.camara-fora-hint {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
 .camara-header {
   display: flex;
   align-items: baseline;

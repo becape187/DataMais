@@ -62,6 +62,18 @@
 #         script logo antes do restart é a volta, se for o caso.
 #         Procure no log: "✓ 1 pergunta(s) descontinuada(s) do checklist removida(s)".
 #
+# 📌 Release "ensaio de câmara única" (migration AddCamarasHabilitadasEnsaio):
+#     Adiciona Ensaios.CamaraAHabilitada/CamaraBHabilitada (bool NOT NULL, DEFAULT TRUE).
+#     O default é TRUE de propósito: todo ensaio já existente continua sendo um ensaio
+#     de duas câmaras. Se o default tivesse ficado FALSE (o que o scaffold do EF gera),
+#     nenhum ensaio aberto poderia mais ser aceito.
+#     O que muda no uso: cada câmara tem um checkbox na tela de Ensaio. Desmarcar uma
+#     libera o aceite sem ela e o laudo sai com uma câmara só (modal confirma no aceite).
+#     ⚠️  APAGA DADOS quando usado: desmarcar uma câmara que JÁ RODOU marca as corridas
+#         dela como Descartada e APAGA as leituras dela no InfluxDB. A tela confirma antes.
+#     Também nesta release (sem efeito no banco): o "Histórico de Versões" continua na
+#     tela do laudo mas não entra mais no PDF.
+#
 # USO:
 #   cd <pasta-do-repo-pullado>
 #   chmod +x deploy-local.sh
@@ -424,6 +436,44 @@ SQL
   echo "       sozinho, e as respostas do checklist têm que sair impressas."
   echo "    3. 'Editar (gera vN+1)' → mudar uma resposta → 'Concluir / Assinar':"
   echo "       o Histórico de Versões ganha 'Reaberto' e depois 'Concluido' na v seguinte."
+
+  # ── Release "ensaio de câmara única" ──────────────────────────────────────
+  echo ""
+  echo "==> Conferindo a release de câmara única:"
+
+  COL_CAMARAS="$(psql_um "SELECT count(*) FROM information_schema.columns
+                          WHERE table_name = 'Ensaios'
+                            AND column_name IN ('CamaraAHabilitada','CamaraBHabilitada');")"
+
+  # Ensaio aberto sem NENHUMA câmara marcada não deveria existir: seria um ensaio
+  # que nunca pode ser aceito. Se aparecer, o default da migration entrou errado.
+  SEM_CAMARA="$(psql_um "SELECT count(*) FROM \"Ensaios\"
+                         WHERE \"CamaraAHabilitada\" = false
+                           AND \"CamaraBHabilitada\" = false;" 2>/dev/null)"
+
+  if [ "${COL_CAMARAS:-0}" = "2" ]; then
+    echo "    ✓ Ensaios.CamaraAHabilitada/CamaraBHabilitada criadas pela migration."
+    if [ "${SEM_CAMARA:-0}" = "0" ]; then
+      echo "    ✓ Nenhum ensaio ficou sem câmara habilitada (default TRUE aplicado)."
+    else
+      echo "    ❌ $SEM_CAMARA ensaio(s) com as DUAS câmaras desmarcadas — esses não podem"
+      echo "       ser aceitos. Corrija com:"
+      echo "       UPDATE \"Ensaios\" SET \"CamaraAHabilitada\"=true, \"CamaraBHabilitada\"=true"
+      echo "       WHERE \"CamaraAHabilitada\"=false AND \"CamaraBHabilitada\"=false;"
+    fi
+  else
+    echo "    ❌ As colunas de câmara habilitada NÃO estão no banco (encontradas: ${COL_CAMARAS} de 2)."
+    echo "       A migration AddCamarasHabilitadasEnsaio não aplicou — veja o log acima."
+  fi
+
+  echo ""
+  echo "    Teste de bancada do ensaio de câmara única:"
+  echo "    1. Novo ensaio: as duas câmaras entram MARCADAS."
+  echo "    2. Desmarcar a B (sem ter rodado) → some o botão de iniciar dela e o aceite"
+  echo "       libera só com a A concluída."
+  echo "    3. Aceitar → sobe o modal 'Fechar o laudo com uma câmara só?'; o laudo sai"
+  echo "       com 'Câmaras Testadas: A' e o critério citando só a câmara A."
+  echo "    4. PDF do laudo: NÃO pode mais ter a seção 'Histórico de Versões'."
 fi
 
 # ── (--reset-admin) Força admin/admin no banco ──────────────────────────────

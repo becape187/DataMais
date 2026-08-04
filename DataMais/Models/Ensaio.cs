@@ -39,6 +39,25 @@ public class Ensaio
     [MaxLength(100)]
     public string? OrdemServico { get; set; }
 
+    // ── Câmaras que este ensaio testa ───────────────────────────────────────
+    // O padrão é o ensaio completo (as duas). O operador pode desmarcar UMA delas
+    // para fechar o laudo só com a outra — é o que libera o aceite sem a câmara
+    // ausente. As duas desmarcadas não existe: o ensaio precisa de ao menos uma.
+
+    /// <summary>Câmara A entra neste ensaio e é exigida no aceite.</summary>
+    public bool CamaraAHabilitada { get; set; } = true;
+
+    /// <summary>Câmara B entra neste ensaio e é exigida no aceite.</summary>
+    public bool CamaraBHabilitada { get; set; } = true;
+
+    /// <summary>Câmaras que este ensaio precisa concluir para virar laudo ("A", "B" ou ambas).</summary>
+    [NotMapped]
+    public string[] CamarasHabilitadas =>
+        new[] { (CamaraAHabilitada, "A"), (CamaraBHabilitada, "B") }
+            .Where(c => c.Item1)
+            .Select(c => c.Item2)
+            .ToArray();
+
     // ── Depreciados: parâmetros migraram para EnsaioEtapa ───────────────────
     // Mantidos apenas porque os ensaios anteriores ao modelo de duas câmaras
     // gravaram aqui; o backfill copiou tudo para a primeira etapa. Código novo
@@ -80,7 +99,7 @@ public static class StatusEnsaio
     /// <summary>Aberto; ainda falta rodar ou repetir alguma câmara.</summary>
     public const string EmAndamento = "EmAndamento";
 
-    /// <summary>As duas câmaras concluídas; esperando o operador aceitar.</summary>
+    /// <summary>Todas as câmaras habilitadas concluídas; esperando o operador aceitar.</summary>
     public const string AguardandoAceite = "AguardandoAceite";
 
     /// <summary>Aceito pelo operador — relatório gerado.</summary>

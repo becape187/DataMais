@@ -350,7 +350,7 @@ public class RegistroConclusaoMonitor : BackgroundService
     }
 
     /// <summary>
-    /// Fecha a etapa como Concluida e, se as duas câmaras já estiverem prontas,
+    /// Fecha a etapa como Concluida e, se as câmaras habilitadas já estiverem prontas,
     /// move o ensaio para AguardandoAceite. O relatório NÃO é gerado aqui: quem
     /// decide se o ensaio vira laudo é o operador, na tela.
     /// </summary>
@@ -392,7 +392,9 @@ public class RegistroConclusaoMonitor : BackgroundService
             anterior.DataAtualizacao = agora;
         }
 
-        var completo = new[] { "A", "B" }
+        // Só as câmaras HABILITADAS contam: o operador pode ter desmarcado uma para
+        // fechar o laudo com a outra sozinha.
+        var completo = ensaio.CamarasHabilitadas
             .All(c => ensaio.Etapas.Any(e => e.Camara == c && e.Status == StatusEtapa.Concluida));
 
         if (ensaio.Status != StatusEnsaio.Aceito && ensaio.Status != StatusEnsaio.Cancelado)

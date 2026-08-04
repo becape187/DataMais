@@ -49,6 +49,9 @@ interface EnsaioAberto {
   cilindroNome: string | null
   etapas: Etapa[]
   etapaEmExecucaoId: number | null
+  /** Câmaras que este ensaio testa — as duas por padrão. Desmarcada não é exigida no aceite. */
+  camaraAHabilitada: boolean
+  camaraBHabilitada: boolean
   podeAceitar: boolean
 }
 
@@ -145,6 +148,17 @@ const etapaValida = (ensaio: EnsaioAberto | null, camara: Camara): Etapa | null 
     : null
 }
 
+/** A câmara faz parte deste ensaio? Ensaio antigo (sem o campo) conta como as duas. */
+const camaraHabilitada = (ensaio: EnsaioAberto | null, camara: Camara): boolean => {
+  if (!ensaio) return true
+  const flag = camara === 'A' ? ensaio.camaraAHabilitada : ensaio.camaraBHabilitada
+  return flag !== false
+}
+
+/** Câmaras que este ensaio ainda precisa concluir para poder ser aceito. */
+const camarasPendentes = (ensaio: EnsaioAberto | null): Camara[] =>
+  CAMARAS.filter(c => camaraHabilitada(ensaio, c) && !etapaValida(ensaio, c))
+
 const Ensaio = () => {
   const navigate = useNavigate()
   const { podeOperar } = useAuth()
@@ -189,6 +203,10 @@ const Ensaio = () => {
 
   const [modalEncerrar, setModalEncerrar] = useState<Etapa | null>(null)
   const [modalCancelar, setModalCancelar] = useState(false)
+  // Desmarcar câmara que já rodou joga fora a corrida dela — confirma antes.
+  const [modalDesmarcar, setModalDesmarcar] = useState<{ camara: Camara; corridas: number } | null>(null)
+  // Aceite com uma câmara só: o laudo sai sem a outra, e isso precisa ser dito.
+  const [modalAceiteParcial, setModalAceiteParcial] = useState(false)
   const [pendenteADescartar, setPendenteADescartar] = useState<EnsaioAberto | null>(null)
   const [ocupado, setOcupado] = useState(false)
 
@@ -498,6 +516,63 @@ const Ensaio = () => {
     registrarLog(`${rotuloEnsaio(pendente)} retomado`)
   }
 
+  // ── Câmaras do ensaio ────────────────────────────────────────────────────
+  // O ensaio nasce com as duas. Desmarcar uma libera o aceite sem ela — e, se ela
+  // já rodou, descarta a corrida (é o caso de não levar aquele resultado adiante).
+  const aplicarCamaras = async (camaraAHabilitada: boolean, camaraBHabilitada: boolean) => {
+    if (!ensaio) return
+
+    setModalDesmarcar(null)
+    setOcupado(true)
+    setErro(null)
+
+    try {
+      const { data } = await api.put(`/ensaio/${ensaio.id}/camaras`, {
+        camaraAHabilitada,
+        camaraBHabilitada,
+      })
+
+      setEnsaio(data.ensaio)
+
+      const habilitadas = CAMARAS.filter(c => (c === 'A' ? camaraAHabilitada : camaraBHabilitada))
+      registrarLog(
+        habilitadas.length === 1
+          ? `Ensaio segue somente com a câmara ${habilitadas[0]}` +
+            (data.corridasDescartadas ? ` — ${data.corridasDescartadas} corrida(s) descartada(s)` : '')
+          : 'Ensaio segue com as duas câmaras'
+      )
+    } catch (err: any) {
+      console.error('Erro ao definir as câmaras do ensaio:', err)
+      setErro(mensagemDeErro(err, 'Erro ao alterar as câmaras do ensaio'))
+    } finally {
+      setOcupado(false)
+    }
+  }
+
+  const alternarCamara = (camara: Camara, marcar: boolean) => {
+    if (!ensaio) return
+
+    const novoA = camara === 'A' ? marcar : camaraHabilitada(ensaio, 'A')
+    const novoB = camara === 'B' ? marcar : camaraHabilitada(ensaio, 'B')
+
+    if (!novoA && !novoB) {
+      setErro('O ensaio precisa de ao menos uma câmara. Marque a outra antes de desmarcar esta.')
+      return
+    }
+
+    // Já rodou: sair do ensaio significa jogar fora a corrida — pergunta antes.
+    const corridas = marcar
+      ? 0
+      : ensaio.etapas.filter(e => e.camara === camara && (e.status === 'Concluida' || e.status === 'Repetida')).length
+
+    if (corridas > 0) {
+      setModalDesmarcar({ camara, corridas })
+      return
+    }
+
+    aplicarCamaras(novoA, novoB)
+  }
+
   const iniciarEtapa = async (camara: Camara) => {
     if (!ensaio) return
 
@@ -586,6 +661,7 @@ const Ensaio = () => {
   const aceitarEnsaio = async () => {
     if (!ensaio) return
 
+    setModalAceiteParcial(false)
     setOcupado(true)
     setErro(null)
 
@@ -599,6 +675,19 @@ const Ensaio = () => {
     } finally {
       setOcupado(false)
     }
+  }
+
+  // Fechar o ensaio com uma câmara só não pode passar em branco: o laudo sai sem a
+  // outra e o número REH-MPR é queimado assim mesmo.
+  const confirmarAceite = () => {
+    if (!ensaio) return
+
+    if (CAMARAS.filter(c => camaraHabilitada(ensaio, c)).length < 2) {
+      setModalAceiteParcial(true)
+      return
+    }
+
+    aceitarEnsaio()
   }
 
   const cancelarEnsaio = async () => {
@@ -687,7 +776,7 @@ const Ensaio = () => {
           <p className="page-subtitle">
             {ensaio
               ? `${ensaio.cilindroNome ?? 'cilindro'} · ${ensaio.clienteNome ?? ''} — o número REH-MPR do laudo sai no aceite`
-              : 'Cada ensaio testa as duas câmaras e gera um único relatório'}
+              : 'Cada ensaio testa as duas câmaras — ou só uma, se você desmarcar a outra — e gera um único relatório'}
           </p>
         </div>
         {ensaio && podeOperar && (
@@ -776,7 +865,7 @@ const Ensaio = () => {
                     {p.cilindroNome ?? 'cilindro'} · {p.ordemServico ? `OS ${p.ordemServico}` : 'sem OS'} ·{' '}
                     {p.status === 'AguardandoAceite'
                       ? 'aguardando aceite'
-                      : `falta câmara ${CAMARAS.filter(c => !etapaValida(p, c)).join(' e ')}`}
+                      : `falta câmara ${camarasPendentes(p).join(' e ')}`}
                   </span>
                 </div>
                 {podeOperar && (
@@ -821,26 +910,60 @@ const Ensaio = () => {
               const rodando = etapaAtiva?.camara === camara
               const concluida = etapaValida(ensaio, camara)
               const outraRodando = etapaAtiva != null && !rodando
+              const habilitada = camaraHabilitada(ensaio, camara)
+              // Última câmara marcada não pode sair: o ensaio ficaria sem nenhuma.
+              const unicaMarcada = habilitada && CAMARAS.filter(c => camaraHabilitada(ensaio, c)).length === 1
 
               return (
                 <div
                   key={camara}
-                  className={`camara-card ${rodando ? 'camara-rodando' : concluida ? 'camara-concluida' : ''}`}
+                  className={`camara-card ${
+                    !habilitada ? 'camara-fora' : rodando ? 'camara-rodando' : concluida ? 'camara-concluida' : ''
+                  }`}
                 >
                   <div className="camara-header">
                     <h2>Câmara {camara}</h2>
                     <span className="camara-estado">
-                      {rodando
-                        ? contando
-                          ? '● Contando'
-                          : '● Rampa — aguardando contagem'
-                        : concluida
-                          ? '✔ Concluída'
-                          : '○ Não iniciada'}
+                      {!habilitada
+                        ? '— Fora deste ensaio'
+                        : rodando
+                          ? contando
+                            ? '● Contando'
+                            : '● Rampa — aguardando contagem'
+                          : concluida
+                            ? '✔ Concluída'
+                            : '○ Não iniciada'}
                     </span>
                   </div>
 
-                  {rodando && etapaAtiva && (
+                  {/* Marcada = a câmara faz parte do ensaio e é exigida no aceite.
+                      Desmarcar é como o operador fecha um laudo de uma câmara só. */}
+                  <label
+                    className="camara-inclusao"
+                    title={
+                      rodando
+                        ? 'Encerre a câmara antes de tirá-la do ensaio'
+                        : unicaMarcada
+                          ? 'O ensaio precisa de ao menos uma câmara'
+                          : undefined
+                    }
+                  >
+                    <input
+                      type="checkbox"
+                      checked={habilitada}
+                      disabled={!podeOperar || ocupado || rodando || unicaMarcada}
+                      onChange={e => alternarCamara(camara, e.target.checked)}
+                    />
+                    <span>Incluir a câmara {camara} neste ensaio</span>
+                  </label>
+
+                  {!habilitada && (
+                    <p className="camara-fora-hint">
+                      Não será ensaiada e não entra no laudo. Marque de volta para rodar.
+                    </p>
+                  )}
+
+                  {habilitada && rodando && etapaAtiva && (
                     <>
                       <dl className="camara-dados">
                         <div>
@@ -877,7 +1000,7 @@ const Ensaio = () => {
                     </>
                   )}
 
-                  {!rodando && concluida && (
+                  {habilitada && !rodando && concluida && (
                     <>
                       <dl className="camara-dados">
                         <div>
@@ -918,7 +1041,7 @@ const Ensaio = () => {
                     </>
                   )}
 
-                  {!rodando && !concluida && (
+                  {habilitada && !rodando && !concluida && (
                     <>
                       <div className="camara-parametros">
                         <div className="config-field">
@@ -975,7 +1098,7 @@ const Ensaio = () => {
             <div className="ensaio-aceite">
               <button
                 className="btn btn-primary btn-aceite"
-                onClick={aceitarEnsaio}
+                onClick={confirmarAceite}
                 disabled={!ensaio.podeAceitar || ocupado}
               >
                 Aceitar ensaio e gerar relatório
@@ -984,7 +1107,12 @@ const Ensaio = () => {
                 <span className="ensaio-aceite-hint">
                   {etapaAtiva
                     ? 'Encerre a câmara em execução para poder aceitar.'
-                    : `Falta concluir a câmara ${CAMARAS.filter(c => !etapaValida(ensaio, c)).join(' e ')}.`}
+                    : `Falta concluir a câmara ${camarasPendentes(ensaio).join(' e ')}.`}
+                </span>
+              )}
+              {ensaio.podeAceitar && CAMARAS.filter(c => camaraHabilitada(ensaio, c)).length < 2 && (
+                <span className="ensaio-aceite-hint">
+                  Só a câmara {CAMARAS.filter(c => camaraHabilitada(ensaio, c)).join('')} entra neste laudo.
                 </span>
               )}
             </div>
@@ -1169,6 +1297,60 @@ const Ensaio = () => {
                 Descartar etapa
               </button>
               <button className="btn btn-link" onClick={() => setModalEncerrar(null)}>
+                Voltar ao ensaio
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tirar do ensaio uma câmara que já rodou = jogar fora a corrida dela */}
+      {modalDesmarcar && ensaio && (
+        <div className="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="titulo-desmarcar">
+          <div className="modal-card">
+            <h2 id="titulo-desmarcar">Tirar a câmara {modalDesmarcar.camara} deste ensaio?</h2>
+            <p>
+              {modalDesmarcar.corridas === 1 ? 'A corrida já feita' : `As ${modalDesmarcar.corridas} corridas já feitas`}{' '}
+              na câmara {modalDesmarcar.camara} {modalDesmarcar.corridas === 1 ? 'será descartada' : 'serão descartadas'} e
+              as leituras apagadas. O laudo sai só com a câmara {modalDesmarcar.camara === 'A' ? 'B' : 'A'}.
+            </p>
+            <div className="modal-acoes">
+              <button
+                className="btn btn-outline-danger"
+                onClick={() =>
+                  aplicarCamaras(
+                    modalDesmarcar.camara !== 'A' && camaraHabilitada(ensaio, 'A'),
+                    modalDesmarcar.camara !== 'B' && camaraHabilitada(ensaio, 'B')
+                  )
+                }
+              >
+                Descartar e seguir sem ela
+              </button>
+              <button className="btn btn-link" onClick={() => setModalDesmarcar(null)}>
+                Voltar ao ensaio
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Fechar o laudo com uma câmara só — o operador precisa ver isso escrito */}
+      {modalAceiteParcial && ensaio && (
+        <div className="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="titulo-aceite-parcial">
+          <div className="modal-card">
+            <h2 id="titulo-aceite-parcial">Fechar o laudo com uma câmara só?</h2>
+            <p>
+              Este ensaio será aceito somente com a câmara{' '}
+              <strong>{CAMARAS.filter(c => camaraHabilitada(ensaio, c)).join('')}</strong>. A câmara{' '}
+              <strong>{CAMARAS.filter(c => !camaraHabilitada(ensaio, c)).join('')}</strong> não foi ensaiada e não
+              aparece no relatório — o veredito sai só da câmara testada.
+            </p>
+            <p>O número REH-MPR é queimado agora e o laudo nasce assim.</p>
+            <div className="modal-acoes">
+              <button className="btn btn-primary" onClick={aceitarEnsaio} disabled={ocupado}>
+                Aceitar assim e gerar relatório
+              </button>
+              <button className="btn btn-link" onClick={() => setModalAceiteParcial(false)}>
                 Voltar ao ensaio
               </button>
             </div>

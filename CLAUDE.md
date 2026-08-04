@@ -65,12 +65,13 @@ Services/         → ModbusService (conexões/leitura/escrita CLP), ConfigServi
 
 ## Ciclo de vida do ensaio (as duas câmaras, um laudo)
 
-Um **ensaio** é o cabeçalho do teste (cliente, cilindro, vessel, OS) e tem **sempre as duas câmaras**, cada uma rodada como uma `EnsaioEtapa` — em qualquer ordem, repetíveis. Estados do ensaio (`StatusEnsaio`): `EmAndamento` → `AguardandoAceite` → `Aceito`, ou `Cancelado`. Estados da etapa (`StatusEtapa`): `EmExecucao` → `Concluida` / `Descartada`, e `Repetida` quando uma tentativa posterior da mesma câmara a substitui.
+Um **ensaio** é o cabeçalho do teste (cliente, cilindro, vessel, OS) e nasce com **as duas câmaras** (`CamaraAHabilitada`/`CamaraBHabilitada`), cada uma rodada como uma `EnsaioEtapa` — em qualquer ordem, repetíveis. O operador pode **desmarcar uma delas** e fechar o laudo com a outra sozinha (ver abaixo). Estados do ensaio (`StatusEnsaio`): `EmAndamento` → `AguardandoAceite` → `Aceito`, ou `Cancelado`. Estados da etapa (`StatusEtapa`): `EmExecucao` → `Concluida` / `Descartada`, e `Repetida` quando uma tentativa posterior da mesma câmara a substitui.
 
 O fluxo, em `EnsaioController`:
 
 ```
 POST /ensaio                       cria o cabeçalho
+PUT  /ensaio/{id}/camaras          marca/desmarca as câmaras que este ensaio testa
 POST /ensaio/{id}/etapa            inicia câmara A ou B (Modbus)
 POST /ensaio/etapa/{id}/encerrar   ?salvar=true|false
 POST /ensaio/{id}/aceitar          → cria o Relatorio (queima o número REH-MPR)
@@ -88,6 +89,9 @@ Pontos que não são óbvios pelo código:
 - **Excluir laudo é `DELETE /relatorio/{id}`, só Admin e só em Rascunho.** Laudo `Concluido` (assinado) não pode ser excluído. A exclusão leva junto o ensaio (vai para `Cancelado`) e as leituras dele no Influx; o número REH-MPR **não** volta para o contador — a sequência do ano fica com um buraco, de propósito.
 - **Todas as etapas compartilham a tag `ensaioId` no Influx** — o que separa uma câmara da outra é a janela de tempo da etapa. Toda query de análise recorta por ela.
 - **Só a última tentativa concluída de cada câmara entra no laudo** (`EtapasValidas`); as anteriores ficam como histórico `Repetida`.
+- **"As duas câmaras" virou "as câmaras habilitadas".** `Ensaio.CamarasHabilitadas` é a lista que manda em tudo: `AtualizarStatusEnsaio`, `RegistroConclusaoMonitor.ConcluirEtapaAsync`, `podeAceitar` e o gate de `AceitarEnsaio`. Nunca voltar a cravar `new[] { "A", "B" }` nesses pontos. Desmarcar as duas é recusado — o ensaio precisa de ao menos uma.
+- **Desmarcar câmara que já rodou descarta a corrida dela** (`DefinirCamaras`): as etapas `Concluida`/`Repetida` viram `Descartada` e as leituras saem do Influx — com folga `TimeSpan.Zero` na janela, senão o buffer de 1 min levaria junto o começo da corrida da outra câmara. É o caminho do operador que não quer levar aquele resultado adiante; a tela confirma antes.
+- **O laudo de câmara única não tem tratamento especial** — `EtapasValidas` devolve uma etapa, `CombinarResultados` julga só ela e a tela mostra "Câmaras Testadas: A". O que muda é o texto do critério (não pode dizer "as duas câmaras") e a observação gravada no aceite.
 - `Ensaio.CamaraTestada`/`PressaoCargaConfigurada`/`TempoCargaConfigurado` estão **depreciados** — existem só para os ensaios anteriores a este modelo, cujo backfill os copiou para a primeira etapa.
 
 ## Critério de Aprovado / Reprovado (regra de negócio central)
